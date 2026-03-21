@@ -273,7 +273,7 @@ if (btnSaveProj) {
                         id: 'rk-project-dir', 
                         startIn: 'documents',
                         suggestedName: defaultName,
-                        types: [{ description: 'RK Mine Sched Project', accept: {'application/json': ['.riz']} }],
+                        types: [{ description: 'RIZPEC Project File', accept: {'application/json': ['.riz']} }],
                     });
                 } catch (err) {
                     if (err.name === 'AbortError') return; // User membatalkan dialog
@@ -551,13 +551,25 @@ document.addEventListener('DOMContentLoaded', () => {
 const fileInputRiz = document.getElementById('file-input-riz');
 if (fileInputRiz) {
     fileInputRiz.addEventListener('click', async (e) => {
+        // Menggunakan showOpenFilePicker jika didukung browser Desktop
         if (window.showOpenFilePicker) {
             e.preventDefault();
             try {
                 const [fileHandle] = await window.showOpenFilePicker({
                     id: 'rk-project-dir', 
                     startIn: 'documents',
-                    types: [{ description: 'RK Mine Sched Project', accept: {'application/json': ['.riz']} }]
+                    // Membuka opsi "All Files" di Windows/Mac agar tidak terblokir
+                    excludeAcceptAllOption: false,
+                    types: [
+                        { 
+                            description: 'RIZPEC Project File (.riz)', 
+                            accept: {
+                                'application/octet-stream': ['.riz'],
+                                'application/json': ['.riz'],
+                                '*/*': ['.riz']
+                            } 
+                        }
+                    ]
                 });
                 const file = await fileHandle.getFile();
                 handleRizFileWithWorker(file);
@@ -565,13 +577,25 @@ if (fileInputRiz) {
                 if (err.name !== 'AbortError') console.warn(err);
             }
         }
+        // Jika di HP/Android, event ini akan dilewati dan input="file" asli akan terpanggil otomatis.
     });
 
     fileInputRiz.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
+        
+        // Validasi Manual Ekstensi File
+        // Di Android, karena kita izinkan semua file, user bisa tidak sengaja menekan gambar/pdf.
+        if (!file.name.toLowerCase().endsWith('.riz')) {
+            const proceed = confirm("PERINGATAN!\n\nFile yang Anda pilih (" + file.name + ") tidak memiliki akhiran (.riz).\n\nApakah Anda yakin ini adalah file Project RIZPEC yang valid?");
+            if (!proceed) {
+                e.target.value = ''; // Reset input agar bisa memilih ulang
+                return;
+            }
+        }
+        
         handleRizFileWithWorker(file);
-        e.target.value = '';
+        e.target.value = ''; // Reset
     });
 }
 

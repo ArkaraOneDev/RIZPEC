@@ -113,9 +113,10 @@
                     <button id="btn-sidebar-new" class="w-full bg-slate-700 hover:bg-slate-600 text-white text-[13px] lg:text-[12px] py-3 lg:py-2.5 rounded transition-colors shadow-sm font-semibold flex items-center justify-center gap-2">
                         <i class="fa-solid fa-file"></i> New Project
                     </button>
+                    <!-- PERUBAHAN DI SINI: accept="*/*" untuk Android -->
                     <label class="w-full bg-slate-700 hover:bg-slate-600 text-white text-[13px] lg:text-[12px] py-3 lg:py-2.5 rounded transition-colors shadow-sm font-semibold flex items-center justify-center gap-2 cursor-pointer m-0">
                         <i class="fa-solid fa-folder-tree"></i> Open Project (.riz)
-                        <input type="file" id="file-input-riz" accept=".riz" class="hidden" />
+                        <input type="file" id="file-input-riz" accept="*/*" class="hidden" />
                     </label>
                     <button id="btn-sidebar-save" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-[13px] lg:text-[12px] py-3 lg:py-2.5 rounded transition-colors shadow-sm font-semibold flex items-center justify-center gap-2">
                         <i class="fa-solid fa-floppy-disk"></i> Save Project (.riz)
@@ -186,6 +187,7 @@
                             <div class="flex items-center gap-3 lg:gap-2.5 text-slate-200 text-[14px] lg:text-[13px] font-semibold tracking-wide">
                                 <i class="fa-solid fa-folder text-rose-400"></i> DXF Data
                             </div>
+                            <!-- DXF File tetap dibatasi .dxf karena file browser HP biasanya kenal DXF text -->
                             <label class="w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded lg:opacity-0 group-hover:opacity-100 transition-all shadow cursor-pointer m-0" onclick="event.stopPropagation();" title="Import DXF">
                                 <i class="fa-solid fa-plus text-[12px] lg:text-[10px]"></i>
                                 <input type="file" id="file-input-dxf" accept=".dxf" class="hidden" />
@@ -428,7 +430,6 @@
                             
                             <!-- Subset Selection & Substrings (Columns) -->
                             <div class="flex flex-col gap-2 lg:gap-1.5 mt-1">
-                                <!-- Grouping to save space, inputs have uniform style -->
                                 <style>
                                     .col-select { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 6px; font-size: 11px; color: #cbd5e1; outline: none; flex: 1; max-width: 160px; height: 30px; }
                                     @media(min-width: 1024px) { .col-select { font-size: 10px; padding: 4px; height: auto; max-width: 150px; } }
@@ -836,7 +837,6 @@
                     </div>
                 </div>
                 
-                <!-- Modal dan Popup Lainnya... -->
                 <!-- Delete Confirmation Modal -->
                 <div id="delete-modal" class="fixed inset-0 bg-black/60 z-[100] hidden items-center justify-center backdrop-blur-sm">
                     <div class="bg-slate-800 border border-slate-600 p-5 lg:p-4 rounded shadow-xl w-72 lg:w-64 flex flex-col gap-4 lg:gap-3">
@@ -866,10 +866,6 @@
                         Kembali ke Default
                     </button>
                 </div>
-
-                <!-- GCP Modal (Sama dengan penyesuaian sedikit font) -->
-                <!-- ... GCP Code omitted for brevity, logic remains identical ... -->
-
             </div> <!-- END VIEW: 3D CANVAS -->
 
             <!-- VIEW: SCHEDULING (Tab Scheduling) -->
