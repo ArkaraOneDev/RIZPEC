@@ -5,8 +5,8 @@ window.currentProjectName = "Untitled";
 window.selectedMeshes = new Set();
 window.hoveredGroupKey = null;
 window.hoveredMeshes = []; 
-window.currentHoveredName = null; // Menyimpan nama block yang dihover
-window.currentHoveredData = null; // Menyimpan data spesifik hover (geom, bench, part)
+window.currentHoveredName = null; 
+window.currentHoveredData = null; 
 
 window.isDraggingRect = false;
 window.dragStartPos = { x: 0, y: 0 };
@@ -22,6 +22,9 @@ window.redoStack = [];
 window.MAX_UNDO_STEPS = 10;
 window.currentMousePos = { x: 0, y: 0, nx: 0, ny: 0 };
 
+// OPTIMASI: Waktu terakhir raycaster dieksekusi (Throttle)
+window.lastRaycastTime = 0;
+
 // ==========================================
 // PENYIAPAN DOM (INFO PANEL)
 // ==========================================
@@ -30,15 +33,12 @@ const selectionRect = document.getElementById('selection-rect');
 const polygonShape = document.getElementById('polygon-shape');
 const polygonLine = document.getElementById('polygon-line');
 
-// 1. Ubah Judul Panel
 const infoTitle = document.querySelector('#container-info h3');
 if (infoTitle) infoTitle.innerHTML = '<i class="fa-solid fa-circle-info text-yellow-400"></i> Information';
 
-// 2. Sembunyikan kontainer Hover lama (Hapus Status Bar Arahkan Cursor)
 const hoverBar = document.getElementById('hover-empty')?.parentElement;
 if (hoverBar) hoverBar.classList.add('hidden'); 
 
-// 3. Sembunyikan Placeholder Text secara permanen
 const infoEmpty = document.getElementById('info-empty');
 if (infoEmpty) infoEmpty.classList.add('hidden'); 
 
@@ -49,7 +49,6 @@ const infoPanel = document.getElementById('info-panel');
 // ==========================================
 
 window.addEventListener('keydown', (e) => {
-    // Pengendali lukisan (Tamat / Batal)
     if (e.key === 'Enter') {
         if (window.activeInteractionMode === 'draw_line' || window.activeInteractionMode === 'draw_area') {
             if(window.finishDrawing) window.finishDrawing();
@@ -65,7 +64,6 @@ window.addEventListener('keydown', (e) => {
         }
     }
 
-    // Padam lukisan yang dipilih
     if ((e.key === 'Delete' || e.key === 'Backspace') && typeof selectedDrawing !== 'undefined' && selectedDrawing) {
         if (selectedDrawing.lineMesh) {
             drawGroup.remove(selectedDrawing.lineMesh);
@@ -112,8 +110,6 @@ window.clearSelection = function() {
 window.highlightMesh = function(mesh, isHover) { 
     if (!mesh || !mesh.visible) return; 
     
-    // Hapus efek warna saat hover pada geometri 3D, 
-    // hanya terapkan warna emissive jika mesh masuk ke dalam set seleksi (diklik)
     if (window.selectedMeshes.has(mesh)) {
         mesh.material.emissive.setHex(typeof COLOR_SELECTED !== 'undefined' ? COLOR_SELECTED : 0xffaa00); 
     } else {
@@ -171,25 +167,21 @@ window.handleHover = function(intersects, isShiftKey) {
                 }
             });
             
-            // Format Bench: Tidak lagi memotong karakter "M", tampilkan secara utuh
             const formatBench = (b) => b;
-
             const benchArr = Array.from(uniqueBenches).map(formatBench).sort();
             const benchStr = benchArr.length > 2 ? `${benchArr[0]} ... ${benchArr[benchArr.length-1]}` : benchArr.join(', ');
             const seamStr = Array.from(uniqueSeams).join(', ') || '-';
             
-            // Simpan data hover untuk di-render realtime
             window.currentHoveredData = {
                 blockname: isShift ? object.userData.blockName : `${object.userData.blockName} (Bench: ${object.userData.bench})`,
                 geom: Array.from(uniqueGeoms).join(', '),
                 bench: benchStr,
-                part: uniqueBenches.size.toString(), // Part = Jumlah Bench unik
+                part: uniqueBenches.size.toString(), 
                 seam: seamStr,
                 ob: totalOB,
                 coal: totalCoal
             };
             
-            // Hapus update pada tooltip text lama jika ada
             const tooltipText = document.getElementById('tooltip-text');
             const tooltip = document.getElementById('hover-tooltip');
             if (tooltipText) tooltipText.textContent = ''; 
@@ -204,7 +196,6 @@ window.handleHover = function(intersects, isShiftKey) {
             window.hoveredMeshes = []; 
             window.hoveredGroupKey = null; 
             
-            // Kosongkan data hover lalu render ulang panel UI
             window.currentHoveredData = null;
             const tooltip = document.getElementById('hover-tooltip');
             if (tooltip) tooltip.classList.add('hidden'); 
@@ -219,9 +210,8 @@ window.onPointerDown = function(event) {
     const pos = window.getMousePos(event);
     const mode = window.activeInteractionMode;
     
-    // Logik Mod Lukisan
     if (mode === 'draw_line' || mode === 'draw_area') {
-        if (event.button === 2) { window.finishDrawing(); return; } // Klik kanan: Selesai
+        if (event.button === 2) { window.finishDrawing(); return; } 
         if (event.button !== 0) return; 
         const pt = window.getRaycastPoint(pos);
         if (pt) {
@@ -232,7 +222,7 @@ window.onPointerDown = function(event) {
         return;
     }
 
-    if (event.button !== 0) return; // Hanya proses klik kiri untuk alat lain
+    if (event.button !== 0) return; 
     
     const isBox = mode === 'box_select' || (event.shiftKey && !event.altKey && !event.ctrlKey);
     const isPoly = mode === 'poly_select' || (event.altKey && !event.shiftKey && !event.ctrlKey);
@@ -279,7 +269,6 @@ window.onPointerMove = function(event) {
     
     const mode = window.activeInteractionMode;
 
-    // Logik Mod Lukisan (Dihadkan dengan requestAnimationFrame)
     if (mode === 'draw_line' || mode === 'draw_area') {
         lastDrawPos = pos;
         if (!isDrawVisualUpdatePending) {
@@ -321,6 +310,11 @@ window.onPointerMove = function(event) {
         container.style.cursor = 'crosshair';
         return;
     }
+
+    // OPTIMASI THROTTLING: Hanya jalankan raycast kompleks setiap 80ms untuk sentuhan Tablet
+    const currentTime = Date.now();
+    if (currentTime - window.lastRaycastTime < 80) return;
+    window.lastRaycastTime = currentTime;
 
     mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
     const meshArray = Object.values(meshes).filter(m => m.visible && pitReserveGroup.visible);
@@ -400,7 +394,6 @@ window.executeClickAction = function(event, pos) {
     mouse.x = pos.nx; mouse.y = pos.ny; 
     raycaster.setFromCamera(mouse, camera);
     
-    // Utamakan lukisan (Drawing) yang sudah ada
     if (typeof drawGroup !== 'undefined' && drawGroup && (mode === 'select_bench' || mode === 'select_block')) {
         raycaster.params.Line.threshold = 2.0; 
         const drawIntersects = raycaster.intersectObjects(drawGroup.children, false);
@@ -425,7 +418,6 @@ window.executeClickAction = function(event, pos) {
         }
     }
 
-    // Pemilihan Pit Reserve Normal
     const isCtrl = event.ctrlKey || mode === 'record_bench' || mode === 'record_block';
     const isShift = event.shiftKey || mode === 'select_block' || mode === 'record_block';
 
@@ -548,7 +540,6 @@ window.renderInfoPanel = function() {
 
     let html = '<div class="flex flex-col gap-1.5 text-[10px] w-full px-1 pb-1 pt-1 overflow-y-auto">';
 
-    // Format layout baris : "Deskripsi" : "Nilai"
     const createRow = (label, value, valueClass = "text-emerald-400") => `
         <div class="flex items-start w-full">
             <span class="text-slate-400 font-medium w-[65px] shrink-0">${label}</span>
@@ -557,64 +548,38 @@ window.renderInfoPanel = function() {
         </div>
     `;
 
-    // 1. Siapkan variabel data terpusat
-    let geomData = "";
-    let blockNameData = "";
-    let benchData = "";
-    let partData = "";
-    let seamData = "-";
-    let obData = 0;
-    let coalData = 0;
-    let srData = "-";
+    let geomData = ""; let blockNameData = ""; let benchData = "";
+    let partData = ""; let seamData = "-"; let obData = 0;
+    let coalData = 0; let srData = "-";
 
     const formatBench = (b) => b;
 
-    // 2. Tentukan sumber data (Hover vs Selection)
     if (window.currentHoveredData) {
-        // Tampilkan semua data hover secara realtime
-        geomData = window.currentHoveredData.geom;
-        blockNameData = window.currentHoveredData.blockname;
-        benchData = window.currentHoveredData.bench;
-        partData = window.currentHoveredData.part;
-        seamData = window.currentHoveredData.seam;
-        obData = window.currentHoveredData.ob;
-        coalData = window.currentHoveredData.coal;
-        srData = coalData > 0 ? (obData / coalData).toFixed(2) : '-';
+        geomData = window.currentHoveredData.geom; blockNameData = window.currentHoveredData.blockname; benchData = window.currentHoveredData.bench;
+        partData = window.currentHoveredData.part; seamData = window.currentHoveredData.seam; obData = window.currentHoveredData.ob;
+        coalData = window.currentHoveredData.coal; srData = coalData > 0 ? (obData / coalData).toFixed(2) : '-';
     } 
     else if (window.selectedMeshes.size > 0) {
-        let uniqueBenches = new Set();
-        let uniqueGeoms = new Set();
-        let uniqueBlocks = new Set();
-        let uniqueSeams = new Set();
+        let uniqueBenches = new Set(); let uniqueGeoms = new Set(); let uniqueBlocks = new Set(); let uniqueSeams = new Set();
 
         window.selectedMeshes.forEach(m => {
-            uniqueBenches.add(m.userData.bench);
-            uniqueGeoms.add(m.userData.geometryType || 'Pit');
-            uniqueBlocks.add(m.userData.blockName);
-            obData += m.userData.obVolume || 0; 
-            coalData += m.userData.coalMass || 0;
+            uniqueBenches.add(m.userData.bench); uniqueGeoms.add(m.userData.geometryType || 'Pit'); uniqueBlocks.add(m.userData.blockName);
+            obData += m.userData.obVolume || 0; coalData += m.userData.coalMass || 0;
             if (m.userData.seam && m.userData.seam !== '-' && m.userData.seam.trim() !== '') uniqueSeams.add(m.userData.seam);
         });
 
         const blockArr = Array.from(uniqueBlocks);
         blockNameData = blockArr.length === 1 ? blockArr[0] : `MULTIPLE (${blockArr.length})`;
-        
         const benchArr = Array.from(uniqueBenches).map(formatBench).sort();
         benchData = benchArr.length > 2 ? `${benchArr[0]} ... ${benchArr[benchArr.length-1]}` : benchArr.join(', ');
         
-        geomData = Array.from(uniqueGeoms).join(', ');
-        partData = uniqueBenches.size.toString(); // Part menghitung jumlah bench
-        seamData = Array.from(uniqueSeams).join(', ') || '-';
-        srData = coalData > 0 ? (obData / coalData).toFixed(2) : '-';
+        geomData = Array.from(uniqueGeoms).join(', '); partData = uniqueBenches.size.toString();
+        seamData = Array.from(uniqueSeams).join(', ') || '-'; srData = coalData > 0 ? (obData / coalData).toFixed(2) : '-';
     }
 
-    // 3. Render baris-baris sesuai urutan yang diminta jika ada data
     if (blockNameData) {
-        html += createRow('Geometry', geomData);
-        html += createRow('Blockname', blockNameData);
-        html += createRow('Bench', benchData);
-        html += createRow('Part', partData);
-        html += createRow('Seam', seamData, 'text-white');
+        html += createRow('Geometry', geomData); html += createRow('Blockname', blockNameData); html += createRow('Bench', benchData);
+        html += createRow('Part', partData); html += createRow('Seam', seamData, 'text-white');
         html += createRow('OB (bcm)', Number(obData.toFixed(2)).toLocaleString(), 'text-blue-400 font-mono');
         html += createRow('Coal (t)', Number(coalData.toFixed(2)).toLocaleString(), 'text-orange-400 font-mono');
         html += createRow('Strip Ratio', srData, 'text-green-400 font-mono');
@@ -622,17 +587,11 @@ window.renderInfoPanel = function() {
 
     html += '</div>';
 
-    // Jika tidak ada apa-apa panel dibersihkan (dikosongkan sepenuhnya)
-    if (!blockNameData && window.selectedMeshes.size === 0) {
-        infoPanel.innerHTML = '';
-    } else {
-        infoPanel.innerHTML = html;
-    }
+    if (!blockNameData && window.selectedMeshes.size === 0) infoPanel.innerHTML = '';
+    else infoPanel.innerHTML = html;
 }
 
-window.displaySelectionInfo = function() {
-    window.renderInfoPanel();
-}
+window.displaySelectionInfo = function() { window.renderInfoPanel(); }
 
 // ==========================================
 // URUTAN & RAKAMAN REKOD (SEQUENCE LOGIC)
@@ -646,56 +605,42 @@ window.recordSelectedMeshes = function() {
     let uniqueBlocks = new Set(), recordedMeshesInStep = [];
     
     window.selectedMeshes.forEach(m => {
-        combinedOB += m.userData.obVolume || 0; 
-        combinedCoal += m.userData.coalMass || 0; 
+        combinedOB += m.userData.obVolume || 0; combinedCoal += m.userData.coalMass || 0; 
         uniqueBlocks.add(m.userData.blockName);
-        m.userData.isRecorded = true; 
-        m.visible = false; 
+        m.userData.isRecorded = true; m.visible = false; 
         m.material.emissive.setHex(0x000000); 
         recordedMeshesInStep.push(m);
     });
     
-    const blockArr = Array.from(uniqueBlocks); 
-    let seqName = "";
+    const blockArr = Array.from(uniqueBlocks); let seqName = "";
     if (blockArr.length === 1) {
-        let benches = new Set(); 
-        window.selectedMeshes.forEach(m => benches.add(m.userData.bench));
-        const bArr = Array.from(benches); 
-        seqName = bArr.length > 1 ? `${blockArr[0]} (Multi-Bench)` : `${blockArr[0]}-${bArr[0]}`;
+        let benches = new Set(); window.selectedMeshes.forEach(m => benches.add(m.userData.bench));
+        const bArr = Array.from(benches); seqName = bArr.length > 1 ? `${blockArr[0]} (Multi-Bench)` : `${blockArr[0]}-${bArr[0]}`;
     } else seqName = `Selection #${window.sequenceCounter++} (${blockArr.length} Blk)`;
     
     window.sequenceRecords.push({ name: seqName, ob: combinedOB, coal: combinedCoal });
-    window.sequenceTotalOB += combinedOB; 
-    window.sequenceTotalCoal += combinedCoal;
+    window.sequenceTotalOB += combinedOB; window.sequenceTotalCoal += combinedCoal;
     
     window.undoStack.push({ name: seqName, meshes: recordedMeshesInStep, ob: combinedOB, coal: combinedCoal });
     if (window.undoStack.length > window.MAX_UNDO_STEPS) window.undoStack.shift();
     
-    window.updateSequenceUI(); 
-    window.selectedMeshes.clear(); 
-    window.hoveredGroupKey = null; 
-    window.hoveredMeshes = []; 
-    window.currentHoveredName = null;
-    window.currentHoveredData = null;
+    window.updateSequenceUI(); window.selectedMeshes.clear(); window.hoveredGroupKey = null; 
+    window.hoveredMeshes = []; window.currentHoveredName = null; window.currentHoveredData = null;
 
     window.displaySelectionInfo();
 }
 
 window.undoLastRecord = function() {
     if (window.undoStack.length === 0) return;
-    const lastAction = window.undoStack.pop(); 
-    window.redoStack.push(lastAction);
+    const lastAction = window.undoStack.pop(); window.redoStack.push(lastAction);
     if (window.redoStack.length > window.MAX_UNDO_STEPS) window.redoStack.shift();
     
-    window.sequenceRecords.pop(); 
-    window.sequenceTotalOB -= lastAction.ob; 
-    window.sequenceTotalCoal -= lastAction.coal;
+    window.sequenceRecords.pop(); window.sequenceTotalOB -= lastAction.ob; window.sequenceTotalCoal -= lastAction.coal;
     
     if (lastAction.name.startsWith('Selection #')) window.sequenceCounter = Math.max(1, window.sequenceCounter - 1);
     
     lastAction.meshes.forEach(m => {
-        m.userData.isRecorded = false; 
-        const isResource = (m.userData.burden || '').toUpperCase() === 'RESOURCE';
+        m.userData.isRecorded = false; const isResource = (m.userData.burden || '').toUpperCase() === 'RESOURCE';
         m.visible = isResource ? isCoalVisible : isOBVisible;
     });
     window.updateSequenceUI();
@@ -703,58 +648,35 @@ window.undoLastRecord = function() {
 
 window.redoLastUndo = function() {
     if (window.redoStack.length === 0) return;
-    const actionToRedo = window.redoStack.pop(); 
-    window.undoStack.push(actionToRedo);
+    const actionToRedo = window.redoStack.pop(); window.undoStack.push(actionToRedo);
     
-    actionToRedo.meshes.forEach(m => { 
-        m.userData.isRecorded = true; 
-        m.visible = false; 
-        m.material.emissive.setHex(0x000000); 
-    });
+    actionToRedo.meshes.forEach(m => { m.userData.isRecorded = true; m.visible = false; m.material.emissive.setHex(0x000000); });
     
     if (actionToRedo.name.startsWith('Selection #')) window.sequenceCounter++;
     window.sequenceRecords.push({ name: actionToRedo.name, ob: actionToRedo.ob, coal: actionToRedo.coal });
-    window.sequenceTotalOB += actionToRedo.ob; 
-    window.sequenceTotalCoal += actionToRedo.coal;
+    window.sequenceTotalOB += actionToRedo.ob; window.sequenceTotalCoal += actionToRedo.coal;
     
     window.updateSequenceUI();
 }
 
 window.resetSequenceAndView = function() {
-    // Menetapkan semula Data Pit Reserve
     Object.values(meshes).forEach(mesh => {
-        mesh.userData.isRecorded = false; 
-        const isResource = (mesh.userData.burden || '').toUpperCase() === 'RESOURCE';
-        mesh.visible = isResource ? isCoalVisible : isOBVisible; 
-        mesh.material.emissive.setHex(0x000000);
+        mesh.userData.isRecorded = false; const isResource = (mesh.userData.burden || '').toUpperCase() === 'RESOURCE';
+        mesh.visible = isResource ? isCoalVisible : isOBVisible; mesh.material.emissive.setHex(0x000000);
     });
     
-    window.selectedMeshes.clear(); 
-    window.sequenceRecords = []; 
-    window.sequenceTotalOB = 0; 
-    window.sequenceTotalCoal = 0; 
-    window.sequenceCounter = 1;
-    window.undoStack = []; 
-    window.redoStack = []; 
-    window.hoveredGroupKey = null; 
-    window.hoveredMeshes = [];
-    window.currentHoveredName = null;
-    window.currentHoveredData = null;
+    window.selectedMeshes.clear(); window.sequenceRecords = []; window.sequenceTotalOB = 0; 
+    window.sequenceTotalCoal = 0; window.sequenceCounter = 1; window.undoStack = []; window.redoStack = []; 
+    window.hoveredGroupKey = null; window.hoveredMeshes = []; window.currentHoveredName = null; window.currentHoveredData = null;
 
-    window.displaySelectionInfo(); 
-    window.updateSequenceUI();
+    window.displaySelectionInfo(); window.updateSequenceUI();
     
-    // Memadam semua garisan & kawasan lukisan
     if (typeof drawGroup !== 'undefined' && drawGroup) {
-        drawGroup.children.forEach(c => {
-            if (c.geometry) c.geometry.dispose();
-        });
-        drawGroup.clear();
+        drawGroup.children.forEach(c => { if (c.geometry) c.geometry.dispose(); }); drawGroup.clear();
     }
     if (typeof finishedDrawings !== 'undefined') finishedDrawings = [];
     if (typeof selectedDrawing !== 'undefined') selectedDrawing = null;
 
-    // Memproses semula warna blok jika ada
     if (Object.keys(meshes).length > 0) {
         const pitProcSelect = document.getElementById('pit-processing-select');
         if (pitProcSelect) {
@@ -767,14 +689,12 @@ window.resetSequenceAndView = function() {
 }
 
 window.updateSequenceUI = function() {
-    const tbody = document.getElementById('sequence-tbody'); 
-    const placeholder = document.getElementById('sequence-placeholder');
+    const tbody = document.getElementById('sequence-tbody'); const placeholder = document.getElementById('sequence-placeholder');
     if (!tbody || !placeholder) return;
 
     tbody.innerHTML = '';
-    if (window.sequenceRecords.length === 0) { 
-        placeholder.style.display = 'flex'; 
-    } else {
+    if (window.sequenceRecords.length === 0) { placeholder.style.display = 'flex'; } 
+    else {
         placeholder.style.display = 'none';
         window.sequenceRecords.forEach(record => {
             let sr = record.coal > 0 ? (record.ob / record.coal).toFixed(2) : '-';
@@ -794,9 +714,7 @@ window.updateSequenceUI = function() {
     document.getElementById('sequence-sr-total').textContent = window.sequenceTotalCoal > 0 ? (window.sequenceTotalOB / window.sequenceTotalCoal).toFixed(2) : '-';
     
     const scrollContainer = document.getElementById('sequence-scroll-container');
-    if (scrollContainer && window.sequenceRecords.length > 0) {
-        setTimeout(() => { scrollContainer.scrollTop = scrollContainer.scrollHeight; }, 10);
-    }
+    if (scrollContainer && window.sequenceRecords.length > 0) { setTimeout(() => { scrollContainer.scrollTop = scrollContainer.scrollHeight; }, 10); }
 }
 
 // ==========================================

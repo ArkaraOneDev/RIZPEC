@@ -63,14 +63,12 @@ window.recalculateGlobalSums = function() {
     if (elSumSr) elSumSr.textContent = totalCoal > 0 ? (totalOB / totalCoal).toFixed(2) : "0.00";
 };
 
-// 3. Poller untuk Mengeksekusi Mesh Loading (Dipanggil saat masuk Tab Geometry)
+// 3. Poller untuk Mengeksekusi Mesh Loading
 window.renderPendingPits = async function() {
     const pending = [...window.loadedPits].filter(p => !window.renderedPits.has(p));
     if (pending.length === 0) return;
     
     if (typeof showFullscreenLoading === 'function') showFullscreenLoading("Membangun 3D Geometry di Background...");
-    
-    // Beri jeda UI render untuk memastikan overlay muncul
     await new Promise(resolve => setTimeout(resolve, 100));
     
     try {
@@ -82,13 +80,11 @@ window.renderPendingPits = async function() {
         console.error("Gagal merender pit:", err);
     } finally {
         if (typeof hideFullscreenLoading === 'function') hideFullscreenLoading();
-        
         const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
         if (tabBtn) tabBtn.classList.remove('bg-emerald-600/30', 'text-emerald-300', 'animate-pulse');
     }
 };
 
-// Listener global: Jika user klik tab Geometry, langsung periksa dan bangun grafik yang tertunda (pending)
 document.addEventListener('click', (e) => {
     const tab = e.target.closest('.nav-tab');
     if (tab && tab.dataset.target === 'panel-geometry') {
@@ -108,30 +104,21 @@ window.buildPitMesh = function(pitId) {
 
             if (typeof isProcessing !== 'undefined') isProcessing = true;
 
-            // Parameter Konfigurasi Visual
             const stupaMode = typeof isStupaMode !== 'undefined' ? isStupaMode : false;
             const extrusionHeight = typeof currentExtrusion !== 'undefined' ? currentExtrusion : 5;
             
-            // Kode Web Worker (Diisolasi dari Main Thread)
             const workerCode = `
                 self.onmessage = function(e) {
                     try {
                         const { csvData, pitId, stupaMode, extrusionHeight } = e.data;
                         const lines = csvData.split(/\\r?\\n/).filter(l => l.trim() !== '');
-                        if (lines.length < 2) {
-                            self.postMessage({ error: "Data CSV kosong." });
-                            return;
-                        }
+                        if (lines.length < 2) { self.postMessage({ error: "Data kosong." }); return; }
 
                         const headers = lines[0].split(',').map(h => h.trim().toUpperCase());
-
                         const getIdx = (name, aliases) => {
                             let idx = headers.indexOf(name);
                             if (idx === -1 && aliases) {
-                                for(let a of aliases) {
-                                    idx = headers.indexOf(a);
-                                    if(idx !== -1) break;
-                                }
+                                for(let a of aliases) { idx = headers.indexOf(a); if(idx !== -1) break; }
                             }
                             return idx;
                         };
@@ -140,12 +127,9 @@ window.buildPitMesh = function(pitId) {
                         const idxE2 = getIdx('EASTING_2'); const idxN2 = getIdx('NORTHING_2'); const idxT2 = getIdx('TOPELEVATION_2'); const idxB2 = getIdx('BOTELEVATION_2');
                         const idxE3 = getIdx('EASTING_3'); const idxN3 = getIdx('NORTHING_3'); const idxT3 = getIdx('TOPELEVATION_3'); const idxB3 = getIdx('BOTELEVATION_3');
 
-                        const idxBlock = getIdx('BLOCKNAME', ['ID BLOCK']);
-                        const idxBench = getIdx('BENCH', ['ID BENCH']);
-                        const idxSeam = getIdx('SEAM', ['ID SEAM']);
-                        const idxBurden = getIdx('BURDEN');
-                        const idxRes = getIdx('PRO_RATA_RESOURCE');
-                        const idxWaste = getIdx('PRO_RATA_WASTE');
+                        const idxBlock = getIdx('BLOCKNAME', ['ID BLOCK']); const idxBench = getIdx('BENCH', ['ID BENCH']);
+                        const idxSeam = getIdx('SEAM', ['ID SEAM']); const idxBurden = getIdx('BURDEN');
+                        const idxRes = getIdx('PRO_RATA_RESOURCE'); const idxWaste = getIdx('PRO_RATA_WASTE');
 
                         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
                         const blocks = {};
@@ -162,17 +146,13 @@ window.buildPitMesh = function(pitId) {
                             return null;
                         }
 
-                        // Ekstraksi dan pengelompokan baris ke block
                         for (let i = 1; i < lines.length; i++) {
                             const row = lines[i].split(',');
                             const e1 = parseFloat(row[idxE1]);
                             if (isNaN(e1)) continue;
 
-                            // Kalkulasi Bounding Box Global
-                            [   [row[idxE1], row[idxT1], row[idxN1]],
-                                [row[idxE2], row[idxT2], row[idxN2]],
-                                [row[idxE3], row[idxT3], row[idxN3]],
-                                [row[idxE1], row[idxB1], row[idxN1]]
+                            [   [row[idxE1], row[idxT1], row[idxN1]], [row[idxE2], row[idxT2], row[idxN2]],
+                                [row[idxE3], row[idxT3], row[idxN3]], [row[idxE1], row[idxB1], row[idxN1]]
                             ].forEach(c => {
                                 let x = parseFloat(c[0]), y = parseFloat(c[1]), z = -parseFloat(c[2]);
                                 if(x < minX) minX = x; if(x > maxX) maxX = x;
@@ -212,15 +192,8 @@ window.buildPitMesh = function(pitId) {
                                     let avgTop = (parseFloat(row[idxT1]) + parseFloat(row[idxT2]) + parseFloat(row[idxT3])) / 3;
                                     topElev = isNaN(avgTop) ? 0 : avgTop;
                                 }
-
-                                let topY = topElev;
-                                let botY = topElev - extrusionHeight;
-
-                                if (burden !== 'RESOURCE') {
-                                    topY -= 0.05;
-                                    botY += 0.05;
-                                }
-
+                                let topY = topElev; let botY = topElev - extrusionHeight;
+                                if (burden !== 'RESOURCE') { topY -= 0.05; botY += 0.05; }
                                 p = {
                                     t1: [parseFloat(row[idxE1]), topY, -parseFloat(row[idxN1])], t2: [parseFloat(row[idxE2]), topY, -parseFloat(row[idxN2])], t3: [parseFloat(row[idxE3]), topY, -parseFloat(row[idxN3])],
                                     b1: [parseFloat(row[idxE1]), botY, -parseFloat(row[idxN1])], b2: [parseFloat(row[idxE2]), botY, -parseFloat(row[idxN2])], b3: [parseFloat(row[idxE3]), botY, -parseFloat(row[idxN3])]
@@ -235,19 +208,14 @@ window.buildPitMesh = function(pitId) {
                         }
 
                         const bounds = { minX, maxX, minY, maxY, minZ, maxZ };
-                        const cX = (minX + maxX) / 2;
-                        const cY = (minY + maxY) / 2;
-                        const cZ = (minZ + maxZ) / 2;
+                        const cX = (minX + maxX) / 2; const cY = (minY + maxY) / 2; const cZ = (minZ + maxZ) / 2;
 
                         const processedBlocks = [];
                         const transferables = [];
 
-                        // Optimasi titik dan pembuatan Array 1D yang efisien memori
                         Object.keys(blocks).forEach(blockKey => {
                             const blockData = blocks[blockKey];
-                            const positions = []; 
-                            const edgesCount = {}; 
-                            const edgeVertices = {};
+                            const positions = []; const edgesCount = {}; const edgeVertices = {};
 
                             const addEdge = (pA, pB) => {
                                 const round = (val) => Math.round(val * 1000) / 1000;
@@ -270,22 +238,15 @@ window.buildPitMesh = function(pitId) {
                                 }
                             });
 
-                            // Konversi ke Float32Array agar dapat di transfer menggunakan 0-copy ArrayBuffer
                             const positionsArray = new Float32Array(positions);
                             transferables.push(positionsArray.buffer);
 
-                            processedBlocks.push({
-                                blockKey: blockKey,
-                                info: blockData.info,
-                                positions: positionsArray
-                            });
+                            processedBlocks.push({ blockKey: blockKey, info: blockData.info, positions: positionsArray });
                         });
 
                         self.postMessage({ success: true, blocks: processedBlocks, bounds: bounds }, transferables);
 
-                    } catch (err) {
-                        self.postMessage({ error: err.message });
-                    }
+                    } catch (err) { self.postMessage({ error: err.message }); }
                 };
             `;
 
@@ -293,19 +254,16 @@ window.buildPitMesh = function(pitId) {
             const workerUrl = URL.createObjectURL(blob);
             const worker = new Worker(workerUrl);
 
-            // Listener saat Worker selesai bekerja
             worker.onmessage = (e) => {
-                URL.revokeObjectURL(workerUrl); // Bebaskan memori URL
+                URL.revokeObjectURL(workerUrl); 
                 
                 if (e.data.error) {
                     if (typeof isProcessing !== 'undefined') isProcessing = false;
-                    reject(new Error(e.data.error));
-                    return;
+                    reject(new Error(e.data.error)); return;
                 }
 
                 const { blocks, bounds } = e.data;
 
-                // 5. Menyusun Mesh di Main Thread menggunakan Buffer Data
                 if (typeof worldOrigin !== 'undefined' && !worldOrigin.isSet && bounds.minX !== Infinity) {
                     worldOrigin = { x: (bounds.minX+bounds.maxX)/2, y: (bounds.minY+bounds.maxY)/2, z: (bounds.minZ+bounds.maxZ)/2, isSet: true };
                 }
@@ -320,10 +278,8 @@ window.buildPitMesh = function(pitId) {
 
                 blocks.forEach(b => {
                     let geometry = new THREE.BufferGeometry();
-                    // Import langsung Float32Array hasil kalkulasi di worker
                     geometry.setAttribute('position', new THREE.BufferAttribute(b.positions, 3));
                     
-                    // Lakukan mergeVertices (Deduplikasi) di Main thread karena butuh fungsi Three.js
                     if (THREE.BufferGeometryUtils) geometry = THREE.BufferGeometryUtils.mergeVertices(geometry, stupaMode ? 0.01 : 0.5); 
                     geometry.computeVertexNormals(); 
                     geometry.computeBoundingBox();
@@ -341,12 +297,20 @@ window.buildPitMesh = function(pitId) {
                     const mesh = new THREE.Mesh(geometry, material);
                     mesh.userData = { ...b.info, isRecorded: false };
                     
+                    // OPTIMASI: Blok tidak bergerak, jangan hitung matriks tiap frame (CPU Saver untuk Tablet)
+                    mesh.matrixAutoUpdate = false;
+                    mesh.updateMatrix();
+
                     const edges = new THREE.EdgesGeometry(geometry, stupaMode ? 10 : 60); 
                     const lineMaterial = new THREE.LineBasicMaterial({ 
                         color: 0x111111, opacity: 0.9, transparent: true, linewidth: 1,
                         polygonOffset: true, polygonOffsetFactor: isCoal ? -3 : 0, polygonOffsetUnits: isCoal ? -3 : 0
                     });
                     const line = new THREE.LineSegments(edges, lineMaterial);
+                    
+                    // OPTIMASI: Matikan auto update matriks pada garis pinggir
+                    line.matrixAutoUpdate = false;
+                    line.updateMatrix();
                     mesh.add(line);
 
                     if (typeof pitReserveGroup !== 'undefined' && typeof meshes !== 'undefined') {
@@ -355,7 +319,6 @@ window.buildPitMesh = function(pitId) {
                     }
                 });
 
-                // Update UI Settings dan Posisi Kamera
                 window.recalculateGlobalSums();
 
                 const optInc = document.querySelector('#pit-processing-select option[value="resgraphic_incremental"]');
@@ -377,7 +340,6 @@ window.buildPitMesh = function(pitId) {
                     const box = new THREE.Box3();
                     Object.values(meshes).forEach(mesh => box.expandByObject(mesh));
 
-                    // Memposisikan kamera otomatis agar pas di tengah data yang baru dimuat
                     if (!box.isEmpty() && typeof camera !== 'undefined' && typeof controls !== 'undefined') {
                         const center = box.getCenter(new THREE.Vector3()); const size = box.getSize(new THREE.Vector3());
                         const maxDim = Math.max(size.x, size.y, size.z);
@@ -393,7 +355,6 @@ window.buildPitMesh = function(pitId) {
                     }
                 }
 
-                // Eksekusi fungsi pit processing spesifik jika ada yang aktif
                 const pitProcSelect = document.getElementById('pit-processing-select');
                 const srLimitInput = document.getElementById('sr-limit');
                 if (pitProcSelect) {
@@ -407,7 +368,6 @@ window.buildPitMesh = function(pitId) {
                 resolve();
             };
 
-            // Handling Error Darurat Worker
             worker.onerror = (err) => {
                 URL.revokeObjectURL(workerUrl);
                 if (typeof isProcessing !== 'undefined') isProcessing = false;
@@ -415,11 +375,9 @@ window.buildPitMesh = function(pitId) {
                 reject(new Error("Memori Perangkat Penuh saat mengekstrak titik koordinat."));
             };
 
-            // MULAI PROSES: Kirim data string mentah ke Worker
             worker.postMessage({ csvData, pitId, stupaMode, extrusionHeight });
 
         } catch (err) {
-            // Fallback aman, matikan centang di antarmuka jika awal proses gagal
             const cb = document.querySelector(`.pit-checkbox[data-pit="${pitId}"]`);
             if(cb) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
             window.loadedPits.delete(pitId);
