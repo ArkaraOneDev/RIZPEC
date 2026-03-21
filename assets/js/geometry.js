@@ -1,5 +1,6 @@
 // ==========================================
 // GEOMETRY BUILDER & MANAGER (Pit Reserve)
+// DENGAN WEB WORKER UNTUK MENCEGAH OOM
 // ==========================================
 
 // Track state Pit mana saja yang saat ini sedang diload dan dirender
@@ -67,7 +68,7 @@ window.renderPendingPits = async function() {
     const pending = [...window.loadedPits].filter(p => !window.renderedPits.has(p));
     if (pending.length === 0) return;
     
-    if (typeof showFullscreenLoading === 'function') showFullscreenLoading("Membangun 3D Geometry...");
+    if (typeof showFullscreenLoading === 'function') showFullscreenLoading("Membangun 3D Geometry di Background...");
     
     // Beri jeda UI render untuk memastikan overlay muncul
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -97,7 +98,7 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// 4. Mengekstrak dan membangun Mesh dengan Basis Async Promise
+// 4. Mengekstrak dan membangun Mesh menggunakan WEB WORKER (Pencegah OOM)
 window.buildPitMesh = function(pitId) {
     return new Promise(async (resolve, reject) => {
         try {
@@ -105,190 +106,229 @@ window.buildPitMesh = function(pitId) {
             const csvData = await RizpecDB.get(key); 
             if (!csvData) throw new Error("Data CSV tidak ditemukan di database cache.");
 
-            const lines = csvData.split(/\r?\n/).filter(l => l.trim() !== '');
-            const headers = lines[0].split(',').map(h => h.trim().toUpperCase());
-            const parsedData = [];
+            if (typeof isProcessing !== 'undefined') isProcessing = true;
+
+            // Parameter Konfigurasi Visual
+            const stupaMode = typeof isStupaMode !== 'undefined' ? isStupaMode : false;
+            const extrusionHeight = typeof currentExtrusion !== 'undefined' ? currentExtrusion : 5;
             
-            for (let i = 1; i < lines.length; i++) {
-                const values = lines[i].split(',');
-                const row = {};
-                headers.forEach((h, idx) => row[h] = values[idx] ? values[idx].trim() : '');
+            // Kode Web Worker (Diisolasi dari Main Thread)
+            const workerCode = `
+                self.onmessage = function(e) {
+                    try {
+                        const { csvData, pitId, stupaMode, extrusionHeight } = e.data;
+                        const lines = csvData.split(/\\r?\\n/).filter(l => l.trim() !== '');
+                        if (lines.length < 2) {
+                            self.postMessage({ error: "Data CSV kosong." });
+                            return;
+                        }
 
-                row.BLOCKNAME = row['ID BLOCK'] || row['BLOCKNAME'];
-                row.BENCH = row['ID BENCH'] || row['BENCH'];
-                row.SEAM = row['ID SEAM'] || row['SEAM'];
+                        const headers = lines[0].split(',').map(h => h.trim().toUpperCase());
 
-                let resVal = parseFloat(row['PRO_RATA_RESOURCE']) || 0;
-                let wasteVal = parseFloat(row['PRO_RATA_WASTE']) || 0;
-                let originalBurden = row['BURDEN'] ? row['BURDEN'].toUpperCase() : '';
+                        const getIdx = (name, aliases) => {
+                            let idx = headers.indexOf(name);
+                            if (idx === -1 && aliases) {
+                                for(let a of aliases) {
+                                    idx = headers.indexOf(a);
+                                    if(idx !== -1) break;
+                                }
+                            }
+                            return idx;
+                        };
+
+                        const idxE1 = getIdx('EASTING_1'); const idxN1 = getIdx('NORTHING_1'); const idxT1 = getIdx('TOPELEVATION_1'); const idxB1 = getIdx('BOTELEVATION_1');
+                        const idxE2 = getIdx('EASTING_2'); const idxN2 = getIdx('NORTHING_2'); const idxT2 = getIdx('TOPELEVATION_2'); const idxB2 = getIdx('BOTELEVATION_2');
+                        const idxE3 = getIdx('EASTING_3'); const idxN3 = getIdx('NORTHING_3'); const idxT3 = getIdx('TOPELEVATION_3'); const idxB3 = getIdx('BOTELEVATION_3');
+
+                        const idxBlock = getIdx('BLOCKNAME', ['ID BLOCK']);
+                        const idxBench = getIdx('BENCH', ['ID BENCH']);
+                        const idxSeam = getIdx('SEAM', ['ID SEAM']);
+                        const idxBurden = getIdx('BURDEN');
+                        const idxRes = getIdx('PRO_RATA_RESOURCE');
+                        const idxWaste = getIdx('PRO_RATA_WASTE');
+
+                        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+                        const blocks = {};
+
+                        function parseBenchElevation(benchStr) {
+                            if (!benchStr) return null;
+                            const str = benchStr.trim().toUpperCase();
+                            if (str.startsWith('M') || str.startsWith('P')) {
+                                const numMatch = str.match(/\\d+(?:\\.\\d+)?/);
+                                if (numMatch) return str.startsWith('M') ? -parseFloat(numMatch[0]) : parseFloat(numMatch[0]);
+                            }
+                            const numMatch = str.match(/-?\\d+(?:\\.\\d+)?/);
+                            if (numMatch) return parseFloat(numMatch[0]);
+                            return null;
+                        }
+
+                        // Ekstraksi dan pengelompokan baris ke block
+                        for (let i = 1; i < lines.length; i++) {
+                            const row = lines[i].split(',');
+                            const e1 = parseFloat(row[idxE1]);
+                            if (isNaN(e1)) continue;
+
+                            // Kalkulasi Bounding Box Global
+                            [   [row[idxE1], row[idxT1], row[idxN1]],
+                                [row[idxE2], row[idxT2], row[idxN2]],
+                                [row[idxE3], row[idxT3], row[idxN3]],
+                                [row[idxE1], row[idxB1], row[idxN1]]
+                            ].forEach(c => {
+                                let x = parseFloat(c[0]), y = parseFloat(c[1]), z = -parseFloat(c[2]);
+                                if(x < minX) minX = x; if(x > maxX) maxX = x;
+                                if(y < minY) minY = y; if(y > maxY) maxY = y;
+                                if(z < minZ) minZ = z; if(z > maxZ) maxZ = z;
+                            });
+
+                            const blockName = row[idxBlock] ? row[idxBlock].trim() : '';
+                            if (!blockName) continue;
+
+                            const bench = row[idxBench] ? row[idxBench].trim() : 'Unknown';
+                            let burden = row[idxBurden] ? row[idxBurden].trim().toUpperCase() : '';
+                            const seam = row[idxSeam] ? row[idxSeam].trim() : '-';
+                            const resVal = parseFloat(row[idxRes]) || 0;
+                            const wasteVal = parseFloat(row[idxWaste]) || 0;
+
+                            if (burden === 'RESOURCE' || burden === 'COAL') burden = 'RESOURCE';
+                            else if (burden !== '') burden = 'WASTE';
+                            else burden = resVal > 0 ? 'RESOURCE' : 'WASTE';
+
+                            const blockKey = pitId + '_' + blockName + '_' + bench + '_' + burden;
+
+                            if (!blocks[blockKey]) {
+                                blocks[blockKey] = {
+                                    info: { pitId: pitId, blockKey: blockKey, blockName: blockName, burden: burden, seam: seam, bench: bench, obVolume: 0, coalMass: 0 },
+                                    triangles: []
+                                };
+                            }
+
+                            if (burden === 'RESOURCE') blocks[blockKey].info.coalMass += resVal;
+                            else blocks[blockKey].info.obVolume += wasteVal;
+
+                            let p;
+                            if (stupaMode) {
+                                let topElev = parseBenchElevation(bench);
+                                if (topElev === null) {
+                                    let avgTop = (parseFloat(row[idxT1]) + parseFloat(row[idxT2]) + parseFloat(row[idxT3])) / 3;
+                                    topElev = isNaN(avgTop) ? 0 : avgTop;
+                                }
+
+                                let topY = topElev;
+                                let botY = topElev - extrusionHeight;
+
+                                if (burden !== 'RESOURCE') {
+                                    topY -= 0.05;
+                                    botY += 0.05;
+                                }
+
+                                p = {
+                                    t1: [parseFloat(row[idxE1]), topY, -parseFloat(row[idxN1])], t2: [parseFloat(row[idxE2]), topY, -parseFloat(row[idxN2])], t3: [parseFloat(row[idxE3]), topY, -parseFloat(row[idxN3])],
+                                    b1: [parseFloat(row[idxE1]), botY, -parseFloat(row[idxN1])], b2: [parseFloat(row[idxE2]), botY, -parseFloat(row[idxN2])], b3: [parseFloat(row[idxE3]), botY, -parseFloat(row[idxN3])]
+                                };
+                            } else {
+                                p = {
+                                    t1: [parseFloat(row[idxE1]), parseFloat(row[idxT1]), -parseFloat(row[idxN1])], t2: [parseFloat(row[idxE2]), parseFloat(row[idxT2]), -parseFloat(row[idxN2])], t3: [parseFloat(row[idxE3]), parseFloat(row[idxT3]), -parseFloat(row[idxN3])],
+                                    b1: [parseFloat(row[idxE1]), parseFloat(row[idxB1]), -parseFloat(row[idxN1])], b2: [parseFloat(row[idxE2]), parseFloat(row[idxB2]), -parseFloat(row[idxN2])], b3: [parseFloat(row[idxE3]), parseFloat(row[idxB3]), -parseFloat(row[idxN3])]
+                                };
+                            }
+                            blocks[blockKey].triangles.push(p);
+                        }
+
+                        const bounds = { minX, maxX, minY, maxY, minZ, maxZ };
+                        const cX = (minX + maxX) / 2;
+                        const cY = (minY + maxY) / 2;
+                        const cZ = (minZ + maxZ) / 2;
+
+                        const processedBlocks = [];
+                        const transferables = [];
+
+                        // Optimasi titik dan pembuatan Array 1D yang efisien memori
+                        Object.keys(blocks).forEach(blockKey => {
+                            const blockData = blocks[blockKey];
+                            const positions = []; 
+                            const edgesCount = {}; 
+                            const edgeVertices = {};
+
+                            const addEdge = (pA, pB) => {
+                                const round = (val) => Math.round(val * 1000) / 1000;
+                                const keyA = round(pA.t[0]) + '_' + round(pA.t[2]); const keyB = round(pB.t[0]) + '_' + round(pB.t[2]);
+                                const edgeKey = keyA < keyB ? keyA+'|'+keyB : keyB+'|'+keyA;
+                                if (!edgesCount[edgeKey]) { edgesCount[edgeKey] = 0; edgeVertices[edgeKey] = [pA, pB]; }
+                                edgesCount[edgeKey]++;
+                            };
+
+                            blockData.triangles.forEach(p => {
+                                const t1 = [p.t1[0] - cX, p.t1[1] - cY, p.t1[2] - cZ]; const t2 = [p.t2[0] - cX, p.t2[1] - cY, p.t2[2] - cZ]; const t3 = [p.t3[0] - cX, p.t3[1] - cY, p.t3[2] - cZ];
+                                const b1 = [p.b1[0] - cX, p.b1[1] - cY, p.b1[2] - cZ]; const b2 = [p.b2[0] - cX, p.b2[1] - cY, p.b2[2] - cZ]; const b3 = [p.b3[0] - cX, p.b3[1] - cY, p.b3[2] - cZ];
+                                addEdge({t: t1, b: b1}, {t: t2, b: b2}); addEdge({t: t2, b: b2}, {t: t3, b: b3}); addEdge({t: t3, b: b3}, {t: t1, b: b1});
+                                positions.push(...t1, ...t2, ...t3, ...b1, ...b3, ...b2);
+                            });
+
+                            Object.keys(edgesCount).forEach(key => {
+                                if (edgesCount[key] === 1) {
+                                    const [pA, pB] = edgeVertices[key]; positions.push(...pA.t, ...pA.b, ...pB.b, ...pA.t, ...pB.b, ...pB.t);
+                                }
+                            });
+
+                            // Konversi ke Float32Array agar dapat di transfer menggunakan 0-copy ArrayBuffer
+                            const positionsArray = new Float32Array(positions);
+                            transferables.push(positionsArray.buffer);
+
+                            processedBlocks.push({
+                                blockKey: blockKey,
+                                info: blockData.info,
+                                positions: positionsArray
+                            });
+                        });
+
+                        self.postMessage({ success: true, blocks: processedBlocks, bounds: bounds }, transferables);
+
+                    } catch (err) {
+                        self.postMessage({ error: err.message });
+                    }
+                };
+            `;
+
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            const workerUrl = URL.createObjectURL(blob);
+            const worker = new Worker(workerUrl);
+
+            // Listener saat Worker selesai bekerja
+            worker.onmessage = (e) => {
+                URL.revokeObjectURL(workerUrl); // Bebaskan memori URL
                 
-                if (originalBurden === 'RESOURCE' || originalBurden === 'COAL') row.BURDEN = 'RESOURCE';
-                else if (originalBurden !== '') row.BURDEN = 'WASTE';
-                else row.BURDEN = resVal > 0 ? 'RESOURCE' : 'WASTE';
+                if (e.data.error) {
+                    if (typeof isProcessing !== 'undefined') isProcessing = false;
+                    reject(new Error(e.data.error));
+                    return;
+                }
 
-                row.RAWRECMASS = resVal;
-                row.TOTALVOLUME = wasteVal;
-                
-                parsedData.push(row);
-            }
+                const { blocks, bounds } = e.data;
 
-            await processDataPromise(parsedData, pitId, false);
-            resolve();
-        } catch (err) {
-            reject(err);
-            // Fallback aman, matikan centang di antarmuka jika memori grafis gagal
-            const cb = document.querySelector(`.pit-checkbox[data-pit="${pitId}"]`);
-            if(cb) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
-            window.loadedPits.delete(pitId);
-        }
-    });
-};
+                // 5. Menyusun Mesh di Main Thread menggunakan Buffer Data
+                if (typeof worldOrigin !== 'undefined' && !worldOrigin.isSet && bounds.minX !== Infinity) {
+                    worldOrigin = { x: (bounds.minX+bounds.maxX)/2, y: (bounds.minY+bounds.maxY)/2, z: (bounds.minZ+bounds.maxZ)/2, isSet: true };
+                }
 
-function parseBenchElevation(benchStr) {
-    if (!benchStr) return null;
-    const str = benchStr.trim().toUpperCase();
-    if (str.startsWith('M') || str.startsWith('P')) {
-        const numMatch = str.match(/\d+(?:\.\d+)?/);
-        if (numMatch) return str.startsWith('M') ? -parseFloat(numMatch[0]) : parseFloat(numMatch[0]);
-    }
-    const numMatch = str.match(/-?\d+(?:\.\d+)?/);
-    if (numMatch) return parseFloat(numMatch[0]);
-    return null;
-}
+                window.unloadPitGeometry(pitId);
+                if (typeof clearLabels === 'function') clearLabels();
 
-// 5. Fungsi Core Rendering (Dikonversi Menjadi Promise Non-Blocking)
-function processDataPromise(data, pitId, skipCameraReset = false) {
-    return new Promise((resolve) => {
-        if (typeof isProcessing !== 'undefined') isProcessing = true; 
-        
-        setTimeout(() => {
-            try {
-                const stupaMode = typeof isStupaMode !== 'undefined' ? isStupaMode : false;
-                const extrusionHeight = typeof currentExtrusion !== 'undefined' ? currentExtrusion : 5;
                 const colorCoal = typeof basicColorCoal !== 'undefined' ? basicColorCoal : 0x000000;
                 const colorOB = typeof basicColorOB !== 'undefined' ? basicColorOB : 0xaaaaaa;
                 const opacCoal = typeof coalOpacity !== 'undefined' ? coalOpacity : 1;
                 const opacOB = typeof obOpacity !== 'undefined' ? obOpacity : 1;
 
-                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-                
-                // Mencari Bounding Box Ekstrem dari koordinat Pit
-                data.forEach(row => {
-                    const e1 = parseFloat(row.EASTING_1);
-                    if (isNaN(e1)) return; 
-                    [   [row.EASTING_1, row.TOPELEVATION_1, row.NORTHING_1],
-                        [row.EASTING_2, row.TOPELEVATION_2, row.NORTHING_2],
-                        [row.EASTING_3, row.TOPELEVATION_3, row.NORTHING_3],
-                        [row.EASTING_1, row.BOTELEVATION_1, row.NORTHING_1] 
-                    ].forEach(c => {
-                        let x = parseFloat(c[0]), y = parseFloat(c[1]), z = -parseFloat(c[2]); 
-                        if(x < minX) minX = x; if(x > maxX) maxX = x;
-                        if(y < minY) minY = y; if(y > maxY) maxY = y;
-                        if(z < minZ) minZ = z; if(z > maxZ) maxZ = z;
-                    });
-                });
-
-                // Menentukan poros tengah dunia (origin) jika belum di-set
-                if (typeof worldOrigin !== 'undefined' && !worldOrigin.isSet && minX !== Infinity) {
-                    worldOrigin = { x: (minX+maxX)/2, y: (minY+maxY)/2, z: (minZ+maxZ)/2, isSet: true };
-                }
-                const cX = typeof worldOrigin !== 'undefined' ? worldOrigin.x : 0;
-                const cY = typeof worldOrigin !== 'undefined' ? worldOrigin.y : 0;
-                const cZ = typeof worldOrigin !== 'undefined' ? worldOrigin.z : 0;
-
-                const blocks = {};
-                
-                if (typeof isOBVisible !== 'undefined') isOBVisible = true; 
-                if (typeof isCoalVisible !== 'undefined') isCoalVisible = true; 
-                if (typeof isLabelLayerVisible !== 'undefined') isLabelLayerVisible = true;
-
-                data.forEach(row => {
-                    if (isNaN(parseFloat(row.EASTING_1))) return; 
-                    const blockName = row.BLOCKNAME;
-                    if (!blockName) return;
-
-                    const bench = row.BENCH || 'Unknown';
-                    const burden = row.BURDEN || 'Unknown';
-                    
-                    const blockKey = `${pitId}_${blockName}_${bench}_${burden}`;
-
-                    if (!blocks[blockKey]) {
-                        blocks[blockKey] = {
-                            info: { pitId: pitId, blockKey: blockKey, blockName: blockName, burden: burden, seam: row.SEAM || '-', bench: bench, obVolume: 0, coalMass: 0 },
-                            triangles: [], rawRows: [] 
-                        };
-                    }
-                    blocks[blockKey].rawRows.push(row);
-
-                    const isResource = (row.BURDEN || '').toUpperCase() === 'RESOURCE';
-                    if (isResource) blocks[blockKey].info.coalMass += parseFloat(row.RAWRECMASS) || 0;
-                    else blocks[blockKey].info.obVolume += parseFloat(row.TOTALVOLUME) || 0;
-
-                    let p;
-                    if (stupaMode) {
-                        let topElev = parseBenchElevation(bench);
-                        if (topElev === null) {
-                            let avgTop = (parseFloat(row.TOPELEVATION_1) + parseFloat(row.TOPELEVATION_2) + parseFloat(row.TOPELEVATION_3)) / 3;
-                            topElev = isNaN(avgTop) ? 0 : avgTop;
-                        }
-                        
-                        let topY = topElev;
-                        let botY = topElev - extrusionHeight;
-
-                        if (!isResource) {
-                            topY -= 0.05;
-                            botY += 0.05;
-                        }
-
-                        p = {
-                            t1: [parseFloat(row.EASTING_1), topY, -parseFloat(row.NORTHING_1)], t2: [parseFloat(row.EASTING_2), topY, -parseFloat(row.NORTHING_2)], t3: [parseFloat(row.EASTING_3), topY, -parseFloat(row.NORTHING_3)],
-                            b1: [parseFloat(row.EASTING_1), botY, -parseFloat(row.NORTHING_1)], b2: [parseFloat(row.EASTING_2), botY, -parseFloat(row.NORTHING_2)], b3: [parseFloat(row.EASTING_3), botY, -parseFloat(row.NORTHING_3)]
-                        };
-                    } else {
-                        p = {
-                            t1: [parseFloat(row.EASTING_1), parseFloat(row.TOPELEVATION_1), -parseFloat(row.NORTHING_1)], t2: [parseFloat(row.EASTING_2), parseFloat(row.TOPELEVATION_2), -parseFloat(row.NORTHING_2)], t3: [parseFloat(row.EASTING_3), parseFloat(row.TOPELEVATION_3), -parseFloat(row.NORTHING_3)],
-                            b1: [parseFloat(row.EASTING_1), parseFloat(row.BOTELEVATION_1), -parseFloat(row.NORTHING_1)], b2: [parseFloat(row.EASTING_2), parseFloat(row.BOTELEVATION_2), -parseFloat(row.NORTHING_2)], b3: [parseFloat(row.EASTING_3), parseFloat(row.BOTELEVATION_3), -parseFloat(row.NORTHING_3)]
-                        };
-                    }
-                    blocks[blockKey].triangles.push(p);
-                });
-
-                // Pastikan geometri yang lama dihapus dulu sebelum merakit ulang (menghindari duplikasi render)
-                window.unloadPitGeometry(pitId);
-                if (typeof clearLabels === 'function') clearLabels(); 
-
-                Object.keys(blocks).forEach(blockKey => {
-                    const blockData = blocks[blockKey];
-                    const positions = []; const edgesCount = {}; const edgeVertices = {};
-
-                    const addEdge = (pA, pB) => {
-                        const round = (val) => Math.round(val * 1000) / 1000; 
-                        const keyA = `${round(pA.t[0])}_${round(pA.t[2])}`; const keyB = `${round(pB.t[0])}_${round(pB.t[2])}`;
-                        const edgeKey = keyA < keyB ? `${keyA}|${keyB}` : `${keyB}|${keyA}`;
-                        if (!edgesCount[edgeKey]) { edgesCount[edgeKey] = 0; edgeVertices[edgeKey] = [pA, pB]; }
-                        edgesCount[edgeKey]++;
-                    };
-
-                    blockData.triangles.forEach(p => {
-                        const t1 = [p.t1[0] - cX, p.t1[1] - cY, p.t1[2] - cZ]; const t2 = [p.t2[0] - cX, p.t2[1] - cY, p.t2[2] - cZ]; const t3 = [p.t3[0] - cX, p.t3[1] - cY, p.t3[2] - cZ];
-                        const b1 = [p.b1[0] - cX, p.b1[1] - cY, p.b1[2] - cZ]; const b2 = [p.b2[0] - cX, p.b2[1] - cY, p.b2[2] - cZ]; const b3 = [p.b3[0] - cX, p.b3[1] - cY, p.b3[2] - cZ];
-                        addEdge({t: t1, b: b1}, {t: t2, b: b2}); addEdge({t: t2, b: b2}, {t: t3, b: b3}); addEdge({t: t3, b: b3}, {t: t1, b: b1});
-                        positions.push(...t1, ...t2, ...t3, ...b1, ...b3, ...b2);
-                    });
-
-                    Object.keys(edgesCount).forEach(key => {
-                        if (edgesCount[key] === 1) { 
-                            const [pA, pB] = edgeVertices[key]; positions.push(...pA.t, ...pA.b, ...pB.b, ...pA.t, ...pB.b, ...pB.t);
-                        }
-                    });
-
+                blocks.forEach(b => {
                     let geometry = new THREE.BufferGeometry();
-                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                    // Import langsung Float32Array hasil kalkulasi di worker
+                    geometry.setAttribute('position', new THREE.BufferAttribute(b.positions, 3));
                     
+                    // Lakukan mergeVertices (Deduplikasi) di Main thread karena butuh fungsi Three.js
                     if (THREE.BufferGeometryUtils) geometry = THREE.BufferGeometryUtils.mergeVertices(geometry, stupaMode ? 0.01 : 0.5); 
-                    geometry.computeVertexNormals(); geometry.computeBoundingBox();
+                    geometry.computeVertexNormals(); 
+                    geometry.computeBoundingBox();
 
-                    const isCoal = blockData.info.burden.toUpperCase() === 'RESOURCE';
+                    const isCoal = b.info.burden.toUpperCase() === 'RESOURCE';
                     const blockColor = isCoal ? colorCoal : colorOB; 
                     
                     const material = new THREE.MeshStandardMaterial({ 
@@ -299,7 +339,7 @@ function processDataPromise(data, pitId, skipCameraReset = false) {
                     });
 
                     const mesh = new THREE.Mesh(geometry, material);
-                    mesh.userData = { ...blockData.info, isRecorded: false, rawRows: blockData.rawRows };
+                    mesh.userData = { ...b.info, isRecorded: false };
                     
                     const edges = new THREE.EdgesGeometry(geometry, stupaMode ? 10 : 60); 
                     const lineMaterial = new THREE.LineBasicMaterial({ 
@@ -311,10 +351,11 @@ function processDataPromise(data, pitId, skipCameraReset = false) {
 
                     if (typeof pitReserveGroup !== 'undefined' && typeof meshes !== 'undefined') {
                         pitReserveGroup.add(mesh); 
-                        meshes[blockKey] = mesh;
+                        meshes[b.blockKey] = mesh;
                     }
                 });
-                
+
+                // Update UI Settings dan Posisi Kamera
                 window.recalculateGlobalSums();
 
                 const optInc = document.querySelector('#pit-processing-select option[value="resgraphic_incremental"]');
@@ -336,7 +377,8 @@ function processDataPromise(data, pitId, skipCameraReset = false) {
                     const box = new THREE.Box3();
                     Object.values(meshes).forEach(mesh => box.expandByObject(mesh));
 
-                    if (!box.isEmpty() && !skipCameraReset && typeof camera !== 'undefined' && typeof controls !== 'undefined') {
+                    // Memposisikan kamera otomatis agar pas di tengah data yang baru dimuat
+                    if (!box.isEmpty() && typeof camera !== 'undefined' && typeof controls !== 'undefined') {
                         const center = box.getCenter(new THREE.Vector3()); const size = box.getSize(new THREE.Vector3());
                         const maxDim = Math.max(size.x, size.y, size.z);
                         const fov = camera.fov * (Math.PI / 180); let cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
@@ -350,10 +392,10 @@ function processDataPromise(data, pitId, skipCameraReset = false) {
                         camera.lookAt(center); controls.target.copy(center); controls.update();
                     }
                 }
-                
+
+                // Eksekusi fungsi pit processing spesifik jika ada yang aktif
                 const pitProcSelect = document.getElementById('pit-processing-select');
                 const srLimitInput = document.getElementById('sr-limit');
-                
                 if (pitProcSelect) {
                     if (pitProcSelect.value === 'basic' && typeof resetToBasicColors === 'function') resetToBasicColors();
                     else if (pitProcSelect.value === 'resgraphic_incremental' && typeof generateResgraphicIncremental === 'function') generateResgraphicIncremental(parseFloat(srLimitInput?.value) || 5);
@@ -361,14 +403,27 @@ function processDataPromise(data, pitId, skipCameraReset = false) {
                     else if (pitProcSelect.value === 'quality' && typeof generateQuality === 'function') generateQuality();
                 }
 
+                if (typeof isProcessing !== 'undefined') isProcessing = false;
                 resolve();
-            } catch (err) { 
-                console.error("Error merakit geometri pit:", err); 
-                alert("Terjadi kesalahan saat merakit geometri."); 
-                resolve();
-            } finally { 
-                if (typeof isProcessing !== 'undefined') isProcessing = false; 
-            }
-        }, 50); // Delay kecil agar thread UI bisa bernapas sebelum block rendering
+            };
+
+            // Handling Error Darurat Worker
+            worker.onerror = (err) => {
+                URL.revokeObjectURL(workerUrl);
+                if (typeof isProcessing !== 'undefined') isProcessing = false;
+                console.error("Fatal Web Worker Error:", err);
+                reject(new Error("Memori Perangkat Penuh saat mengekstrak titik koordinat."));
+            };
+
+            // MULAI PROSES: Kirim data string mentah ke Worker
+            worker.postMessage({ csvData, pitId, stupaMode, extrusionHeight });
+
+        } catch (err) {
+            // Fallback aman, matikan centang di antarmuka jika awal proses gagal
+            const cb = document.querySelector(`.pit-checkbox[data-pit="${pitId}"]`);
+            if(cb) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
+            window.loadedPits.delete(pitId);
+            reject(err);
+        }
     });
-}
+};
