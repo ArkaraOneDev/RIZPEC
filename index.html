@@ -203,98 +203,8 @@
             <!-- ===================================== -->
             <div id="panel-geometry" class="sidebar-panel hidden flex-col w-full h-full">
                 
-                <!-- Controls Panel -->
-                <div class="p-4 lg:p-3 flex flex-col shrink-0 max-h-[60vh] overflow-y-auto">
-                    <div class="flex flex-col gap-3 lg:gap-2 mb-2">
-                        <h3 class="text-[10px] lg:text-[9px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                            <i class="fa-solid fa-microchip"></i> Pit Processing
-                        </h3>
-                        <div class="flex flex-col gap-2 lg:gap-1.5">
-                            <select id="pit-processing-select" class="w-full bg-slate-900/80 border border-slate-700 hover:border-slate-500 rounded p-2 lg:p-1.5 text-[12px] lg:text-[11px] text-slate-300 font-medium outline-none focus:border-blue-500 transition-colors cursor-pointer shadow-inner h-9 lg:h-auto">
-                                <option value="basic" selected>Basic</option>
-                                <option value="resgraphic_incremental" disabled>Resgraphic Incremental</option>
-                                <option value="resgraphic_cumulative" disabled>Resgraphic Cumulative</option>
-                                <option value="quality" disabled>Quality</option>
-                            </select>
-
-                            <div id="basic-panel" class="flex flex-col gap-3 lg:gap-2 p-3 lg:p-2 bg-slate-900/60 border border-slate-700/80 rounded mt-1 shadow-inner">
-                                <div class="flex items-center justify-between">
-                                    <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">OB</span>
-                                    <input type="color" id="color-ob" class="bg-slate-800 border border-slate-600 rounded cursor-pointer w-10 h-6 lg:w-8 lg:h-5 outline-none transition-colors">
-                                </div>
-                                <div class="flex items-center justify-between">
-                                    <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">Coal</span>
-                                    <input type="color" id="color-coal" class="bg-slate-800 border border-slate-600 rounded cursor-pointer w-10 h-6 lg:w-8 lg:h-5 outline-none transition-colors">
-                                </div>
-                            </div>
-
-                            <div id="resgraphic-panel" class="hidden flex-col gap-3 lg:gap-2 p-3 lg:p-2 bg-slate-900/60 border border-slate-700/80 rounded mt-1 shadow-inner">
-                                <div id="cumulative-settings" class="hidden flex-col gap-2">
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">Direction</span>
-                                        <select id="resgraphic-direction" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 lg:px-1.5 lg:py-0.5 text-[11px] lg:text-[9px] text-white outline-none w-[120px] lg:w-[105px]">
-                                            <option value="strip_asc">Strip Ascending</option>
-                                            <option value="strip_desc">Strip Descending</option>
-                                            <option value="block_asc">Block Ascending</option>
-                                            <option value="block_desc">Block Descending</option>
-                                        </select>
-                                    </div>
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">Sequence</span>
-                                        <select id="resgraphic-sequence" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 lg:px-1.5 lg:py-0.5 text-[11px] lg:text-[9px] text-white outline-none w-[120px] lg:w-[105px]">
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div class="flex items-center justify-between">
-                                    <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">SR Limit</span>
-                                    <input type="number" id="sr-limit" value="5" step="0.1" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 lg:px-1.5 lg:py-0.5 text-[12px] lg:text-[10px] text-white outline-none w-[120px] lg:w-[105px] text-right">
-                                </div>
-                                <button id="btn-generate-resgraphic" class="w-full mt-2 lg:mt-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] lg:text-[9px] font-bold py-2 lg:py-1.5 rounded transition-colors tracking-wider">
-                                    GENERATE
-                                </button>
-                            </div>
-
-                            <div id="quality-panel" class="hidden flex-col gap-3 lg:gap-2 p-3 lg:p-2 bg-slate-900/60 border border-slate-700/80 rounded mt-1 shadow-inner">
-                                <div class="flex items-center justify-between">
-                                    <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">Quality</span>
-                                    <select id="quality-target" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 lg:px-1.5 lg:py-0.5 text-[11px] lg:text-[9px] text-white outline-none w-[120px] lg:w-[105px]"></select>
-                                </div>
-                                
-                                <div class="flex items-center justify-between">
-                                    <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">Formula</span>
-                                    <select id="quality-formula" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 lg:px-1.5 lg:py-0.5 text-[11px] lg:text-[9px] text-white outline-none w-[120px] lg:w-[105px]">
-                                        <option value="weighted_average">Weighted Average</option>
-                                        <option value="average">Average</option>
-                                        <option value="sum">Sum</option>
-                                    </select>
-                                </div>
-                                
-                                <div id="quality-weight-row" class="flex items-center justify-between">
-                                    <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">Weight</span>
-                                    <select id="quality-weight" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 lg:px-1.5 lg:py-0.5 text-[11px] lg:text-[9px] text-white outline-none w-[120px] lg:w-[105px]">
-                                        <option value="coal">Coal</option>
-                                        <option value="ob">OB</option>
-                                    </select>
-                                </div>
-
-                                <div class="flex items-center justify-between">
-                                    <span class="text-[11px] lg:text-[9px] text-slate-400 font-medium">Optimization</span>
-                                    <select id="quality-type" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 lg:px-1.5 lg:py-0.5 text-[11px] lg:text-[9px] text-white outline-none w-[120px] lg:w-[105px]">
-                                        <option value="maximize">Maximize</option>
-                                        <option value="minimize">Minimize</option>
-                                    </select>
-                                </div>
-                                <button id="btn-generate-quality" class="w-full mt-2 lg:mt-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] lg:text-[9px] font-bold py-2 lg:py-1.5 rounded transition-colors tracking-wider">
-                                    GENERATE
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Sequence Record Panel -->
-                <div id="sequence-panel" class="flex-1 px-4 lg:px-3 pb-4 lg:pb-3 pt-0 flex flex-col min-h-0 gap-3 lg:gap-2">
+                <div id="sequence-panel" class="flex-1 px-4 lg:px-3 pb-4 lg:pb-3 pt-4 lg:pt-3 flex flex-col min-h-0 gap-3 lg:gap-2">
                     <div class="flex-1 flex flex-col w-full rounded border border-slate-700 bg-slate-900/50 overflow-hidden relative">
                         <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-b border-slate-700 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] text-slate-400 font-semibold shadow z-10">
                             <div>Selection Name</div>
@@ -395,15 +305,6 @@
                     <!-- LEFT PANEL: Settings & Actions -->
                     <div class="w-full md:w-64 lg:w-[320px] xl:w-[380px] shrink-0 border-b md:border-b-0 md:border-r border-slate-700 bg-slate-800/40 p-4 lg:p-5 overflow-y-auto flex flex-col max-h-[50vh] md:max-h-full">
                         
-                        <!-- Settings Empty (Root Folder) -->
-                        <div id="settings-empty" class="hidden flex-col items-center justify-center h-full text-center opacity-60 mt-10">
-                            <div class="w-12 h-12 lg:w-16 lg:h-16 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 mb-3 shadow-inner">
-                                <i class="fa-solid fa-sliders text-xl lg:text-2xl text-slate-500"></i>
-                            </div>
-                            <h3 class="text-white font-bold text-[14px] lg:text-[13px] mb-1">Pengaturan Root Folder</h3>
-                            <p class="text-slate-400 text-[11px] lg:text-[10px]">Pilih subfolder di panel sebelah kiri untuk melihat pengaturan spesifik atau mengunggah data.</p>
-                        </div>
-
                         <!-- Settings CSV (Subfolder Data) -->
                         <div id="settings-csv" class="hidden flex-col gap-5 lg:gap-4 pt-2">
                             <!-- Geometry Header -->
@@ -896,8 +797,8 @@
     <script src="assets/js/autocad.js"></script>
     <script src="assets/js/geometry.js"></script>
     <script src="assets/js/file.js"></script>
+    <script src="assets/js/file-pit.js"></script>
     <script src="assets/js/project.js"></script>
-    <script src="assets/js/pit.js"></script>
     
     <!-- Tambahan Skrip Interaksi & Alat (Dipisahkan) -->
     <script src="assets/js/tools.js"></script>

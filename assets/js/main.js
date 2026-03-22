@@ -580,30 +580,24 @@ function init3D() {
         }
     });
 
-    // --- OBSERVER UNTUK PAUSE/RESUME 3D SECARA OTOMATIS ---
-    const view3D = document.getElementById('view-3d');
-    if (view3D) {
-        const observer = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                if (mutation.attributeName === 'class') {
-                    if (view3D.classList.contains('hidden')) {
-                        window.pause3D();
-                    } else {
-                        window.resume3D();
-                    }
+    // --- OBSERVER UNTUK PAUSE/RESUME 3D SECARA OTOMATIS (INTERSECTION OBSERVER) ---
+    const canvasContainerDOM = document.getElementById('canvas-container');
+    if (canvasContainerDOM) {
+        // Menggunakan Intersection Observer untuk mendeteksi visibilitas yang sebenarnya
+        // Akan tertrigger pause jika element terkena display:none (tab tertutup) atau keluar scroll viewport
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                    window.resume3D();
+                } else {
+                    window.pause3D();
                 }
             });
-        });
-        observer.observe(view3D, { attributes: true });
+        }, { root: null, threshold: 0.01 }); // Hanya butuh terlihat 1% untuk resume render
         
-        // Pengecekan awal saat inisialisasi
-        if (!view3D.classList.contains('hidden')) {
-            window.resume3D();
-        } else {
-            window.pause3D();
-        }
+        observer.observe(canvasContainerDOM);
     } else {
-        window.resume3D(); // Fallback jika container view-3d tidak ditemukan
+        window.resume3D(); // Fallback
     }
 }
 

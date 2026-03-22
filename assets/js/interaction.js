@@ -22,8 +22,21 @@ window.redoStack = [];
 window.MAX_UNDO_STEPS = 10;
 window.currentMousePos = { x: 0, y: 0, nx: 0, ny: 0 };
 
-// OPTIMASI: Waktu terakhir raycaster dieksekusi (Throttle)
+// OPTIMASI: Variabel pengendali untuk Tablet
 window.lastRaycastTime = 0;
+window.isCameraMoving = false; // Mencegah hover saat sedang swipe/drag layar
+window.isPointerDown = false; // Deteksi apakah mouse sedang ditekan
+window.rawPointerDownPos = { x: 0, y: 0 }; // Posisi layar awal saat mouse ditekan
+
+// Helper untuk mengekstrak PIT/BLOCK/STRIP dari BLOCKNAME (Split String)
+window.getBaseBlockName = function(fullBlockName) {
+    if (!fullBlockName) return "UNKNOWN";
+    const parts = fullBlockName.split('/');
+    if (parts.length >= 3) {
+        return `${parts[0]}/${parts[1]}/${parts[2]}`;
+    }
+    return fullBlockName;
+};
 
 // ==========================================
 // PENYIAPAN DOM (INFO PANEL)
@@ -86,6 +99,43 @@ container.addEventListener('contextmenu', (e) => {
 });
 
 // ==========================================
+// OPTIMASI: LOD DINAMIS & EVENT GLOBALS
+// ==========================================
+
+// Fungsi ini menyembunyikan garis (Edges) di atas mesh untuk meringankan GPU saat bergerak
+window.toggleEdgesLOD = function(show) {
+    if (typeof pitReserveGroup === 'undefined' || !pitReserveGroup) return;
+    pitReserveGroup.children.forEach(m => {
+        // Asumsi: Anak pertama (index 0) adalah garis LineSegments
+        if (m.isMesh && m.children.length > 0) {
+            m.children[0].visible = show;
+        }
+    });
+};
+
+// Deteksi Wheel (Scroll Zoom) dari sentuhan / mouse
+let wheelTimeout;
+container.addEventListener('wheel', () => {
+    window.isCameraMoving = true;
+    window.toggleEdgesLOD(false);
+    clearTimeout(wheelTimeout);
+    wheelTimeout = setTimeout(() => {
+        window.isCameraMoving = false;
+        window.toggleEdgesLOD(true);
+    }, 300);
+}, { passive: true });
+
+// Event pelepasan kursor/jari secara global (Bahkan jika jari terlepas di luar layar)
+window.addEventListener('pointerup', () => {
+    window.isPointerDown = false; // Reset status mouse down
+    if (window.isCameraMoving) {
+        window.isCameraMoving = false;
+        window.toggleEdgesLOD(true);
+    }
+});
+
+
+// ==========================================
 // LOGIK PEMILIHAN ASAS (POINTER)
 // ==========================================
 
@@ -118,7 +168,10 @@ window.highlightMesh = function(mesh, isHover) {
 }
 
 window.updateSelectionVisuals = function() { 
-    Object.values(meshes).forEach(mesh => { 
+    // OPTIMASI: Hindari Object.values(meshes) agar tidak alokasi array di RAM berlebihan
+    if (!pitReserveGroup) return;
+    pitReserveGroup.children.forEach(mesh => { 
+        if (!mesh.isMesh) return;
         if (window.selectedMeshes.has(mesh)) mesh.material.emissive.setHex(typeof COLOR_SELECTED !== 'undefined' ? COLOR_SELECTED : 0xffaa00); 
         else mesh.material.emissive.setHex(0x000000); 
     }); 
@@ -133,7 +186,12 @@ window.handleHover = function(intersects, isShiftKey) {
     if (intersects.length > 0) {
         container.style.cursor = 'pointer'; 
         const object = intersects[0].object;
-        const currentHoverKey = isShift ? `BLOCK_${object.userData.blockName}` : `BENCH_${object.userData.blockName}_${object.userData.bench}`;
+        const targetBaseBlock = window.getBaseBlockName(object.userData.blockName);
+        
+        if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+        const targetCenterY = object.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
+
+        const currentHoverKey = isShift ? `BLOCK_${targetBaseBlock}` : `BENCH_ABOVE_${targetBaseBlock}_${targetCenterY.toFixed(1)}`;
         
         if (window.hoveredGroupKey !== currentHoverKey) {
             window.hoveredMeshes.forEach(m => window.highlightMesh(m, false)); 
@@ -146,26 +204,38 @@ window.handleHover = function(intersects, isShiftKey) {
             let totalCoal = 0;
             let uniqueSeams = new Set();
 
-            Object.values(meshes).forEach(m => {
-                if (!m.visible || !pitReserveGroup.visible) return;
-                
-                let isMatch = false;
-                if (isShift) { 
-                    isMatch = m.userData.blockName === object.userData.blockName;
-                } else { 
-                    isMatch = m.userData.blockName === object.userData.blockName && m.userData.bench === object.userData.bench;
-                }
-                
-                if (isMatch) {
-                    window.highlightMesh(m, true); 
-                    window.hoveredMeshes.push(m); 
-                    uniqueBenches.add(m.userData.bench);
-                    uniqueGeoms.add(m.userData.geometryType || 'Pit');
-                    totalOB += m.userData.obVolume || 0;
-                    totalCoal += m.userData.coalMass || 0;
-                    if (m.userData.seam && m.userData.seam !== '-' && m.userData.seam.trim() !== '') uniqueSeams.add(m.userData.seam);
-                }
-            });
+            // OPTIMASI
+            if (pitReserveGroup && pitReserveGroup.visible) {
+                pitReserveGroup.children.forEach(m => {
+                    if (!m.isMesh || !m.visible) return;
+                    
+                    const mBaseBlock = window.getBaseBlockName(m.userData.blockName);
+                    
+                    let isMatch = false;
+                    if (isShift) { 
+                        isMatch = mBaseBlock === targetBaseBlock;
+                    } else { 
+                        // Logika Utama: Ambil semua bench diatasnya, ATAU BENCH YANG SAMA SECARA EKSPLISIT (Tablet/Stylus fallback)
+                        if (mBaseBlock === targetBaseBlock) {
+                            if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                            const mCenterY = m.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
+                            if (mCenterY >= targetCenterY - 0.5 || String(m.userData.bench) === String(object.userData.bench)) {
+                                isMatch = true;
+                            }
+                        }
+                    }
+                    
+                    if (isMatch) {
+                        window.highlightMesh(m, true); 
+                        window.hoveredMeshes.push(m); 
+                        uniqueBenches.add(m.userData.bench);
+                        uniqueGeoms.add(m.userData.geometryType || 'Pit');
+                        totalOB += m.userData.obVolume || 0;
+                        totalCoal += m.userData.coalMass || 0;
+                        if (m.userData.seam && m.userData.seam !== '-' && m.userData.seam.trim() !== '') uniqueSeams.add(m.userData.seam);
+                    }
+                });
+            }
             
             const formatBench = (b) => b;
             const benchArr = Array.from(uniqueBenches).map(formatBench).sort();
@@ -173,7 +243,7 @@ window.handleHover = function(intersects, isShiftKey) {
             const seamStr = Array.from(uniqueSeams).join(', ') || '-';
             
             window.currentHoveredData = {
-                blockname: isShift ? object.userData.blockName : `${object.userData.blockName} (Bench: ${object.userData.bench})`,
+                blockname: isShift ? targetBaseBlock : `${targetBaseBlock} (Bench Above: ${object.userData.bench})`,
                 geom: Array.from(uniqueGeoms).join(', '),
                 bench: benchStr,
                 part: uniqueBenches.size.toString(), 
@@ -207,6 +277,11 @@ window.handleHover = function(intersects, isShiftKey) {
 
 window.onPointerDown = function(event) {
     if (!window.is3DRenderingActive || (typeof isProcessing !== 'undefined' && isProcessing)) return; 
+    
+    // Rekam status mouse down untuk membedakan antara klik (select) dan drag (orbit)
+    window.isPointerDown = true;
+    window.rawPointerDownPos = { x: event.clientX, y: event.clientY };
+
     const pos = window.getMousePos(event);
     const mode = window.activeInteractionMode;
     
@@ -264,11 +339,24 @@ var lastDrawPos = null;
 
 window.onPointerMove = function(event) {
     if (!window.is3DRenderingActive || (typeof isProcessing !== 'undefined' && isProcessing)) return; 
-    const pos = window.getMousePos(event);
-    window.currentMousePos = pos;
     
     const mode = window.activeInteractionMode;
 
+    // Deteksi apakah ini gerakan kamera (Orbit/Pan) atau sekadar klik seleksi
+    // Jika pointer bergerak lebih dari 3 pixel saat ditekan, itu adalah drag (kamera bergerak)
+    if (window.isPointerDown && !window.isDraggingRect && !window.isDrawingPolygon && mode !== 'draw_line' && mode !== 'draw_area') {
+        const dx = Math.abs(event.clientX - window.rawPointerDownPos.x);
+        const dy = Math.abs(event.clientY - window.rawPointerDownPos.y);
+        
+        if ((dx > 3 || dy > 3) && !window.isCameraMoving) {
+            window.isCameraMoving = true;
+            window.toggleEdgesLOD(false); // Sembunyikan tepi HANYA SAAT ROTATE/ORBIT
+        }
+    }
+
+    const pos = window.getMousePos(event);
+    window.currentMousePos = pos;
+    
     if (mode === 'draw_line' || mode === 'draw_area') {
         lastDrawPos = pos;
         if (!isDrawVisualUpdatePending) {
@@ -311,16 +399,25 @@ window.onPointerMove = function(event) {
         return;
     }
 
-    // OPTIMASI THROTTLING: Hanya jalankan raycast kompleks setiap 80ms untuk sentuhan Tablet
+    // LOMPATI HOVER RAYCAST JIKA LAYAR SEDANG DI-SWIPE / DISENTUH AGAR FPS MAKSIMAL
+    if (window.isCameraMoving) return;
+
+    // OPTIMASI THROTTLING
     const currentTime = Date.now();
     if (currentTime - window.lastRaycastTime < 80) return;
     window.lastRaycastTime = currentTime;
 
     mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
-    const meshArray = Object.values(meshes).filter(m => m.visible && pitReserveGroup.visible);
+    
+    let validIntersects = [];
+    // OPTIMASI: Raycaster.intersectObjects() (false) -> jangan baca anak/garis tepinya
+    if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup.visible) {
+        const rawIntersects = raycaster.intersectObjects(pitReserveGroup.children, false);
+        validIntersects = rawIntersects.filter(i => i.object.visible && i.object.isMesh);
+    }
     
     const isShift = event.shiftKey || mode === 'select_block' || mode === 'record_block';
-    window.handleHover(raycaster.intersectObjects(meshArray), isShift);
+    window.handleHover(validIntersects, isShift);
 }
 
 window.onPointerUp = function(event) {
@@ -421,16 +518,40 @@ window.executeClickAction = function(event, pos) {
     const isCtrl = event.ctrlKey || mode === 'record_bench' || mode === 'record_block';
     const isShift = event.shiftKey || mode === 'select_block' || mode === 'record_block';
 
-    const meshArray = Object.values(meshes).filter(m => m.visible && pitReserveGroup.visible);
-    const intersects = raycaster.intersectObjects(meshArray);
+    let intersects = [];
+    if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup.visible) {
+        const rawIntersects = raycaster.intersectObjects(pitReserveGroup.children, false);
+        intersects = rawIntersects.filter(i => i.object.visible && i.object.isMesh);
+    }
 
     if (isCtrl) {
         if (window.selectedMeshes.size > 0) window.recordSelectedMeshes();
         else if (intersects.length > 0) {
             const target = intersects[0].object; 
+            const targetBaseBlock = window.getBaseBlockName(target.userData.blockName);
+            
+            if (!target.geometry.boundingBox) target.geometry.computeBoundingBox();
+            const targetCenterY = target.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
+
             let groupMeshes = [];
-            if (isShift) groupMeshes = Object.values(meshes).filter(m => m.userData.blockName === target.userData.blockName && m.visible);
-            else groupMeshes = Object.values(meshes).filter(m => m.userData.blockName === target.userData.blockName && m.userData.bench === target.userData.bench && m.visible);
+            const childArray = pitReserveGroup ? pitReserveGroup.children : [];
+            
+            groupMeshes = childArray.filter(m => {
+                if (!m.isMesh || !m.visible) return false;
+                const mBaseBlock = window.getBaseBlockName(m.userData.blockName);
+                
+                if (isShift) {
+                    return mBaseBlock === targetBaseBlock;
+                } else {
+                    if (mBaseBlock === targetBaseBlock) {
+                        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                        const mCenterY = m.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
+                        // Pastikan menyertakan bench yang sama juga sebagai fallback
+                        return (mCenterY >= targetCenterY - 0.5 || String(m.userData.bench) === String(target.userData.bench));
+                    }
+                    return false;
+                }
+            });
             
             groupMeshes.forEach(m => window.selectedMeshes.add(m)); 
             window.recordSelectedMeshes();
@@ -441,14 +562,31 @@ window.executeClickAction = function(event, pos) {
     if (intersects.length === 0) { window.clearSelection(); return; }
     
     const target = intersects[0].object; 
-    const targetBlockName = target.userData.blockName; 
-    const targetBench = target.userData.bench;
+    const targetBaseBlock = window.getBaseBlockName(target.userData.blockName);
+    
+    if (!target.geometry.boundingBox) target.geometry.computeBoundingBox();
+    const targetCenterY = target.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
+
     window.clearSelection();
 
-    if (isShift) {
-        Object.values(meshes).forEach(m => { if (m.userData.blockName === targetBlockName && m.visible) window.selectedMeshes.add(m); });
-    } else {
-        Object.values(meshes).forEach(m => { if (m.userData.blockName === targetBlockName && m.userData.bench === targetBench && m.visible) window.selectedMeshes.add(m); });
+    if (pitReserveGroup) {
+        pitReserveGroup.children.forEach(m => {
+            if (!m.isMesh || !m.visible) return;
+            const mBaseBlock = window.getBaseBlockName(m.userData.blockName);
+            
+            if (isShift) {
+                if (mBaseBlock === targetBaseBlock) window.selectedMeshes.add(m);
+            } else {
+                if (mBaseBlock === targetBaseBlock) {
+                    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                    const mCenterY = m.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
+                    // Pilih target dan semua elevasi bench di atasnya, ATAU bench yang sama persis untuk fallback tablet
+                    if (mCenterY >= targetCenterY - 0.5 || String(m.userData.bench) === String(target.userData.bench)) {
+                        window.selectedMeshes.add(m);
+                    }
+                }
+            }
+        });
     }
 
     window.updateSelectionVisuals(); 
@@ -487,8 +625,13 @@ window.processAreaSelection = function(rectBounds, polyPoints) {
     window.clearSelection(); 
     scene.updateMatrixWorld(true);
     
-    Object.values(meshes).forEach(mesh => {
-        if (!mesh.visible || !pitReserveGroup.visible) return;
+    if (!pitReserveGroup || !pitReserveGroup.visible) return;
+    
+    const hitTargets = [];
+
+    // TAHAP 1: Deteksi target mana saja yang kena box/polygon selection
+    pitReserveGroup.children.forEach(mesh => {
+        if (!mesh.visible || !mesh.isMesh) return;
         if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
         
         const center = new THREE.Vector3(); 
@@ -506,13 +649,30 @@ window.processAreaSelection = function(rectBounds, polyPoints) {
             isInside = window.pointInPolygon({x: sx, y: sy}, polyPoints); 
         }
         
-        if (isInside) {
-            const gKey = `${mesh.userData.blockName}_${mesh.userData.bench}`;
-            Object.values(meshes).forEach(m => { 
-                if (`${m.userData.blockName}_${m.userData.bench}` === gKey && m.visible) window.selectedMeshes.add(m); 
-            });
-        }
+        if (isInside) hitTargets.push(mesh);
     });
+
+    // TAHAP 2: Pilih Target & Bench Di Atasnya
+    hitTargets.forEach(target => {
+        const targetBaseBlock = window.getBaseBlockName(target.userData.blockName);
+        if (!target.geometry.boundingBox) target.geometry.computeBoundingBox();
+        const targetCenterY = target.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
+
+        pitReserveGroup.children.forEach(m => {
+            if (!m.isMesh || !m.visible) return;
+            const mBaseBlock = window.getBaseBlockName(m.userData.blockName);
+
+            if (mBaseBlock === targetBaseBlock) {
+                if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                const mCenterY = m.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
+                // Tambahan fallback pengecekan string bench sama 
+                if (mCenterY >= targetCenterY - 0.5 || String(m.userData.bench) === String(target.userData.bench)) {
+                    window.selectedMeshes.add(m);
+                }
+            }
+        });
+    });
+
     window.updateSelectionVisuals(); 
     window.displaySelectionInfo();
 }
@@ -563,7 +723,8 @@ window.renderInfoPanel = function() {
         let uniqueBenches = new Set(); let uniqueGeoms = new Set(); let uniqueBlocks = new Set(); let uniqueSeams = new Set();
 
         window.selectedMeshes.forEach(m => {
-            uniqueBenches.add(m.userData.bench); uniqueGeoms.add(m.userData.geometryType || 'Pit'); uniqueBlocks.add(m.userData.blockName);
+            uniqueBenches.add(m.userData.bench); uniqueGeoms.add(m.userData.geometryType || 'Pit'); 
+            uniqueBlocks.add(window.getBaseBlockName(m.userData.blockName)); 
             obData += m.userData.obVolume || 0; coalData += m.userData.coalMass || 0;
             if (m.userData.seam && m.userData.seam !== '-' && m.userData.seam.trim() !== '') uniqueSeams.add(m.userData.seam);
         });
@@ -606,7 +767,7 @@ window.recordSelectedMeshes = function() {
     
     window.selectedMeshes.forEach(m => {
         combinedOB += m.userData.obVolume || 0; combinedCoal += m.userData.coalMass || 0; 
-        uniqueBlocks.add(m.userData.blockName);
+        uniqueBlocks.add(window.getBaseBlockName(m.userData.blockName));
         m.userData.isRecorded = true; m.visible = false; 
         m.material.emissive.setHex(0x000000); 
         recordedMeshesInStep.push(m);
@@ -660,10 +821,13 @@ window.redoLastUndo = function() {
 }
 
 window.resetSequenceAndView = function() {
-    Object.values(meshes).forEach(mesh => {
-        mesh.userData.isRecorded = false; const isResource = (mesh.userData.burden || '').toUpperCase() === 'RESOURCE';
-        mesh.visible = isResource ? isCoalVisible : isOBVisible; mesh.material.emissive.setHex(0x000000);
-    });
+    if (pitReserveGroup) {
+        pitReserveGroup.children.forEach(mesh => {
+            if(!mesh.isMesh) return;
+            mesh.userData.isRecorded = false; const isResource = (mesh.userData.burden || '').toUpperCase() === 'RESOURCE';
+            mesh.visible = isResource ? isCoalVisible : isOBVisible; mesh.material.emissive.setHex(0x000000);
+        });
+    }
     
     window.selectedMeshes.clear(); window.sequenceRecords = []; window.sequenceTotalOB = 0; 
     window.sequenceTotalCoal = 0; window.sequenceCounter = 1; window.undoStack = []; window.redoStack = []; 
@@ -677,7 +841,9 @@ window.resetSequenceAndView = function() {
     if (typeof finishedDrawings !== 'undefined') finishedDrawings = [];
     if (typeof selectedDrawing !== 'undefined') selectedDrawing = null;
 
-    if (Object.keys(meshes).length > 0) {
+    // OPTIMASI Iterasi objek jika diperlukan pada logic selanjutnya
+    const hasMeshes = pitReserveGroup && pitReserveGroup.children.some(m => m.isMesh);
+    if (hasMeshes) {
         const pitProcSelect = document.getElementById('pit-processing-select');
         if (pitProcSelect) {
             if (pitProcSelect.value === 'basic' && window.resetToBasicColors) window.resetToBasicColors();

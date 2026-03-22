@@ -412,8 +412,7 @@ window.updateLayerUI = function() {
             wrapper.className = "flex flex-col gap-0.5";
             wrapper.appendChild(mainRow);
             
-            const currentMode = document.getElementById('pit-processing-select').value;
-            const hasLabels = currentMode !== 'basic';
+            const hasLabels = true; // Labels selalu tersedia untuk CSV
             
             const obEye = isOBVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
             const coalEye = isCoalVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
@@ -586,13 +585,6 @@ function executeDeleteLayer(layerId) {
                 filenameUI.classList.remove('text-slate-200');
                 filenameUI.classList.add('text-slate-400');
             }
-
-            const selectEl = document.getElementById('pit-processing-select');
-            selectEl.value = 'basic';
-            selectEl.dispatchEvent(new Event('change'));
-            document.querySelector('#pit-processing-select option[value="resgraphic_incremental"]').disabled = true;
-            document.querySelector('#pit-processing-select option[value="resgraphic_cumulative"]').disabled = true;
-            document.querySelector('#pit-processing-select option[value="quality"]').disabled = true;
         } else {
             scene.remove(layer.threeObject);
             layer.threeObject.traverse((child) => {

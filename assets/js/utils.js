@@ -9,11 +9,13 @@ function showFullscreenLoading(message) {
         overlay.className = 'fixed inset-0 bg-slate-900/90 z-[9999] flex flex-col items-center justify-center backdrop-blur-sm hidden';
         overlay.innerHTML = `
             <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4 shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
-            <h2 id="rk-loading-text" class="text-white font-bold text-[13px] tracking-wider animate-pulse">Loading...</h2>
+            <h2 id="rk-loading-text" class="text-white font-bold text-[13px] tracking-wider animate-pulse text-center">Loading...</h2>
+            <div id="rk-loading-progress" class="text-blue-400 font-bold text-[12px] tracking-wide mt-2 text-center empty:hidden"></div>
         `;
         document.body.appendChild(overlay);
     }
     document.getElementById('rk-loading-text').textContent = message;
+    document.getElementById('rk-loading-progress').textContent = ''; // Kosongkan progress bawaan saat muncul pertama kali
     overlay.classList.remove('hidden');
     overlay.classList.add('flex');
 }
@@ -25,6 +27,13 @@ function hideFullscreenLoading() {
         overlay.classList.remove('flex');
     }
 }
+
+// Fungsi baru khusus untuk mengupdate angka progress di loading screen
+function updateLoadingProgress(text) {
+    const progressEl = document.getElementById('rk-loading-progress');
+    if (progressEl) progressEl.textContent = text;
+}
+window.updateLoadingProgress = updateLoadingProgress;
 
 function showCustomConfirm(message, onConfirm) {
     let modal = document.getElementById('rk-custom-confirm');

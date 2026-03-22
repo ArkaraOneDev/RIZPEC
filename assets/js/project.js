@@ -56,8 +56,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const landingContainer = document.getElementById('landing-new-project-container');
 
     if (landingForm && landingInput) {
+        
+        // FITUR BARU: Format otomatis UPPERCASE dan spasi menjadi underscore (_)
+        landingInput.addEventListener('input', function() {
+            this.value = this.value.toUpperCase().replace(/\s+/g, '_');
+        });
+
         landingForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            // Value sudah diformat oleh event 'input' di atas
             const val = landingInput.value.trim();
             if (val) {
                 if (typeof window.resetFileTabForNewProject === 'function') {
@@ -143,7 +150,7 @@ function getBaseProjectData() {
     }
 
     return {
-        version: "1.4", // Diperbarui untuk fitur save state Pit List
+        version: "1.5", // Diperbarui untuk fitur save state Pit List & World Origin
         csvFileName: currentFileName,
         csvHeaders: typeof csvHeaders !== 'undefined' ? csvHeaders : [], 
         pitStates: cleanPitStates,
@@ -151,6 +158,9 @@ function getBaseProjectData() {
         
         // Simpan status check/uncheck dari array window.loadedPits
         loadedPits: Array.from(window.loadedPits || []),
+        
+        // TAMBAHAN: Simpan worldOrigin ke file .riz agar koordinat pit tidak tertumpuk saat load
+        worldOrigin: window.worldOrigin || { x: 0, y: 0, z: 0, isSet: false },
         
         // Rekam Konfigurasi Kamera & Visualisasi
         cameraState: {
@@ -190,7 +200,11 @@ function getBaseProjectData() {
             layer: getCheck('cb-layout-layer'),
             info: getCheck('cb-layout-info'),
             helper: getCheck('cb-layout-helper')
-        }
+        },
+        // TAMBAHAN: Rekam konfigurasi Palette dan UI Mode pada file-pit.js
+        pitColorModes: JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {},
+        burdenPalette: JSON.parse(localStorage.getItem('rizpec_burden_palette')) || null,
+        subsetPalette: JSON.parse(localStorage.getItem('rizpec_subset_palette')) || null
         // pitReserve, pitDataCSVs dan dxfLayers akan ditambahkan melalui Stream
     };
 }
@@ -403,7 +417,7 @@ async function executeProgressiveStreamSave(fileHandle, fileName) {
 
         // Download otomatis untuk fallback browser
         if (!fileHandle) {
-            const finalBlob = new Blob(fallbackChunks, { type: "application/gzip" });
+            const finalBlob = new Blob(fallbackChunks, { type: "application/octet-stream" });
             const url = URL.createObjectURL(finalBlob);
             const a = document.createElement('a');
             a.href = url;
@@ -487,7 +501,7 @@ function resetFullProject() {
     }
 
     // 4. Reset Variabel State Sequences
-    if (typeof worldOrigin !== 'undefined') worldOrigin = { x: 0, y: 0, z: 0, isSet: false };
+    window.worldOrigin = { x: 0, y: 0, z: 0, isSet: false }; // FIX
     window.currentCsvFileName = null;
     
     window.sequenceRecords = [];
@@ -676,6 +690,13 @@ async function processLoadedData(data, fileName) {
 
     resetFullProject();
 
+    // FIX: Pulihkan worldOrigin dari memori file .riz agar pit baru sinkron posisinya
+    if (data.worldOrigin) {
+        window.worldOrigin = data.worldOrigin;
+    } else {
+        window.worldOrigin = { x: 0, y: 0, z: 0, isSet: false };
+    }
+
     // Memulihkan Status Pit List (Check/Uncheck) dari .riz file (Bukan dari localStorage)
     if (data.loadedPits) {
         window.loadedPits = new Set(data.loadedPits);
@@ -685,6 +706,20 @@ async function processLoadedData(data, fileName) {
     }
     // Rendered Pits disamakan dengan state loadedPits
     window.renderedPits = new Set(window.loadedPits);
+
+    // --- TAMBAHAN: Memulihkan Konfigurasi Warna Palette ---
+    if (data.pitColorModes) {
+        localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(data.pitColorModes));
+        window.pitColorModes = data.pitColorModes;
+    }
+    if (data.burdenPalette) {
+        localStorage.setItem('rizpec_burden_palette', JSON.stringify(data.burdenPalette));
+        window.burdenPalette = data.burdenPalette;
+    }
+    if (data.subsetPalette) {
+        localStorage.setItem('rizpec_subset_palette', JSON.stringify(data.subsetPalette));
+        window.subsetPalette = data.subsetPalette;
+    }
 
     if (data.cameraState && typeof controls !== 'undefined' && typeof camera !== 'undefined') {
         camera.position.set(data.cameraState.position.x, data.cameraState.position.y, data.cameraState.position.z);
@@ -924,12 +959,19 @@ async function processLoadedData(data, fileName) {
 
             const mesh = new THREE.Mesh(geo, mat);
             mesh.userData = m.userData;
+            
+            // OPTIMASI: Blok tidak bergerak, cegah kalkulasi render matriks berulang
+            mesh.matrixAutoUpdate = false;
+            mesh.updateMatrix();
 
             // Menyembunyikan Geometri berdasarkan status loadedPits
             if (m.userData.blockKey) {
                 const pitName = m.userData.blockKey.split('/')[0];
-                if (pitName && data.pitStates && data.pitStates[pitName]) {
-                    mesh.visible = window.loadedPits.has(pitName);
+                const pitIdFromUserData = m.userData.pitId;
+                const targetPit = pitIdFromUserData || pitName;
+                
+                if (targetPit) {
+                    mesh.visible = window.loadedPits.has(targetPit);
                 }
             }
 
@@ -939,6 +981,11 @@ async function processLoadedData(data, fileName) {
                 polygonOffset: true, polygonOffsetFactor: isCoal ? -3 : 0, polygonOffsetUnits: isCoal ? -3 : 0
             });
             const line = new THREE.LineSegments(edges, lineMat);
+            
+            // OPTIMASI: Matikan auto update untuk garis pinggir
+            line.matrixAutoUpdate = false;
+            line.updateMatrix();
+            
             mesh.add(line);
 
             pitReserveGroup.add(mesh);
