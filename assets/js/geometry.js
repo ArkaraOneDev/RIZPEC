@@ -1,6 +1,7 @@
 // ==========================================
 // GEOMETRY BUILDER & MANAGER (Pit Reserve)
 // DENGAN WEB WORKER, DYNAMIC TIME-CHUNK & MATERIAL CACHING
+// OPTIMIZED FOR MOBILE/TABLET (ULTRA OOM PREVENTION)
 // ==========================================
 
 // Track state Pit mana saja yang saat ini sedang diload dan dirender
@@ -18,8 +19,7 @@ window.unloadPitGeometry = function(pitId) {
     if (typeof meshes !== 'undefined' && typeof pitReserveGroup !== 'undefined') {
         const keysToDelete = [];
         
-        // FIX NAMA NORMALISASI: Cocokkan string menggunakan underscore & spasi 
-        // agar tidak gagal menemukan nama folder yang memiliki spasi ganda ("Pit  1" vs "Pit 1")
+        // FIX NAMA NORMALISASI
         const targetNormalized = pitId.replace(/\s+/g, '_').replace(/_/g, ' ');
 
         Object.keys(meshes).forEach(key => {
@@ -46,7 +46,7 @@ window.unloadPitGeometry = function(pitId) {
         
         keysToDelete.forEach(k => delete meshes[k]);
 
-        // RESET World Origin jika semua pit sudah dihapus / tidak ada lagi yang dimuat
+        // RESET World Origin jika semua pit sudah dihapus
         if (Object.keys(meshes).length === 0) {
             window.worldOrigin = { x: 0, y: 0, z: 0, isSet: false };
         }
@@ -55,15 +55,12 @@ window.unloadPitGeometry = function(pitId) {
     window.recalculateGlobalSums();
     if (typeof window.resetSequenceAndView === 'function') window.resetSequenceAndView();
     
-    // FIX RENDER PAKSA: Jika aplikasi tidak menggunakan animasi loop (requestAnimationFrame terus menerus),
-    // Menghapus objek dari scene tidak akan membersihkan layar sampai kamera diputar.
-    // Kode ini memaksa renderer untuk segera merefresh tampilan.
     if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
         requestAnimationFrame(() => renderer.render(scene, camera));
     }
 };
 
-// 2. Menghitung Ulang Summary UI Setelah Pemuatan/Pengahapusan
+// 2. Menghitung Ulang Summary UI
 window.recalculateGlobalSums = function() {
     let totalOB = 0, totalCoal = 0;
     let uniqueBlocks = new Set();
@@ -90,9 +87,8 @@ window.recalculateGlobalSums = function() {
     if (elSumSr) elSumSr.textContent = totalCoal > 0 ? (totalOB / totalCoal).toFixed(2) : "0.00";
 };
 
-// 3. Poller untuk Mengeksekusi Mesh Loading (DENGAN SISTEM ANTREAN / LOCK)
+// 3. Poller untuk Mengeksekusi Mesh Loading
 window.renderPendingPits = async function() {
-    // Jika sedang merender pit lain, abaikan panggilan ini agar tidak tumpang tindih (Race Condition)
     if (window.isRenderingPits) return; 
     window.isRenderingPits = true;
     
@@ -103,23 +99,21 @@ window.renderPendingPits = async function() {
         if (typeof showFullscreenLoading === 'function') showFullscreenLoading("Membangun 3D Geometry di Background...");
         await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Proses satu persatu agar World Origin di-set dengan benar oleh Pit pertama
         while (pending.length > 0) {
             for (let pit of pending) {
-                window.renderedPits.add(pit); // Tandai segera agar tidak diproses ganda
+                window.renderedPits.add(pit); 
                 try {
                     await window.buildPitMesh(pit);
                 } catch(err) {
-                    window.renderedPits.delete(pit); // Rollback jika gagal
+                    window.renderedPits.delete(pit); 
                     console.error("Gagal merender pit:", err);
                 }
             }
-            // Cek lagi apakah ada pit baru yang dicentang selama loop sebelumnya berjalan
             pending = [...window.loadedPits].filter(p => !window.renderedPits.has(p));
         }
 
     } finally {
-        window.isRenderingPits = false; // Buka kembali kunci antrean
+        window.isRenderingPits = false;
         if (typeof hideFullscreenLoading === 'function') hideFullscreenLoading();
         const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
         if (tabBtn) tabBtn.classList.remove('bg-emerald-600/30', 'text-emerald-300', 'animate-pulse');
@@ -135,12 +129,10 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// 4. Mengekstrak dan membangun Mesh menggunakan WEB WORKER (Pencegah OOM)
+// 4. Mengekstrak dan membangun Mesh menggunakan WEB WORKER
 window.buildPitMesh = function(pitId) {
     return new Promise(async (resolve, reject) => {
         try {
-            // FIX: PULIHKAN WORLD ORIGIN DARI CACHE MESH JIKA PROJECT BARU SAJA DI-LOAD
-            // Ini mencegah Pit baru menumpuk di 0,0,0 karena kehilangan acuan koordinat asli
             if (!window.worldOrigin.isSet && typeof meshes !== 'undefined') {
                 const existingKeys = Object.keys(meshes);
                 for (let i = 0; i < existingKeys.length; i++) {
@@ -158,8 +150,8 @@ window.buildPitMesh = function(pitId) {
             }
 
             const key = `rizpec_entity_${pitId.replace(/\s+/g, '_')}`;
-            const csvData = await RizpecDB.get(key); 
-            if (!csvData) throw new Error("Data CSV tidak ditemukan di database cache.");
+            const csvDataDB = await RizpecDB.get(key); 
+            if (!csvDataDB) throw new Error("Data CSV tidak ditemukan di database cache.");
 
             if (typeof isProcessing !== 'undefined') isProcessing = true;
 
@@ -169,7 +161,7 @@ window.buildPitMesh = function(pitId) {
             const workerCode = `
                 self.onmessage = function(e) {
                     try {
-                        const { csvData, pitId, stupaMode, extrusionHeight, globalCenter } = e.data;
+                        let { csvData, pitId, stupaMode, extrusionHeight, globalCenter } = e.data;
                         
                         let firstLineEnd = csvData.indexOf('\\n');
                         if (firstLineEnd === -1) firstLineEnd = csvData.length;
@@ -188,7 +180,6 @@ window.buildPitMesh = function(pitId) {
                         const idxE2 = getIdx('EASTING_2'); const idxN2 = getIdx('NORTHING_2'); const idxT2 = getIdx('TOPELEVATION_2'); const idxB2 = getIdx('BOTELEVATION_2');
                         const idxE3 = getIdx('EASTING_3'); const idxN3 = getIdx('NORTHING_3'); const idxT3 = getIdx('TOPELEVATION_3'); const idxB3 = getIdx('BOTELEVATION_3');
 
-                        // FIX: Prioritaskan 'ID BLOCK' (Kolom bentukan sistem) alih-alih 'BLOCKNAME' bawaan user
                         const idxBlock = getIdx('ID BLOCK', ['BLOCKNAME']); 
                         const idxBench = getIdx('ID BENCH', ['BENCH']);
                         const idxSeam = getIdx('ID SEAM', ['SEAM']); 
@@ -198,7 +189,7 @@ window.buildPitMesh = function(pitId) {
                         const idxRes = getIdx('PRO_RATA_RESOURCE'); const idxWaste = getIdx('PRO_RATA_WASTE');
 
                         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-                        const blocks = {};
+                        let blocks = {};
 
                         function parseBenchElevation(benchStr) {
                             if (!benchStr) return null;
@@ -212,7 +203,6 @@ window.buildPitMesh = function(pitId) {
                             return null;
                         }
 
-                        // HIGH-PERFORMANCE CSV PARSING: Tidak menggunakan split('\\n') menghindari memory overhead
                         let lastIndex = firstLineEnd + 1;
                         while (lastIndex < csvData.length) {
                             let nextIndex = csvData.indexOf('\\n', lastIndex);
@@ -250,12 +240,11 @@ window.buildPitMesh = function(pitId) {
                             else if (burden !== '') burden = 'WASTE';
                             else burden = resVal > 0 ? 'RESOURCE' : 'WASTE';
 
-                            // Gunakan blockName sebagai key yang kuat (Kini formatnya PIT/BLOCK/STRIP/BENCH/SEAM/SUBSET)
                             const blockKey = pitId + '_' + blockName + '_' + burden;
 
                             if (!blocks[blockKey]) {
                                 blocks[blockKey] = {
-                                    info: { pitId: pitId, blockKey: blockKey, blockName: blockName, burden: burden, seam: seam, subset: subset, bench: bench, obVolume: 0, coalMass: 0, rawRows: [] },
+                                    info: { pitId: pitId, blockKey: blockKey, blockName: blockName, burden: burden, seam: seam, subset: subset, bench: bench, obVolume: 0, coalMass: 0 },
                                     triangles: []
                                 };
                             }
@@ -263,9 +252,6 @@ window.buildPitMesh = function(pitId) {
                             if (burden === 'RESOURCE') blocks[blockKey].info.coalMass += resVal;
                             else blocks[blockKey].info.obVolume += wasteVal;
                             
-                            // Simpan row untuk kalkulasi Quality jika diperlukan ke depannya
-                            blocks[blockKey].info.rawRows.push(row.reduce((acc, val, i) => { acc[headers[i]] = val; return acc; }, {}));
-
                             let p;
                             if (stupaMode) {
                                 let topElev = parseBenchElevation(bench);
@@ -288,23 +274,25 @@ window.buildPitMesh = function(pitId) {
                             blocks[blockKey].triangles.push(p);
                         }
 
+                        // --- OPTIMASI EKSTREM 1: Bersihkan string mentah raksasa dari Memori/RAM seketika!
+                        csvData = null; 
+
                         const bounds = { minX, maxX, minY, maxY, minZ, maxZ };
                         
-                        // FIX: Gunakan Global Center jika ada, jika belum hitung tengah dari pit pertama
                         const cX = globalCenter ? globalCenter.x : (minX + maxX) / 2; 
                         const cY = globalCenter ? globalCenter.y : (minY + maxY) / 2; 
                         const cZ = globalCenter ? globalCenter.z : (minZ + maxZ) / 2;
 
-                        const processedBlocks = [];
-                        const transferables = [];
+                        let processedBlocks = [];
+                        let transferables = [];
 
                         Object.keys(blocks).forEach(blockKey => {
                             const blockData = blocks[blockKey];
                             const positions = []; const edgesCount = {}; const edgeVertices = {};
 
                             const addEdge = (pA, pB) => {
-                                const round = (val) => Math.round(val * 1000) / 1000;
-                                const keyA = round(pA.t[0]) + '_' + round(pA.t[2]); const keyB = round(pB.t[0]) + '_' + round(pB.t[2]);
+                                const keyA = Math.round(pA.t[0]*10) + '_' + Math.round(pA.t[2]*10); 
+                                const keyB = Math.round(pB.t[0]*10) + '_' + Math.round(pB.t[2]*10);
                                 const edgeKey = keyA < keyB ? keyA+'|'+keyB : keyB+'|'+keyA;
                                 if (!edgesCount[edgeKey]) { edgesCount[edgeKey] = 0; edgeVertices[edgeKey] = [pA, pB]; }
                                 edgesCount[edgeKey]++;
@@ -327,10 +315,20 @@ window.buildPitMesh = function(pitId) {
                             transferables.push(positionsArray.buffer);
 
                             processedBlocks.push({ blockKey: blockKey, info: blockData.info, positions: positionsArray });
+                            
+                            // --- OPTIMASI EKSTREM 2: Mencegah Memory Spike! ---
+                            // Hapus referensi data Object mentah per-blok SATU PER SATU segera setelah berubah jadi Array Biner
+                            // Ini membuat kurva RAM tetap datar di tablet, mencegah lonjakan RAM di akhir proses.
+                            delete blocks[blockKey];
                         });
 
-                        // Kirim balik center yang digunakan agar main thread bisa menyimpannya
+                        // Sisa blok root
+                        blocks = null; 
+
                         self.postMessage({ success: true, blocks: processedBlocks, bounds: bounds, centerUsed: {x: cX, y: cY, z: cZ} }, transferables);
+                        
+                        processedBlocks = null;
+                        transferables = null;
 
                     } catch (err) { self.postMessage({ error: err.message }); }
                 };
@@ -348,11 +346,10 @@ window.buildPitMesh = function(pitId) {
                     reject(new Error(e.data.error)); return;
                 }
 
-                // FIX WEB WORKER RACE CONDITION
                 const safeIdCheck = pitId.replace(/\s+/g, '_');
                 const isStillValid = localStorage.getItem(`rizpec_build_type_${safeIdCheck}`) !== null;
                 if (!isStillValid) {
-                    console.warn(`Pit "${pitId}" telah dihapus selama worker berjalan. Membatalkan render scene agar tidak menjadi ghost mesh.`);
+                    console.warn(`Pit "${pitId}" telah dihapus. Membatalkan render.`);
                     if (typeof isProcessing !== 'undefined') isProcessing = false;
                     window.loadedPits.delete(pitId);
                     window.renderedPits.delete(pitId);
@@ -360,9 +357,8 @@ window.buildPitMesh = function(pitId) {
                     return;
                 }
 
-                const { blocks, bounds, centerUsed } = e.data;
+                let { blocks, bounds, centerUsed } = e.data;
 
-                // Terapkan worldOrigin dari Pit pertama yang berhasil di-load secara mutlak
                 if (!window.worldOrigin.isSet && centerUsed) {
                     window.worldOrigin = { x: centerUsed.x, y: centerUsed.y, z: centerUsed.z, isSet: true };
                 }
@@ -373,19 +369,16 @@ window.buildPitMesh = function(pitId) {
                 const opacCoal = typeof coalOpacity !== 'undefined' ? coalOpacity : 1;
                 const opacOB = typeof obOpacity !== 'undefined' ? obOpacity : 1;
 
-                // Ambil Data Color Palette dari LocalStorage
                 const pitColorModes = JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {};
                 const burdenPalette = JSON.parse(localStorage.getItem('rizpec_burden_palette')) || [];
                 const subsetPalette = JSON.parse(localStorage.getItem('rizpec_subset_palette')) || [];
 
-                // --- OPTIMASI 1: MATERIAL CACHING (HEMAT RAM & MENCEGAH GPU OVERLOAD) ---
-                // Menggunakan kembali material yang sama untuk kategori yang sama.
                 const sharedMaterials = {};
                 const sharedLineMaterials = {};
 
-                // --- OPTIMASI 2: TIME-BASED CHUNKING (DYNAMIC PERFORMANCE) ---
                 let currentIndex = 0;
-                const TIME_BUDGET_MS = 30; // Batas maksimal eksekusi 30 milidetik per frame (Memaksimalkan PC kencang)
+                
+                const TIME_BUDGET_MS = 15; 
                 
                 const statEl = document.getElementById('stat-new-entity');
                 const originalStatText = statEl ? statEl.textContent : '';
@@ -396,21 +389,39 @@ window.buildPitMesh = function(pitId) {
                         if (typeof isProcessing !== 'undefined') isProcessing = false;
                         window.loadedPits.delete(pitId);
                         window.renderedPits.delete(pitId);
+                        blocks = null;
                         resolve();
                         return;
                     }
 
                     const frameStartTime = performance.now();
 
-                    // Loop sebanyak mungkin SELAMA tidak melebihi alokasi waktu (30ms) agar UI tidak freeze
                     while (currentIndex < blocks.length && (performance.now() - frameStartTime < TIME_BUDGET_MS)) {
                         const b = blocks[currentIndex];
                         let geometry = new THREE.BufferGeometry();
                         geometry.setAttribute('position', new THREE.BufferAttribute(b.positions, 3));
                         
-                        // FUNGSI BERAT: mergeVertices
-                        if (THREE.BufferGeometryUtils) geometry = THREE.BufferGeometryUtils.mergeVertices(geometry, stupaMode ? 0.01 : 0.5); 
-                        geometry.computeVertexNormals(); 
+                        const vertexCount = b.positions.length / 3;
+                        const SAFE_VERTEX_LIMIT = 30000; 
+                        
+                        if (THREE.BufferGeometryUtils && vertexCount <= SAFE_VERTEX_LIMIT) {
+                            try {
+                                const mergedGeom = THREE.BufferGeometryUtils.mergeVertices(geometry, stupaMode ? 0.01 : 0.5);
+                                geometry.dispose(); 
+                                geometry = mergedGeom;
+                            } catch (mergeErr) {
+                                console.warn("Skip mergeVertices: Memori penuh", mergeErr);
+                            }
+                        } else if (vertexCount > SAFE_VERTEX_LIMIT) {
+                            console.warn(`Blok ${b.info.blockKey} terlalu berat (${vertexCount} vertex). Skip mergeVertices untuk hindari OOM di Tablet.`);
+                        }
+                        
+                        // --- OPTIMASI EKSTREM 3: HAPUS .computeVertexNormals() ---
+                        // Fitur ini secara diam-diam membuang 50% RAM Geometri hanya untuk menyimpan 
+                        // vector normals yang sama sekali TIDAK DIGUNAKAN oleh Three.js jika 
+                        // material di set ke `flatShading: true`.
+                        // geometry.computeVertexNormals(); // <- Dihapus total.
+                        
                         geometry.computeBoundingBox();
 
                         const blockPitId = b.info.pitId;
@@ -430,7 +441,6 @@ window.buildPitMesh = function(pitId) {
 
                         const isCoal = burden === 'RESOURCE';
                         
-                        // --- GUNAKAN CACHE MATERIAL ---
                         const matKey = `${blockPitId}_${burden}_${subset}`;
                         let material = sharedMaterials[matKey];
                         
@@ -445,40 +455,39 @@ window.buildPitMesh = function(pitId) {
                         }
 
                         const mesh = new THREE.Mesh(geometry, material);
-                        
                         mesh.userData = { ...b.info, isRecorded: false, centerOffset: centerUsed };
-                        
                         mesh.matrixAutoUpdate = false;
                         mesh.updateMatrix();
 
-                        // --- GUNAKAN CACHE LINE MATERIAL ---
-                        const lineMatKey = isCoal ? 'coal' : 'ob';
-                        let lineMaterial = sharedLineMaterials[lineMatKey];
-                        
-                        if (!lineMaterial) {
-                            lineMaterial = new THREE.LineBasicMaterial({ 
-                                color: 0x111111, opacity: 0.9, transparent: true, linewidth: 1,
-                                polygonOffset: true, polygonOffsetFactor: isCoal ? -3 : 0, polygonOffsetUnits: isCoal ? -3 : 0
-                            });
-                            sharedLineMaterials[lineMatKey] = lineMaterial;
-                        }
+                        if (vertexCount <= SAFE_VERTEX_LIMIT * 1.5) {
+                            const lineMatKey = isCoal ? 'coal' : 'ob';
+                            let lineMaterial = sharedLineMaterials[lineMatKey];
+                            
+                            if (!lineMaterial) {
+                                lineMaterial = new THREE.LineBasicMaterial({ 
+                                    color: 0x111111, opacity: 0.9, transparent: true, linewidth: 1,
+                                    polygonOffset: true, polygonOffsetFactor: isCoal ? -3 : 0, polygonOffsetUnits: isCoal ? -3 : 0
+                                });
+                                sharedLineMaterials[lineMatKey] = lineMaterial;
+                            }
 
-                        const edges = new THREE.EdgesGeometry(geometry, stupaMode ? 10 : 60); 
-                        const line = new THREE.LineSegments(edges, lineMaterial);
-                        
-                        line.matrixAutoUpdate = false;
-                        line.updateMatrix();
-                        mesh.add(line);
+                            const edges = new THREE.EdgesGeometry(geometry, stupaMode ? 10 : 60); 
+                            const line = new THREE.LineSegments(edges, lineMaterial);
+                            line.matrixAutoUpdate = false;
+                            line.updateMatrix();
+                            mesh.add(line);
+                        }
 
                         if (typeof pitReserveGroup !== 'undefined' && typeof meshes !== 'undefined') {
                             pitReserveGroup.add(mesh); 
                             meshes[b.blockKey] = mesh;
                         }
                         
+                        b.positions = null;
+                        
                         currentIndex++;
                     }
 
-                    // Update UI Progress Loading 3D & Stat Panel
                     const currentCount = Math.min(currentIndex, blocks.length);
                     const percent = Math.round((currentCount / blocks.length) * 100);
 
@@ -491,10 +500,10 @@ window.buildPitMesh = function(pitId) {
                     }
 
                     if (currentIndex < blocks.length) {
-                        // Teruskan ke frame render berikutnya agar layar tidak freeze
                         requestAnimationFrame(processChunk);
                     } else {
-                        // --- PROSES SELESAI ---
+                        blocks = null;
+
                         if (statEl && statEl.textContent.includes('Merender 3D')) {
                             statEl.textContent = originalStatText; 
                         }
@@ -509,7 +518,6 @@ window.buildPitMesh = function(pitId) {
                             if (typeof updateLayerUI === 'function') updateLayerUI();
                         }
 
-                        // Fokus kamera ke SEMUA pit yang sedang dimuat
                         if (typeof meshes !== 'undefined' && Object.keys(meshes).length > 0) {
                             const box = new THREE.Box3();
                             Object.values(meshes).forEach(mesh => box.expandByObject(mesh));
@@ -548,7 +556,6 @@ window.buildPitMesh = function(pitId) {
                     }
                 };
                 
-                // Mulai siklus asinkron chunking render dengan optimasi waktu
                 processChunk();
             };
 
@@ -556,15 +563,14 @@ window.buildPitMesh = function(pitId) {
                 URL.revokeObjectURL(workerUrl);
                 if (typeof isProcessing !== 'undefined') isProcessing = false;
                 console.error("Fatal Web Worker Error:", err);
-                reject(new Error("Memori Perangkat Penuh saat mengekstrak titik koordinat."));
+                reject(new Error("Memori Perangkat Penuh saat mengekstrak titik koordinat. (Data terlalu besar untuk RAM device)"));
             };
 
-            // Beritahu Worker apa global center dunia 3D saat ini dari variabel yang valid
             const globalCenter = window.worldOrigin.isSet
                 ? { x: window.worldOrigin.x, y: window.worldOrigin.y, z: window.worldOrigin.z }
                 : null;
 
-            worker.postMessage({ csvData, pitId, stupaMode, extrusionHeight, globalCenter });
+            worker.postMessage({ csvData: csvDataDB, pitId, stupaMode, extrusionHeight, globalCenter });
 
         } catch (err) {
             const cb = document.querySelector(`.pit-checkbox[data-pit="${pitId}"]`);

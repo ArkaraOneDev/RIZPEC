@@ -104,9 +104,33 @@ function init3D() {
     camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100000);
     camera.position.set(0, 500, 500);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+    // --- OPTIMASI GPU KHUSUS TABLET & MOBILE (ULTRA LOW-LEVEL TWEAKS) ---
+    // Deteksi apakah perangkat adalah Tablet/Mobile (berdasarkan User Agent & Touch points)
+    const isMobileOrTablet = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    renderer = new THREE.WebGLRenderer({ 
+        // 1. Matikan antialias di perangkat mobile untuk mencegah FPS drop drastis pada model CAD berat.
+        antialias: !isMobileOrTablet, 
+        
+        // 2. [TWEAK EKSTREM] Matikan log depth buffer di tablet!
+        // Fitur ini merusak performa GPU Mobile karena men-disable Early-Z Culling (menyebabkan Overdraw parah).
+        logarithmicDepthBuffer: !isMobileOrTablet, 
+        
+        // 3. Gunakan high-performance agar OS Tablet memberikan daya prioritas GPU penuh.
+        powerPreference: "high-performance",
+        
+        // 4. [TWEAK EKSTREM] Turunkan Presisi Shader!
+        // PC sanggup hitung 32-bit (highp), di Tablet 16-bit (mediump) sudah sangat cukup dan hemat baterai / cegah overheat.
+        precision: isMobileOrTablet ? 'mediump' : 'highp'
+    });
+    
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    
+    // 5. Batasi Pixel Ratio. Layar tablet modern sangat tajam (Resolusi 2K / 120Hz). 
+    // Merender geometri berat di resolusi natifnya akan membuat VRAM GPU jebol.
+    // Cap ke maksimal 1.25 untuk tablet, biarkan 2.0 untuk Laptop/PC.
+    const maxPixelRatio = isMobileOrTablet ? 1.25 : 2;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
     
     // [PENTING] autoClear dinonaktifkan agar overlay compass tidak tertimpa scene utama
     renderer.autoClear = false; 
@@ -115,19 +139,17 @@ function init3D() {
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     
-    // --- Konfigurasi Kamera (Pindahan dari camera.js) ---
+    // --- Konfigurasi Kamera ---
     controls.zoomSpeed = 3.5;
     controls.panSpeed = 1.5;
-    // ----------------------------------------------------
 
-    // Mematikan fitur damping karena membuat orbit terasa lambat
+    // Mematikan fitur damping karena membuat orbit terasa lambat dan memakan FPS
     controls.enableDamping = false;
     
-    // Mengubah kontrol mouse (Kiri: Pan, Tengah/Kanan dimatikan agar tidak konflik dengan fungsi off-center orbit kita)
-    // Fitur Zoom (Scroll/Wheel) tetap berfungsi normal bawaan OrbitControls
+    // Mengubah kontrol mouse
     controls.mouseButtons = {
         LEFT: THREE.MOUSE.PAN,
-        MIDDLE: null, // Dimatikan, akan di-handle manual untuk Orbit
+        MIDDLE: null, // Dimatikan, akan di-handle manual untuk Custom Orbit
         RIGHT: null   // Dimatikan sementara sesuai permintaan
     };
 
@@ -165,7 +187,7 @@ function init3D() {
     const centerMat = new THREE.MeshPhongMaterial({ color: 0x888888 });
     compassGroup.add(new THREE.Mesh(centerGeo, centerMat));
 
-    // 2. Jarum Utara (Merah, mengarah ke -Z sesuai parser koordinat Three.js)
+    // 2. Jarum Utara
     const northGeo = new THREE.ConeGeometry(0.15, 1, 16);
     northGeo.translate(0, 0.5, 0);
     const northMat = new THREE.MeshPhongMaterial({ color: 0xff3333 });
@@ -173,13 +195,13 @@ function init3D() {
     northMesh.rotation.x = -Math.PI / 2; 
     compassGroup.add(northMesh);
 
-    // 3. Jarum Selatan (Putih, mengarah ke +Z)
+    // 3. Jarum Selatan
     const southMat = new THREE.MeshPhongMaterial({ color: 0xdddddd });
     const southMesh = new THREE.Mesh(northGeo, southMat);
     southMesh.rotation.x = Math.PI / 2; 
     compassGroup.add(southMesh);
 
-    // 4. Garis Timur - Barat (Axis X)
+    // 4. Garis Timur - Barat
     const ewGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.5, 8);
     const ewMat = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
     const ewMesh = new THREE.Mesh(ewGeo, ewMat);
@@ -253,7 +275,6 @@ function init3D() {
 
         if (!hasObj || box.isEmpty()) return;
 
-        // Auto Zoom to Bounds logic
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         const maxDim = Math.max(size.x, size.z) || 100;
@@ -264,7 +285,6 @@ function init3D() {
         
         controls.target.copy(center);
         
-        // Memaksa kemiringan (polar) 0 dan bearing (azimuth) 0, mengarah absolut ke utara
         camera.position.set(center.x, center.y + cameraDistance, center.z + 0.001);
         camera.up.set(0, 1, 0);
         camera.lookAt(center);
@@ -274,7 +294,7 @@ function init3D() {
     // ==========================================
 
     window.addEventListener('resize', () => {
-        if (!window.is3DRenderingActive) return; // Prevent unnecessary resizes when hidden
+        if (!window.is3DRenderingActive) return; 
         
         camera.aspect = container.clientWidth / container.clientHeight;
         camera.updateProjectionMatrix();
@@ -284,7 +304,6 @@ function init3D() {
             if(typeof resizeRightCanvas === 'function') resizeRightCanvas();
         }
 
-        // Resize Orbit Pad 3D Scene
         const trackpad = document.getElementById('orbit-trackpad');
         if (trackpad && padCamera && padRenderer) {
             padCamera.aspect = trackpad.clientWidth / trackpad.clientHeight;
@@ -296,7 +315,6 @@ function init3D() {
     // Cegah default context menu (Klik Kanan) agar tidak muncul
     container.addEventListener('contextmenu', (e) => { e.preventDefault(); });
 
-    // Asignasi event listeners dipanggil dari function di index.html untuk klik kiri
     container.addEventListener('pointerdown', (e) => {
         if (e.button === 0) window.onPointerDown(e);
     });
@@ -304,11 +322,10 @@ function init3D() {
     container.addEventListener('pointerup', window.onPointerUp);
 
     // Logika Custom Orbit Off-Center
-    // Orbit akan diputar mengelilingi posisi geometri di bawah kursor, TANPA memindahkannya ke tengah layar
     container.addEventListener('pointerdown', (e) => {
-        if (e.button === 1) { // 1 = Klik Tengah/Scroll Wheel (Orbit)
-            e.preventDefault(); // Mencegah auto-scroll bawaan browser jika ada
-            if (!window.is3DRenderingActive) return; // Skip logic jika terhidden
+        if (e.button === 1) { // Klik Tengah
+            e.preventDefault(); 
+            if (!window.is3DRenderingActive) return; 
             
             const rect = container.getBoundingClientRect();
             const nMouse = new THREE.Vector2();
@@ -331,12 +348,12 @@ function init3D() {
             if (intersects.length > 0) {
                 orbitPivot.copy(intersects[0].point);
             } else {
-                orbitPivot.copy(controls.target); // Fallback ke target layar saat ini jika meleset
+                orbitPivot.copy(controls.target);
             }
 
             isCustomOrbiting = true;
             lastMousePos = { x: e.clientX, y: e.clientY };
-            controls.enabled = false; // Matikan OrbitControls bawaan sementara waktu
+            controls.enabled = false; 
         }
     });
 
@@ -346,14 +363,12 @@ function init3D() {
             const deltaY = e.clientY - lastMousePos.y;
             lastMousePos = { x: e.clientX, y: e.clientY };
 
-            const rotationSpeed = 0.005; // Kecepatan putaran orbit
+            const rotationSpeed = 0.005; 
             const angleX = -deltaX * rotationSpeed;
             const angleY = -deltaY * rotationSpeed;
 
-            // Rotasi Horizontal (mengelilingi sumbu Y dunia)
             const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angleX);
 
-            // Rotasi Vertikal (mengelilingi sumbu X lokal kamera)
             const camDir = new THREE.Vector3();
             camera.getWorldDirection(camDir);
             const right = new THREE.Vector3().crossVectors(camera.up, camDir.negate()).normalize();
@@ -365,23 +380,19 @@ function init3D() {
 
             const q = new THREE.Quaternion().multiplyQuaternions(qY, qX);
 
-            // Prediksi pergerakan posisi kamera
             const camOffset = camera.position.clone().sub(orbitPivot);
             camOffset.applyQuaternion(q);
             const newCamPos = orbitPivot.clone().add(camOffset);
 
-            // Prediksi pergerakan Target OrbitControls (Ini kunci agar layarnya tidak melompat)
             const targetOffset = controls.target.clone().sub(orbitPivot);
             targetOffset.applyQuaternion(q);
             const newTarget = orbitPivot.clone().add(targetOffset);
 
-            // Lindungi rotasi vertikal dari "Upside Down" (Kamera terjungkal)
             const newDir = newTarget.clone().sub(newCamPos).normalize();
             if (Math.abs(newDir.y) < 0.99) {
                 camera.position.copy(newCamPos);
                 controls.target.copy(newTarget);
             } else {
-                // Jika terlalu ke kutub, terapkan hanya rotasi horizontal
                 camOffset.copy(camera.position).sub(orbitPivot).applyQuaternion(qY);
                 camera.position.copy(orbitPivot).add(camOffset);
 
@@ -394,9 +405,9 @@ function init3D() {
     });
 
     window.addEventListener('pointerup', (e) => {
-        if (e.button === 1 && isCustomOrbiting) { // 1 = Klik Tengah
+        if (e.button === 1 && isCustomOrbiting) { 
             isCustomOrbiting = false;
-            controls.enabled = true; // Nyalakan kembali OrbitControls saat mouse dilepas
+            controls.enabled = true; 
         }
     });
 
@@ -407,33 +418,34 @@ function init3D() {
     if (trackpad) {
         padScene = new THREE.Scene();
         
-        const padW = trackpad.clientWidth || 240; // Default width jika hidden saat init
-        const padH = trackpad.clientHeight || 160; // Disesuaikan dengan tinggi h-40
+        const padW = trackpad.clientWidth || 240; 
+        const padH = trackpad.clientHeight || 160; 
         padCamera = new THREE.PerspectiveCamera(50, padW / padH, 0.1, 100);
         padCamera.position.z = 3;
 
-        padRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        // Sama halnya dengan Renderer utama, Renderer Trackpad juga kita optimasi Presisinya
+        padRenderer = new THREE.WebGLRenderer({ 
+            antialias: !isMobileOrTablet, 
+            alpha: true,
+            precision: isMobileOrTablet ? 'mediump' : 'highp'
+        });
         padRenderer.setSize(padW, padH);
         padRenderer.setPixelRatio(window.devicePixelRatio);
         trackpad.appendChild(padRenderer.domElement);
 
-        // Helper untuk membuat face dengan tulisan & border
         function createFaceMaterial(text, bgColor) {
             const canvas = document.createElement('canvas');
             canvas.width = 128;
             canvas.height = 128;
             const ctx = canvas.getContext('2d');
             
-            // Background warna solid
             ctx.fillStyle = bgColor;
             ctx.fillRect(0, 0, 128, 128);
             
-            // Border tepi kubus
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
             ctx.lineWidth = 4;
             ctx.strokeRect(2, 2, 124, 124);
             
-            // Tulisan di tengah
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 24px Arial, sans-serif';
             ctx.textAlign = 'center';
@@ -441,18 +453,16 @@ function init3D() {
             ctx.fillText(text, 64, 64);
             
             const texture = new THREE.CanvasTexture(canvas);
-            // texture.anisotropy = padRenderer.capabilities.getMaxAnisotropy();
             return new THREE.MeshBasicMaterial({ map: texture });
         }
 
-        // Material untuk setiap sisi kubus
         const cubeMaterials = [
-            createFaceMaterial('RIGHT', '#0284c7'),  // +x (Kanan)
-            createFaceMaterial('LEFT', '#0ea5e9'),   // -x (Kiri)
-            createFaceMaterial('TOP', '#16a34a'),    // +y (Atas)
-            createFaceMaterial('BOTTOM', '#22c55e'), // -y (Bawah)
-            createFaceMaterial('FRONT', '#dc2626'),  // +z (Depan)
-            createFaceMaterial('BACK', '#ef4444')    // -z (Belakang)
+            createFaceMaterial('RIGHT', '#0284c7'),  
+            createFaceMaterial('LEFT', '#0ea5e9'),   
+            createFaceMaterial('TOP', '#16a34a'),    
+            createFaceMaterial('BOTTOM', '#22c55e'), 
+            createFaceMaterial('FRONT', '#dc2626'),  
+            createFaceMaterial('BACK', '#ef4444')    
         ];
         
         const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -480,17 +490,13 @@ function init3D() {
 
             const rotationSpeed = 0.01;
             const angleX = -deltaX * rotationSpeed;
-            // Menghapus minus pada deltaY agar tarik ke bawah (deltaY > 0) menghasilkan rotasi ke atas (angleY > 0)
-            // Ini akan menggerakkan kamera naik sehingga sisi TOP kubus terlihat.
             const angleY = deltaY * rotationSpeed; 
 
             const offset = camera.position.clone().sub(controls.target);
             
-            // Rotasi Horizontal Trackpad
             const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angleX);
             offset.applyQuaternion(qY);
 
-            // Rotasi Vertikal Trackpad
             const camDir = new THREE.Vector3().copy(offset).negate().normalize();
             const right = new THREE.Vector3().crossVectors(camera.up, camDir).normalize();
             
@@ -516,19 +522,16 @@ function init3D() {
     }
 
     window.addEventListener('keydown', (e) => {
-        // Mencegah trigger shortcut jika user sedang mengetik di Form Input / Textarea
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); window.undoLastRecord(); return; }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); window.redoLastUndo(); return; }
         
-        // Tombol X sekarang berfungsi sama dengan Esc (Mereset & Unhide data terekam / Batalkan Poligon)
         if (e.key === 'Escape' || e.key === 'Esc' || e.key.toLowerCase() === 'x') { 
             if (typeof isDrawingPolygon !== 'undefined' && isDrawingPolygon) window.cancelPolygon(); 
             else window.resetSequenceAndView(); 
         }
 
-        // Tombol C untuk mengeksekusi perpindahan Center Pivot berdasarkan posisi kursor terakhir
         if (e.key.toLowerCase() === 'c') {
             if (typeof window.executeCenterPivot === 'function' && window.currentMousePos) {
                 window.executeCenterPivot(window.currentMousePos);
@@ -537,7 +540,6 @@ function init3D() {
 
         if (e.key === 'Enter' && typeof isDrawingPolygon !== 'undefined' && isDrawingPolygon) window.finishPolygonSelection();
         
-        // Menerapkan hover Block hanya saat mode Tool diatur untuk Bench atau sejenis (Integrasi mode UI Baru)
         if (e.key === 'Shift') {
             const mode = window.activeInteractionMode || 'select_bench';
             if (mode === 'select_bench' && window.is3DRenderingActive) {
@@ -566,7 +568,6 @@ function init3D() {
         const extSet = document.getElementById('extrusion-settings');
         isStupaMode ? extSet.classList.replace('hidden', 'flex') : extSet.classList.replace('flex', 'hidden');
         
-        // Panggil helper function agar Block Record dan Kamera dipertahankan
         if (globalParsedData) reprocessDataWithStateRetention();
     });
 
@@ -575,7 +576,6 @@ function init3D() {
             currentExtrusion = parseFloat(document.getElementById('extrusion-input').value) || 5;
             localStorage.setItem('rk_currentExtrusion', currentExtrusion);
             
-            // Panggil helper function agar Block Record dan Kamera dipertahankan
             reprocessDataWithStateRetention();
         }
     });
@@ -583,8 +583,6 @@ function init3D() {
     // --- OBSERVER UNTUK PAUSE/RESUME 3D SECARA OTOMATIS (INTERSECTION OBSERVER) ---
     const canvasContainerDOM = document.getElementById('canvas-container');
     if (canvasContainerDOM) {
-        // Menggunakan Intersection Observer untuk mendeteksi visibilitas yang sebenarnya
-        // Akan tertrigger pause jika element terkena display:none (tab tertutup) atau keluar scroll viewport
         const observer = new IntersectionObserver((entries) => {
             entries.forEach((entry) => {
                 if (entry.isIntersecting) {
@@ -593,11 +591,11 @@ function init3D() {
                     window.pause3D();
                 }
             });
-        }, { root: null, threshold: 0.01 }); // Hanya butuh terlihat 1% untuk resume render
+        }, { root: null, threshold: 0.01 }); 
         
         observer.observe(canvasContainerDOM);
     } else {
-        window.resume3D(); // Fallback
+        window.resume3D(); 
     }
 }
 
@@ -605,18 +603,15 @@ function init3D() {
 function reprocessDataWithStateRetention() {
     if (!globalParsedData) return;
 
-    // 1. Simpan backup dari Records & Perhitungan yang ada saat ini
     const oldRecords = window.sequenceRecords ? JSON.parse(JSON.stringify(window.sequenceRecords)) : [];
     const oldTotalOB = window.sequenceTotalOB || 0;
     const oldTotalCoal = window.sequenceTotalCoal || 0;
     const oldCounter = window.sequenceCounter || 1;
     
-    // Simpan posisi dan sudut kamera secara spesifik sebelum di-render ulang
     const oldCamPos = camera.position.clone();
     const oldCamQuat = camera.quaternion.clone();
     const oldTarget = controls.target.clone();
 
-    // 2. Kumpulkan kombinasi identitas Block & Bench yang statusnya sudah terekam (isRecorded)
     const recordedKeys = [];
     Object.values(meshes).forEach(m => {
         if (m.userData && m.userData.isRecorded) {
@@ -624,42 +619,33 @@ function reprocessDataWithStateRetention() {
         }
     });
 
-    // 3. Modifikasi sementara fungsi reset yang dipanggil di dalam processData agar tidak memusnahkan data record sepenuhnya
     const originalReset = window.resetSequenceAndView;
     window.resetSequenceAndView = function() {
         if (typeof originalReset === 'function') originalReset();
         
-        // Segera paksa kembalikan nilai backup agar UI tidak blank total
         window.sequenceRecords = JSON.parse(JSON.stringify(oldRecords));
         window.sequenceTotalOB = oldTotalOB;
         window.sequenceTotalCoal = oldTotalCoal;
         window.sequenceCounter = oldCounter;
         
-        // Reset stack undo/redo agar tidak terjadi reference loss
         window.undoStack = [];
         window.redoStack = [];
         if (typeof window.updateSequenceUI === 'function') window.updateSequenceUI();
     };
 
-    // Panggil render ulang visual
     if (typeof processData === 'function') processData(globalParsedData);
 
-    // 4. Tunggu sampai rendering selesai dilakukan, baru kembalikan fungsi ke awal & hilangkan blok terekam
     const checkInterval = setInterval(() => {
         if (!isProcessing) {
             clearInterval(checkInterval);
             
-            // Pulihkan fungsi original
             window.resetSequenceAndView = originalReset;
 
-            // Kembalikan sudut kamera dan target sehingga tampilannya tidak melompat kembali ke settingan 45 derajat CSV
             camera.position.copy(oldCamPos);
             camera.quaternion.copy(oldCamQuat);
             controls.target.copy(oldTarget);
             controls.update();
 
-            // Cari block-block pada object meshes yang baru saja di-rebuild,
-            // Jika mereka ada dalam daftar recordedKeys, jadikan statusnya terekam (isRecorded = true) dan hilangkan dari view
             Object.values(meshes).forEach(m => {
                 const key = `${m.userData.blockName}_${m.userData.bench}`;
                 if (recordedKeys.includes(key)) {
@@ -691,14 +677,11 @@ function animate() {
 
     // 2. Render Overlay Compass Scene
     if (compassScene && compassCamera) {
-        renderer.clearDepth(); // Hanya membersihkan Z-Buffer agar model ditimpa di depan, tidak hapus background
+        renderer.clearDepth(); 
         
         const compassSize = 100;
-        // Penempatan viewport kompas di pojok kiri atas
-        // Asal koordinat X,Y setViewport() adalah dari pojok kiri bawah (bottom-left)
         renderer.setViewport(16, container.clientHeight - compassSize - 16, compassSize, compassSize);
         
-        // Sinkronisasi angle Camera Compass terhadap Main Camera
         compassCamera.position.copy(camera.position).sub(controls.target).normalize().multiplyScalar(5);
         compassCamera.quaternion.copy(camera.quaternion);
         
@@ -708,7 +691,6 @@ function animate() {
     // 3. Render Overlay Orbit Pad (View Cube)
     if (padScene && padCamera && padRenderer) {
         const trackpad = document.getElementById('orbit-trackpad');
-        // Tangani masalah ukuran (hidden pada saat page load)
         if (trackpad && trackpad.clientWidth > 0 && trackpad.clientWidth !== padRenderer.domElement.width / window.devicePixelRatio) {
             padCamera.aspect = trackpad.clientWidth / trackpad.clientHeight;
             padCamera.updateProjectionMatrix();
@@ -716,7 +698,6 @@ function animate() {
         }
 
         if (trackpad && trackpad.clientWidth > 0) {
-            // Tempatkan padCamera berotasi mengelilingi kubus (0,0,0) yang berkesesuaian dengan sudut kamera utama
             const offset = camera.position.clone().sub(controls.target).normalize().multiplyScalar(2.5);
             padCamera.position.copy(offset);
             padCamera.quaternion.copy(camera.quaternion);
