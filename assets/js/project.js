@@ -130,7 +130,7 @@ function getBaseProjectData() {
     const getVal = (id, def) => document.getElementById(id) ? document.getElementById(id).value : def;
     const getCheck = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
 
-    // Rekam Konfigurasi Seluruh Tab File & Pit States
+    // Rekam Konfigurasi Seluruh Tab File (Pit States)
     const cleanPitStates = {};
     if (typeof window.pitStates !== 'undefined') {
         for (const [pitId, state] of Object.entries(window.pitStates)) {
@@ -148,18 +148,39 @@ function getBaseProjectData() {
             };
         }
     }
+    
+    // Rekam Konfigurasi Seluruh Tab File (Disposal States)
+    const cleanDisposalStates = {};
+    if (typeof window.disposalStates !== 'undefined') {
+        for (const [dispId, state] of Object.entries(window.disposalStates)) {
+            cleanDisposalStates[dispId] = {
+                mrFilePlaceholder: state.mrFile ? { name: state.mrFile.name } : null,
+                refFilePlaceholder: state.refFile ? { name: state.refFile.name } : null,
+                summaryObj: state.summaryObj,
+                mrStats: state.mrStats,
+                refStats: state.refStats,
+                neStats: state.neStats,
+                cols: state.cols,
+                substrings: state.substrings,
+                mrHeaders: state.mrHeaders,
+                refHeaders: state.refHeaders
+            };
+        }
+    }
 
     return {
-        version: "1.5", // Diperbarui untuk fitur save state Pit List & World Origin
+        version: "1.7", // Versi baru tanpa legacy OB/Coal
         csvFileName: currentFileName,
         csvHeaders: typeof csvHeaders !== 'undefined' ? csvHeaders : [], 
         pitStates: cleanPitStates,
+        disposalStates: cleanDisposalStates,
         activePitId: typeof window.activePitId !== 'undefined' ? window.activePitId : null,
+        activeDisposalId: typeof window.activeDisposalId !== 'undefined' ? window.activeDisposalId : null,
         
-        // Simpan status check/uncheck dari array window.loadedPits
+        // Simpan status check/uncheck
         loadedPits: Array.from(window.loadedPits || []),
+        loadedDisposals: Array.from(window.loadedDisposals || []),
         
-        // TAMBAHAN: Simpan worldOrigin ke file .riz agar koordinat pit tidak tertumpuk saat load
         worldOrigin: window.worldOrigin || { x: 0, y: 0, z: 0, isSet: false },
         
         // Rekam Konfigurasi Kamera & Visualisasi
@@ -174,23 +195,22 @@ function getBaseProjectData() {
         },
         
         // Rekam Konfigurasi Tab Geometry (Processing)
-        // Tidak lagi memanggil localStorage untuk mencegah fallback kotor
         pitProcessing: {
             mode: getVal('pit-processing-select', 'basic'),
-            basicColorOB: getVal('color-ob', '#aaaaaa'),
-            basicColorCoal: getVal('color-coal', '#000000'),
+            basicColorWaste: getVal('color-waste', '#aaaaaa'),
+            basicColorResource: getVal('color-resource', '#000000'),
             srLimit: getVal('sr-limit', '5'),
             resDirection: getVal('resgraphic-direction', 'strip_asc'),
             resSequence: getVal('resgraphic-sequence', ''),
             qualityTarget: getVal('quality-target', ''),
             qualityFormula: getVal('quality-formula', 'weighted_average'),
-            qualityWeight: getVal('quality-weight', 'coal'),
+            qualityWeight: getVal('quality-weight', 'resource'),
             qualityType: getVal('quality-type', 'maximize')
         },
         sequences: {
             records: safeRecords,
-            totalOB: window.sequenceTotalOB || 0,
-            totalCoal: window.sequenceTotalCoal || 0,
+            totalWaste: window.sequenceTotalWaste || 0,
+            totalResource: window.sequenceTotalResource || 0,
             counter: window.sequenceCounter || 1,
             recordedKeys: recKeys 
         },
@@ -201,11 +221,13 @@ function getBaseProjectData() {
             info: getCheck('cb-layout-info'),
             helper: getCheck('cb-layout-helper')
         },
-        // TAMBAHAN: Rekam konfigurasi Palette dan UI Mode pada file-pit.js
+        // Rekam konfigurasi Palette dan UI Mode pada Pit & Disposal
         pitColorModes: JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {},
         burdenPalette: JSON.parse(localStorage.getItem('rizpec_burden_palette')) || null,
-        subsetPalette: JSON.parse(localStorage.getItem('rizpec_subset_palette')) || null
-        // pitReserve, pitDataCSVs dan dxfLayers akan ditambahkan melalui Stream
+        subsetPalette: JSON.parse(localStorage.getItem('rizpec_subset_palette')) || null,
+        dispColorModes: JSON.parse(localStorage.getItem('rizpec_disp_color_modes')) || {},
+        dispBurdenPalette: JSON.parse(localStorage.getItem('rizpec_disp_burden_palette')) || null,
+        dispSubsetPalette: JSON.parse(localStorage.getItem('rizpec_disp_subset_palette')) || null
     };
 }
 
@@ -356,7 +378,8 @@ async function executeProgressiveStreamSave(fileHandle, fileName) {
                             const safeId = pId.replace(/\s+/g, '_');
                             let csvStr = null;
                             try {
-                                csvStr = await RizpecDB.get(`rizpec_entity_${safeId}`);
+                                csvStr = await RizpecDB.get(`rizpec_pit_entity_${safeId}`);
+                                if (!csvStr) csvStr = await RizpecDB.get(`rizpec_entity_${safeId}`); // Fallback legacy
                             } catch(e) {}
                             
                             if (csvStr) {
@@ -368,8 +391,31 @@ async function executeProgressiveStreamSave(fileHandle, fileName) {
                             }
                         }
                     }
+                    
+                    // Tulis Disp CSV
+                    controller.enqueue(new TextEncoder().encode('},"dispDataCSVs":{'));
+                    let isFirstDispCsv = true;
+                    if (typeof window.disposalStates !== 'undefined') {
+                        const dispKeys = Object.keys(window.disposalStates);
+                        for (let i = 0; i < dispKeys.length; i++) {
+                            const dId = dispKeys[i];
+                            const safeId = dId.replace(/\s+/g, '_');
+                            let csvStr = null;
+                            try {
+                                csvStr = await RizpecDB.get(`rizpec_disp_entity_${safeId}`);
+                            } catch(e) {}
+                            
+                            if (csvStr) {
+                                if (loadingTextEl) loadingTextEl.textContent = `Menyimpan sumber Geometri Disposal (${dId})...`;
+                                const prefix = isFirstDispCsv ? '' : ',';
+                                controller.enqueue(new TextEncoder().encode(`${prefix}${JSON.stringify(dId)}:${JSON.stringify(csvStr)}`));
+                                isFirstDispCsv = false;
+                                await new Promise(resolve => setTimeout(resolve, 5));
+                            }
+                        }
+                    }
 
-                    // 2. Tulis Geometri Pit Reserve secara Bertahap (Chunking) untuk yang sedang aktif di-render
+                    // 2. Tulis Geometri Pit & Disposal Reserve secara Bertahap (Chunking) untuk yang sedang aktif di-render
                     controller.enqueue(new TextEncoder().encode('},"pitReserve":['));
                     
                     const meshKeys = typeof meshes !== 'undefined' ? Object.keys(meshes) : [];
@@ -501,19 +547,19 @@ function resetFullProject() {
     }
 
     // 4. Reset Variabel State Sequences
-    window.worldOrigin = { x: 0, y: 0, z: 0, isSet: false }; // FIX
+    window.worldOrigin = { x: 0, y: 0, z: 0, isSet: false }; 
     window.currentCsvFileName = null;
     
     window.sequenceRecords = [];
-    window.sequenceTotalOB = 0;
-    window.sequenceTotalCoal = 0;
+    window.sequenceTotalWaste = 0;
+    window.sequenceTotalResource = 0;
     window.sequenceCounter = 1;
     window.undoStack = [];
     window.redoStack = [];
     if (typeof window.updateSequenceUI === 'function') window.updateSequenceUI();
     
     const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    setTxt('sum-blocks', "0"); setTxt('sum-ob', "0"); setTxt('sum-coal', "0"); setTxt('sum-sr', "0.00");
+    setTxt('sequence-waste-total', "0"); setTxt('sequence-resource-total', "0"); setTxt('sequence-sr-total', "0.00");
     
     const fileInput = document.getElementById('file-input');
     if (fileInput) fileInput.value = '';
@@ -572,7 +618,6 @@ if (fileInputRiz) {
                 const [fileHandle] = await window.showOpenFilePicker({
                     id: 'rk-project-dir', 
                     startIn: 'documents',
-                    // Membuka opsi "All Files" di Windows/Mac agar tidak terblokir
                     excludeAcceptAllOption: false,
                     types: [
                         { 
@@ -591,25 +636,22 @@ if (fileInputRiz) {
                 if (err.name !== 'AbortError') console.warn(err);
             }
         }
-        // Jika di HP/Android, event ini akan dilewati dan input="file" asli akan terpanggil otomatis.
     });
 
     fileInputRiz.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
         
-        // Validasi Manual Ekstensi File
-        // Di Android, karena kita izinkan semua file, user bisa tidak sengaja menekan gambar/pdf.
         if (!file.name.toLowerCase().endsWith('.riz')) {
             const proceed = confirm("PERINGATAN!\n\nFile yang Anda pilih (" + file.name + ") tidak memiliki akhiran (.riz).\n\nApakah Anda yakin ini adalah file Project RIZPEC yang valid?");
             if (!proceed) {
-                e.target.value = ''; // Reset input agar bisa memilih ulang
+                e.target.value = ''; 
                 return;
             }
         }
         
         handleRizFileWithWorker(file);
-        e.target.value = ''; // Reset
+        e.target.value = ''; 
     });
 }
 
@@ -690,24 +732,27 @@ async function processLoadedData(data, fileName) {
 
     resetFullProject();
 
-    // FIX: Pulihkan worldOrigin dari memori file .riz agar pit baru sinkron posisinya
     if (data.worldOrigin) {
         window.worldOrigin = data.worldOrigin;
     } else {
         window.worldOrigin = { x: 0, y: 0, z: 0, isSet: false };
     }
 
-    // Memulihkan Status Pit List (Check/Uncheck) dari .riz file (Bukan dari localStorage)
     if (data.loadedPits) {
         window.loadedPits = new Set(data.loadedPits);
     } else {
-        // Fallback untuk file .riz versi sebelumnya (asumsi semua terbuka)
         window.loadedPits = new Set(Object.keys(data.pitStates || {}));
     }
-    // Rendered Pits disamakan dengan state loadedPits
     window.renderedPits = new Set(window.loadedPits);
+    
+    if (data.loadedDisposals) {
+        window.loadedDisposals = new Set(data.loadedDisposals);
+    } else {
+        window.loadedDisposals = new Set(Object.keys(data.disposalStates || {}));
+    }
+    window.renderedDisposals = new Set(window.loadedDisposals);
 
-    // --- TAMBAHAN: Memulihkan Konfigurasi Warna Palette ---
+    // Memulihkan Konfigurasi Warna Palette Pit
     if (data.pitColorModes) {
         localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(data.pitColorModes));
         window.pitColorModes = data.pitColorModes;
@@ -719,6 +764,20 @@ async function processLoadedData(data, fileName) {
     if (data.subsetPalette) {
         localStorage.setItem('rizpec_subset_palette', JSON.stringify(data.subsetPalette));
         window.subsetPalette = data.subsetPalette;
+    }
+    
+    // Memulihkan Konfigurasi Warna Palette Disposal
+    if (data.dispColorModes) {
+        localStorage.setItem('rizpec_disp_color_modes', JSON.stringify(data.dispColorModes));
+        window.dispColorModes = data.dispColorModes;
+    }
+    if (data.dispBurdenPalette) {
+        localStorage.setItem('rizpec_disp_burden_palette', JSON.stringify(data.dispBurdenPalette));
+        window.dispBurdenPalette = data.dispBurdenPalette;
+    }
+    if (data.dispSubsetPalette) {
+        localStorage.setItem('rizpec_disp_subset_palette', JSON.stringify(data.dispSubsetPalette));
+        window.dispSubsetPalette = data.dispSubsetPalette;
     }
 
     if (data.cameraState && typeof controls !== 'undefined' && typeof camera !== 'undefined') {
@@ -775,10 +834,10 @@ async function processLoadedData(data, fileName) {
         const pitSelect = document.getElementById('pit-processing-select');
         if (pitSelect) {
             pitSelect.value = data.pitProcessing.mode;
-            const cOb = document.getElementById('color-ob');
-            if (cOb) cOb.value = data.pitProcessing.basicColorOB;
-            const cCoal = document.getElementById('color-coal');
-            if (cCoal) cCoal.value = data.pitProcessing.basicColorCoal;
+            const cWaste = document.getElementById('color-waste');
+            if (cWaste) cWaste.value = data.pitProcessing.basicColorWaste;
+            const cRes = document.getElementById('color-resource');
+            if (cRes) cRes.value = data.pitProcessing.basicColorResource;
             const srLim = document.getElementById('sr-limit');
             if (srLim) srLim.value = data.pitProcessing.srLimit;
             
@@ -800,6 +859,7 @@ async function processLoadedData(data, fileName) {
         }
     }
 
+    // Memulihkan Konfigurasi Pit State
     if (data.pitStates) {
         window.pitStates = {};
         const container = document.getElementById('subfolders-folder-pit');
@@ -835,18 +895,16 @@ async function processLoadedData(data, fileName) {
             }
         }
         
-        // Pulihkan Data CSV dari file .riz ke IndexedDB Browser baru
-        // Ini memastikan project 100% mandiri dan tidak terikat Local Storage / Cache asal!
         if (data.pitDataCSVs) {
             for (const [pId, csvStr] of Object.entries(data.pitDataCSVs)) {
                 const safeId = pId.replace(/\s+/g, '_');
                 try {
-                    await RizpecDB.set(`rizpec_entity_${safeId}`, csvStr);
+                    await RizpecDB.set(`rizpec_pit_entity_${safeId}`, csvStr);
                     if (window.pitStates[pId]) {
                         window.pitStates[pId].generatedCsv = csvStr;
                     }
                 } catch(e) {
-                    console.warn("Gagal memulihkan CSV untuk: " + pId);
+                    console.warn("Gagal memulihkan CSV untuk Pit: " + pId);
                 }
             }
         }
@@ -854,6 +912,62 @@ async function processLoadedData(data, fileName) {
         if (data.activePitId && window.pitStates[data.activePitId]) {
             window.activePitId = data.activePitId;
             window.lastActivePitId = data.activePitId;
+        }
+    }
+    
+    // Memulihkan Konfigurasi Disposal State
+    if (data.disposalStates) {
+        window.disposalStates = {};
+        const container = document.getElementById('subfolders-folder-disp');
+        const rootName = 'Disposal Data';
+
+        for (const [dispId, savedState] of Object.entries(data.disposalStates)) {
+            window.disposalStates[dispId] = {
+                mrFile: savedState.mrFilePlaceholder, 
+                refFile: savedState.refFilePlaceholder, 
+                generatedCsv: null, 
+                summaryObj: savedState.summaryObj,
+                mrStats: savedState.mrStats || { text: '0.00 MB (0 Row, 0 Column)' },
+                refStats: savedState.refStats || { text: '0.00 MB (0 Row, 0 Column)' },
+                neStats: savedState.neStats || { text: '0 Block' },
+                cols: savedState.cols || {},
+                substrings: savedState.substrings || {},
+                mrHeaders: savedState.mrHeaders || [],
+                refHeaders: savedState.refHeaders || []
+            };
+
+            const safeId = dispId.replace(/\s+/g, '_');
+            const buildMethod = savedState.refFilePlaceholder ? 'CEN' : 'NON_CEN';
+            localStorage.setItem(`rizpec_disp_build_type_${safeId}`, buildMethod);
+            if (savedState.summaryObj) {
+                localStorage.setItem(`rizpec_disp_entity_${safeId}_summary`, JSON.stringify(savedState.summaryObj));
+            }
+
+            if (typeof folderState !== 'undefined') folderState[rootName]++;
+            if (container && typeof window.makeSubfolderInteractive === 'function') {
+                const subEl = document.createElement('div');
+                container.appendChild(subEl);
+                window.makeSubfolderInteractive(subEl, dispId, rootName);
+            }
+        }
+        
+        if (data.dispDataCSVs) {
+            for (const [dId, csvStr] of Object.entries(data.dispDataCSVs)) {
+                const safeId = dId.replace(/\s+/g, '_');
+                try {
+                    await RizpecDB.set(`rizpec_disp_entity_${safeId}`, csvStr);
+                    if (window.disposalStates[dId]) {
+                        window.disposalStates[dId].generatedCsv = csvStr;
+                    }
+                } catch(e) {
+                    console.warn("Gagal memulihkan CSV untuk Disposal: " + dId);
+                }
+            }
+        }
+        
+        if (data.activeDisposalId && window.disposalStates[data.activeDisposalId]) {
+            window.activeDisposalId = data.activeDisposalId;
+            window.lastActiveDisposalId = data.activeDisposalId;
         }
     }
 
@@ -949,43 +1063,40 @@ async function processLoadedData(data, fileName) {
             geo.computeVertexNormals();
             geo.computeBoundingBox();
 
-            const isCoal = (m.userData.burden || '').toUpperCase() === 'RESOURCE';
+            const isResource = (m.userData.burden || '').toUpperCase() === 'RESOURCE';
             const mat = new THREE.MeshStandardMaterial({
                 color: m.color, side: THREE.DoubleSide, flatShading: true,
-                roughness: isCoal ? 0.4 : 0.8, metalness: 0.1,
-                polygonOffset: true, polygonOffsetFactor: isCoal ? -2 : 1, polygonOffsetUnits: isCoal ? -2 : 1,
-                transparent: true, opacity: isCoal ? (typeof coalOpacity !== 'undefined' ? coalOpacity : 1) : (typeof obOpacity !== 'undefined' ? obOpacity : 1)
+                roughness: isResource ? 0.4 : 0.8, metalness: 0.1,
+                polygonOffset: true, polygonOffsetFactor: isResource ? -2 : 1, polygonOffsetUnits: isResource ? -2 : 1,
+                transparent: true, opacity: isResource ? (typeof resourceOpacity !== 'undefined' ? resourceOpacity : 1) : (typeof wasteOpacity !== 'undefined' ? wasteOpacity : 1)
             });
 
             const mesh = new THREE.Mesh(geo, mat);
             mesh.userData = m.userData;
-            
-            // OPTIMASI: Blok tidak bergerak, cegah kalkulasi render matriks berulang
             mesh.matrixAutoUpdate = false;
             mesh.updateMatrix();
 
-            // Menyembunyikan Geometri berdasarkan status loadedPits
             if (m.userData.blockKey) {
-                const pitName = m.userData.blockKey.split('/')[0];
-                const pitIdFromUserData = m.userData.pitId;
-                const targetPit = pitIdFromUserData || pitName;
+                const parts = m.userData.blockKey.split('/');
+                const entityName = parts[0];
+                const entityIdFromUserData = m.userData.entityId || m.userData.pitId || entityName;
+                const type = m.userData.type || 'pit';
                 
-                if (targetPit) {
-                    mesh.visible = window.loadedPits.has(targetPit);
+                if (type === 'disp') {
+                    mesh.visible = window.loadedDisposals.has(entityIdFromUserData);
+                } else {
+                    mesh.visible = window.loadedPits.has(entityIdFromUserData);
                 }
             }
 
             const edges = new THREE.EdgesGeometry(geo, isStupa ? 10 : 60);
             const lineMat = new THREE.LineBasicMaterial({
                 color: 0x111111, opacity: 0.9, transparent: true, linewidth: 1,
-                polygonOffset: true, polygonOffsetFactor: isCoal ? -3 : 0, polygonOffsetUnits: isCoal ? -3 : 0
+                polygonOffset: true, polygonOffsetFactor: isResource ? -3 : 0, polygonOffsetUnits: isResource ? -3 : 0
             });
             const line = new THREE.LineSegments(edges, lineMat);
-            
-            // OPTIMASI: Matikan auto update untuk garis pinggir
             line.matrixAutoUpdate = false;
             line.updateMatrix();
-            
             mesh.add(line);
 
             pitReserveGroup.add(mesh);
@@ -1004,8 +1115,8 @@ async function processLoadedData(data, fileName) {
 
     if (loadedSequences) {
         window.sequenceRecords = loadedSequences.records || [];
-        window.sequenceTotalOB = loadedSequences.totalOB || 0;
-        window.sequenceTotalCoal = loadedSequences.totalCoal || 0;
+        window.sequenceTotalWaste = loadedSequences.totalWaste || 0;
+        window.sequenceTotalResource = loadedSequences.totalResource || 0;
         window.sequenceCounter = loadedSequences.counter || 1;
         
         const recordedKeysToHide = loadedSequences.recordedKeys || [];
@@ -1046,7 +1157,6 @@ async function processLoadedData(data, fileName) {
         renderer.render(scene, camera);
     }
     
-    // Safety Fallback agar Pit yang tidak di-load benar-benar hilang dari Render dan Workspace
     setTimeout(() => {
         hideFullscreenLoading();
 
@@ -1055,16 +1165,27 @@ async function processLoadedData(data, fileName) {
 
         if (window.activePitId && typeof window.selectFolder === 'function') {
             window.selectFolder(window.activePitId, 'Subfolder', 'Pit Data');
+        } else if (window.activeDisposalId && typeof window.selectFolder === 'function') {
+            window.selectFolder(window.activeDisposalId, 'Subfolder', 'Disposal Data');
         }
 
         if(typeof updateFileMenuState === 'function') updateFileMenuState();
 
-        // Eksekusi pelepasan geometri (Unload) untuk Pit yang Unchecked dari .riz
         if (data.pitStates) {
             Object.keys(data.pitStates).forEach(pit => {
                 if (!window.loadedPits.has(pit)) {
                     if (typeof window.unloadPitGeometry === 'function') {
                         window.unloadPitGeometry(pit);
+                    }
+                }
+            });
+        }
+        
+        if (data.disposalStates) {
+            Object.keys(data.disposalStates).forEach(disp => {
+                if (!window.loadedDisposals.has(disp)) {
+                    if (typeof window.unloadDisposalGeometry === 'function') {
+                        window.unloadDisposalGeometry(disp);
                     }
                 }
             });

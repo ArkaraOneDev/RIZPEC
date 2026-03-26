@@ -55,7 +55,14 @@ function updateFileMenuState() {
     
     const hasProjectName = typeof window.currentProjectName === 'string' && window.currentProjectName.trim() !== '' && window.currentProjectName !== 'Untitled';
     
-    const isEmpty = !(hasCSV || hasDXF || hasMeshes || hasProjectName);
+    let hasFolderData = false;
+    if (typeof folderState !== 'undefined') {
+        if (folderState['Pit Data'] > 0 || folderState['Disposal Data'] > 0 || folderState['Production Data'] > 0 || folderState['DXF Data'] > 0) {
+            hasFolderData = true;
+        }
+    }
+    
+    const isEmpty = !(hasCSV || hasDXF || hasMeshes || hasProjectName || hasFolderData);
     
     const btnSave = document.getElementById('btn-sidebar-save');
     const btnExport = Array.from(document.querySelectorAll('.dropdown-content a')).find(el => el.textContent && el.textContent.trim() === 'Export');
@@ -94,6 +101,13 @@ window.resetFileTabForNewProject = async function() {
     window.currentProjectName = ""; 
     window.clearAllFoldersUI();
 
+    // [UPDATE]: Hapus Kunci Origin dari LocalStorage saat New Project
+    localStorage.removeItem('rizpec_world_origin');
+    if (typeof window.worldOrigin !== 'undefined') {
+        window.worldOrigin = { x: 0, y: 0, z: 0, isSet: false };
+        console.log("World Origin di-reset (New Project)");
+    }
+
     const inputs = ['mining-reserve-file', 'reformat-file-input', 'file-input-dxf'];
     inputs.forEach(id => {
         const el = document.getElementById(id);
@@ -118,8 +132,11 @@ window.resetFileTabForNewProject = async function() {
     }
     keysToRemove.forEach(k => localStorage.removeItem(k));
     
-    // Reset state khusus Pit jika modulnya diload
+    // Reset state spesifik per modul
     if (typeof window.resetPitStates === 'function') window.resetPitStates();
+    if (typeof window.resetDisposalStates === 'function') window.resetDisposalStates();
+    if (typeof window.resetProductionStates === 'function') window.resetProductionStates();
+    if (typeof window.resetDxfStates === 'function') window.resetDxfStates();
 
     if (typeof window.updateTabLockState === 'function') window.updateTabLockState();
     if (typeof updateFileMenuState === 'function') updateFileMenuState();
@@ -186,7 +203,6 @@ setTimeout(updateFileMenuState, 200);
 // FILE & FOLDER EXPLORER LOGIC (Tab File)
 // ==========================================
 
-// HAULAGE DATA dihapus dari state sesuai permintaan
 const folderState = {
     'Pit Data': 0, 'Disposal Data': 0, 'Production Data': 0, 'DXF Data': 0
 };
@@ -212,42 +228,71 @@ window.selectFolder = function(name, type = 'Root Folder', rootName = name) {
             document.getElementById('summary-count').textContent = folderState[rootName] + ' Folders';
         } else {
             document.getElementById('summary-count-label').innerHTML = '<i class="fa-solid fa-file-lines mr-1"></i> Baris / Objek';
-            document.getElementById('summary-count').textContent = Math.floor(Math.random() * 5000) + 100;
+            document.getElementById('summary-count').textContent = '-'; // Data detail di-handle oleh panel spesifik masing-masing
         }
 
+        // --- SISTEM ISOLASI UI (ANTI TUMPANG TINDIH) ---
+        // Sembunyikan semua manager list di left panel (Root Folder UI)
+        const leftPanel = document.querySelector('#file-summary-content > div:first-child');
+        if (leftPanel) {
+            const allManagers = leftPanel.querySelectorAll('[id$="-manager"]');
+            allManagers.forEach(m => {
+                m.classList.add('hidden');
+                m.classList.remove('flex');
+            });
+        }
+
+        // Sembunyikan semua panel settings di main panel (Subfolder UI)
         const panelEmpty = document.getElementById('settings-empty');
-        const panelCsv = document.getElementById('settings-csv');
+        const panelCsv = document.getElementById('settings-csv');     // Legacy shared CSV panel
+        const panelPit = document.getElementById('settings-pit');     // Jika ke depan dipisah
+        const panelDisp = document.getElementById('settings-disp');   // Jika ke depan dipisah
+        const panelProd = document.getElementById('settings-prod');   // Jika ke depan dipisah
         const panelDxf = document.getElementById('settings-dxf');
 
-        if (panelEmpty) { panelEmpty.classList.add('hidden'); panelEmpty.classList.remove('flex'); }
-        if (panelCsv) { panelCsv.classList.add('hidden'); panelCsv.classList.remove('flex'); }
-        if (panelDxf) { panelDxf.classList.add('hidden'); panelDxf.classList.remove('flex'); }
+        [panelEmpty, panelCsv, panelPit, panelDisp, panelProd, panelDxf].forEach(p => {
+            if (p) { p.classList.add('hidden'); p.classList.remove('flex'); }
+        });
 
+        // Buka Panel yang sesuai
         if (type === 'Root Folder') {
             if (panelEmpty) {
                 panelEmpty.classList.remove('hidden');
                 panelEmpty.classList.add('flex');
             }
         } else {
+            // Jika Subfolder, tampilkan panel setting yang sesuai kategorinya
             if (rootName === 'DXF Data') {
-                if (panelDxf) {
-                    panelDxf.classList.remove('hidden');
-                    panelDxf.classList.add('flex');
-                    document.getElementById('dxf-info-name').textContent = name;
-                    document.getElementById('dxf-info-size').textContent = (Math.random() * 5 + 1).toFixed(2) + ' MB';
-                    document.getElementById('dxf-info-type').textContent = Math.random() > 0.3 ? 'Polymesh 3D' : 'Lines/Polylines';
-                    document.getElementById('dxf-info-texture').textContent = 'None';
-                }
+                if (panelDxf) { panelDxf.classList.remove('hidden'); panelDxf.classList.add('flex'); }
+            } else if (rootName === 'Pit Data') {
+                if (panelPit) { panelPit.classList.remove('hidden'); panelPit.classList.add('flex'); }
+                else if (panelCsv) { panelCsv.classList.remove('hidden'); panelCsv.classList.add('flex'); } 
+            } else if (rootName === 'Disposal Data') {
+                if (panelDisp) { panelDisp.classList.remove('hidden'); panelDisp.classList.add('flex'); }
+                else if (panelCsv) { panelCsv.classList.remove('hidden'); panelCsv.classList.add('flex'); } 
+            } else if (rootName === 'Production Data') {
+                if (panelProd) { panelProd.classList.remove('hidden'); panelProd.classList.add('flex'); }
+                else if (panelCsv) { panelCsv.classList.remove('hidden'); panelCsv.classList.add('flex'); } 
             } else {
-                // Semua folder selain DXF (Pit, Disposal, Prod) menggunakan panel CSV secara default
-                if (panelCsv) {
-                    panelCsv.classList.remove('hidden');
-                    panelCsv.classList.add('flex');
-                }
+                if (panelCsv) { panelCsv.classList.remove('hidden'); panelCsv.classList.add('flex'); }
             }
         }
         
-        // Memanggil hook modul spesifik (seperti file-pit.js) jika ada
+        // --- EVENT BUS SYSTEM ROUTING KETAT ---
+        // Panggil event per modul, Modul diwajibkan memvalidasi rootName masing-masing
+        if (typeof window.onPitFolderSelected === 'function') {
+            window.onPitFolderSelected(name, type, rootName);
+        }
+        if (typeof window.onDisposalFolderSelected === 'function') {
+            window.onDisposalFolderSelected(name, type, rootName);
+        }
+        if (typeof window.onProductionFolderSelected === 'function') {
+            window.onProductionFolderSelected(name, type, rootName);
+        }
+        if (typeof window.onDxfFolderSelected === 'function') {
+            window.onDxfFolderSelected(name, type, rootName);
+        }
+        // Fallback backward compatibility
         if (typeof window.onFolderSelected === 'function') {
             window.onFolderSelected(name, type, rootName);
         }
@@ -286,7 +331,7 @@ window.addSubfolder = function(parentId, rootName) {
     
     const saveEdit = () => {
         if (isSaved) return;
-        isSaved = true;
+        isSaved = true; 
         let finalName = input.value.trim();
         
         if (!finalName || finalName === "New Folder") {
@@ -294,15 +339,42 @@ window.addSubfolder = function(parentId, rootName) {
             return;
         }
 
-        // Format nama folder (Uppercase & Underscore) untuk entitas fisik
-        if (rootName === 'Pit Data' || rootName === 'Disposal Data') {
+        // Format nama folder (Uppercase & Underscore) untuk entitas fisik geometri
+        if (rootName === 'Pit Data' || rootName === 'Disposal Data' || rootName === 'Production Data') {
             finalName = finalName.toUpperCase().replace(/\s+/g, '_');
+        }
+        
+        // --- CEK DUPLIKASI NAMA FOLDER ---
+        const existingNames = Array.from(container.querySelectorAll('.folder-name-text')).map(el => el.textContent);
+        if (existingNames.includes(finalName)) {
+            const msg = `Folder dengan nama "${finalName}" sudah ada. Silakan gunakan nama lain.`;
+            
+            const overlay = document.createElement('div');
+            overlay.className = "fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center backdrop-blur-sm";
+            overlay.innerHTML = `
+                <div class="bg-slate-800 border border-slate-600 p-5 rounded-lg shadow-xl max-w-sm w-full text-center transform transition-all scale-100">
+                    <i class="fa-solid fa-circle-exclamation text-yellow-500 text-4xl mb-3"></i>
+                    <p class="text-slate-200 text-sm mb-5 leading-relaxed">${msg}</p>
+                    <button class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-6 rounded text-sm shadow-lg transition-colors w-full" id="btn-mengerti">
+                        Mengerti
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            
+            const btn = overlay.querySelector('#btn-mengerti');
+            btn.onclick = () => {
+                document.body.removeChild(overlay);
+                isSaved = false; 
+                input.focus();
+                input.select(); 
+            };
+            return; 
         }
         
         folderState[rootName]++;
         window.makeSubfolderInteractive(subEl, finalName, rootName);
         
-        // Otomatis select folder baru khusus untuk data CSV base
         if (rootName !== 'DXF Data') {
             setTimeout(() => subEl.click(), 10);
         }
@@ -318,10 +390,18 @@ window.addSubfolder = function(parentId, rootName) {
 window.makeSubfolderInteractive = function(subEl, name, rootName) {
     subEl.className = "flex items-center justify-between p-2 bg-slate-800/40 hover:bg-slate-700/80 border-l-2 border-blue-500/30 hover:border-blue-500 rounded-r cursor-pointer text-slate-300 hover:text-white text-[11px] transition-all shadow-sm group";
     
-    // Abstracting badge logic to specific modules
+    // Abstracting badge logic route
     let badgeHTML = '';
-    if (typeof window.getFolderBadgeHTML === 'function') {
-        badgeHTML = window.getFolderBadgeHTML(name, rootName);
+    if (rootName === 'Pit Data' && typeof window.getPitFolderBadgeHTML === 'function') {
+        badgeHTML = window.getPitFolderBadgeHTML(name, rootName);
+    } else if (rootName === 'Disposal Data' && typeof window.getDisposalFolderBadgeHTML === 'function') {
+        badgeHTML = window.getDisposalFolderBadgeHTML(name, rootName);
+    } else if (rootName === 'Production Data' && typeof window.getProductionFolderBadgeHTML === 'function') {
+        badgeHTML = window.getProductionFolderBadgeHTML(name, rootName);
+    } else if (rootName === 'DXF Data' && typeof window.getDxfFolderBadgeHTML === 'function') {
+        badgeHTML = window.getDxfFolderBadgeHTML(name, rootName);
+    } else if (typeof window.getFolderBadgeHTML === 'function') {
+        badgeHTML = window.getFolderBadgeHTML(name, rootName); // fallback
     }
 
     subEl.innerHTML = `
@@ -349,9 +429,20 @@ window.makeSubfolderInteractive = function(subEl, name, rootName) {
     const deleteBtn = subEl.querySelector('.delete-btn');
     deleteBtn.onclick = (e) => {
         e.stopPropagation();
-        if (confirm(`Apakah Anda yakin ingin menghapus subfolder "${name}"?`)) {
-            // Memanggil hook modul spesifik sebelum dihapus
-            if (typeof window.onFolderDeleted === 'function') window.onFolderDeleted(name, rootName);
+        
+        const executeDelete = () => {
+            // Routing explicit untuk penghapusan
+            if (rootName === 'Pit Data' && typeof window.onPitFolderDeleted === 'function') {
+                window.onPitFolderDeleted(name, rootName);
+            } else if (rootName === 'Disposal Data' && typeof window.onDisposalFolderDeleted === 'function') {
+                window.onDisposalFolderDeleted(name, rootName);
+            } else if (rootName === 'Production Data' && typeof window.onProductionFolderDeleted === 'function') {
+                window.onProductionFolderDeleted(name, rootName);
+            } else if (rootName === 'DXF Data' && typeof window.onDxfFolderDeleted === 'function') {
+                window.onDxfFolderDeleted(name, rootName);
+            } else if (typeof window.onFolderDeleted === 'function') {
+                window.onFolderDeleted(name, rootName); // fallback
+            }
             
             subEl.remove();
             folderState[rootName]--;
@@ -366,13 +457,23 @@ window.makeSubfolderInteractive = function(subEl, name, rootName) {
                     contentView.classList.remove('flex');
                 }
             }
+        };
+
+        const confirmMsg = `Apakah Anda yakin ingin menghapus subfolder "${name}"?`;
+        
+        if (typeof showCustomConfirm === 'function') {
+            showCustomConfirm(confirmMsg, executeDelete);
+        } else {
+            if (confirm(confirmMsg)) {
+                executeDelete();
+            }
         }
     };
 }
 
 window.clearAllFoldersUI = function() {
     for (let key in folderState) folderState[key] = 0;
-    // folder-haul telah dihapus dari array ini
+    
     const containers = ['folder-pit', 'folder-disp', 'folder-prod', 'folder-dxf'];
     containers.forEach(id => {
         const el = document.getElementById(`subfolders-${id}`);
@@ -408,6 +509,48 @@ window.restoreDxfFolderUI = function(fileName) {
 
 const originalProcessDXF = typeof processDXF === 'function' ? processDXF : null;
 window.processDXF = function(dxfText, fileName) {
+    // [UPDATE]: Ekstrak Origin secara Native sebelum memanggil modul 3D agar LocalStorage terkunci duluan!
+    if (typeof window.DxfParser !== 'undefined') {
+        try {
+            const parser = new window.DxfParser();
+            const dxfData = parser.parseSync(dxfText);
+
+            // Cek persisten origin dari session sebelumnya
+            if (typeof window.worldOrigin === 'undefined') {
+                const savedOrigin = localStorage.getItem('rizpec_world_origin');
+                window.worldOrigin = savedOrigin ? JSON.parse(savedOrigin) : { x: 0, y: 0, z: 0, isSet: false };
+            }
+
+            // [UPDATE]: Jika belum ada titik 0,0,0 (Pit belum ada), maka DXF ini yang akan menguncinya!
+            if (!window.worldOrigin.isSet && dxfData && dxfData.entities) {
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+                
+                dxfData.entities.forEach(ent => {
+                    let verts = ent.vertices ? [...ent.vertices] : [];
+                    if (ent.type === 'LINE' && verts.length === 0 && ent.startPoint && ent.endPoint) {
+                        verts = [ent.startPoint, ent.endPoint];
+                    }
+                    verts.forEach(v => {
+                        if(!v) return;
+                        let actualZ = v.z !== undefined ? v.z : (ent.elevation || 0);
+                        let x = v.x; let y = actualZ; let z = -v.y;
+                        if(x < minX) minX = x; if(x > maxX) maxX = x;
+                        if(y < minY) minY = y; if(y > maxY) maxY = y;
+                        if(z < minZ) minZ = z; if(z > maxZ) maxZ = z;
+                    });
+                });
+                
+                if (minX !== Infinity) {
+                    window.worldOrigin = { x: (minX+maxX)/2, y: (minY+maxY)/2, z: (minZ+maxZ)/2, isSet: true };
+                    localStorage.setItem('rizpec_world_origin', JSON.stringify(window.worldOrigin));
+                    console.log("World Origin Dikunci oleh DXF Wrapper:", window.worldOrigin);
+                }
+            }
+        } catch (err) {
+            console.warn("Gagal pre-parse DXF untuk origin:", err);
+        }
+    }
+
     if(originalProcessDXF) originalProcessDXF(dxfText, fileName);
     
     const rootName = 'DXF Data';
@@ -421,7 +564,7 @@ window.processDXF = function(dxfText, fileName) {
             container.appendChild(subEl);
             window.makeSubfolderInteractive(subEl, fileName, rootName);
             if (typeof window.selectFolder === 'function') {
-                window.selectFolder(fileName, `${rootName} Subfolder`, rootName);
+                window.selectFolder(fileName, `Subfolder`, rootName);
             }
         }
     }

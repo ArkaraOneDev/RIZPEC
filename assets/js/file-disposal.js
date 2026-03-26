@@ -1,33 +1,35 @@
 // ==============================================================
-// UI STATE MANAGEMENT (Pit Data Subfolders & CSV Setting)
+// UI STATE MANAGEMENT (Disposal Data Subfolders & CSV Setting)
 // ==============================================================
 
-window.pitStates = {};
-window.activePitId = null;
-window.lastActivePitId = null;
-window._lastSelectedFolderName = null; 
-window.hasUnsavedColorChanges = false; 
-window.hasUnsavedPitConfigChanges = false; 
+window.disposalStates = {};
+window.activeDisposalId = null;
+window.lastActiveDisposalId = null;
+window._lastSelectedDisposalFolderName = null; 
+window.hasUnsavedDisposalColorChanges = false; 
+window.hasUnsavedDisposalConfigChanges = false; 
 
-window.discardUnsavedPitConfigChanges = async function() {
-    if (window.hasUnsavedPitConfigChanges && window.activePitId) {
-        window.hasUnsavedPitConfigChanges = false;
-        await restorePitUIState(window.activePitId);
+// Fungsi helper membatalkan perubahan parameter CSV jika pindah tab tanpa di build
+window.discardUnsavedDisposalConfigChanges = async function() {
+    if (window.hasUnsavedDisposalConfigChanges && window.activeDisposalId) {
+        window.hasUnsavedDisposalConfigChanges = false;
+        await restoreDisposalUIState(window.activeDisposalId);
     }
 };
 
-window.applyPitSafetyDisable = function() {
-    if (!window.activePitId) return;
-    const state = window.pitStates[window.activePitId];
+// Fungsi helper mendisable input/dropdown saat file referensi belum ada
+window.applyDisposalSafetyDisable = function() {
+    if (!window.activeDisposalId) return;
+    const state = window.disposalStates[window.activeDisposalId];
     if (!state) return;
 
     const mrReady = (state.mrFile && state.mrFile.size !== undefined) || !!state.mrFileName;
     const refReady = (state.refFile && state.refFile.size !== undefined) || !!state.refFileName;
 
+    // RULE 1: Subset, Loose, dan Bank
     const mrIds = [
-        'pit-col-blockname', 'pit-col-bench', 'pit-col-subset', 'pit-col-seam', 'pit-col-waste', 'pit-col-resource', 
-        'pit-col-waste-thickness', 'pit-col-resource-thickness', 'pit-col-quality-from', 'pit-col-quality-to',
-        'pit-delim-block', 'pit-delim-strip', 'pit-delim-bench'
+        'disp-col-blockname', 'disp-col-bench', 'disp-col-subset', 'disp-col-waste', 'disp-col-bank',
+        'disp-delim-block', 'disp-delim-strip', 'disp-delim-bench'
     ];
     
     mrIds.forEach(id => {
@@ -42,7 +44,8 @@ window.applyPitSafetyDisable = function() {
         }
     });
 
-    const refIds = ['pit-col-recon-waste', 'pit-col-recon-resource'];
+    // RULE 2: Tinggal Recon Loose Capacity
+    const refIds = ['disp-col-recon-waste'];
     refIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -56,13 +59,14 @@ window.applyPitSafetyDisable = function() {
     });
 };
 
-window.getPitFolderBadgeHTML = function(name, rootName) {
-    if (rootName === 'Pit Data') {
+// Ekstensi/Hook ke Framework Folder Global (file.js) spesifik untuk Disposal
+window.getDisposalFolderBadgeHTML = function(name, rootName) {
+    if (rootName === 'Disposal Data') {
         const safeId = name.replace(/\s+/g, '_');
         if (typeof RizpecDB !== 'undefined') {
-            RizpecDB.get(`rizpec_pit_entity_${safeId}_meta`).then(meta => {
+            RizpecDB.get(`rizpec_disp_entity_${safeId}_meta`).then(meta => {
                 if (meta && meta.buildMethod) {
-                    window.updatePitFolderBadge(name, meta.buildMethod);
+                    window.updateDisposalFolderBadge(name, meta.buildMethod);
                 }
             }).catch(() => {});
         }
@@ -71,12 +75,12 @@ window.getPitFolderBadgeHTML = function(name, rootName) {
     return '';
 };
 
-window.updatePitFolderBadge = function(pitId, method) {
-    const container = document.getElementById('subfolders-folder-pit');
+window.updateDisposalFolderBadge = function(dispId, method) {
+    const container = document.getElementById('subfolders-folder-disp');
     if (!container) return;
     const folders = container.querySelectorAll('.folder-name-text');
     for (let span of folders) {
-        if (span.textContent === pitId) {
+        if (span.textContent === dispId) {
             const subEl = span.closest('.group');
             if (subEl) {
                 const badgeContainer = subEl.querySelector('.geometry-badge-container');
@@ -95,17 +99,17 @@ window.updatePitFolderBadge = function(pitId, method) {
     }
 };
 
-window.resetPitStates = function() {
-    window.pitStates = {};
-    window.activePitId = null;
-    window.lastActivePitId = null;
-    window._lastSelectedFolderName = null;
+window.resetDisposalStates = function() {
+    window.disposalStates = {};
+    window.activeDisposalId = null;
+    window.lastActiveDisposalId = null;
+    window._lastSelectedDisposalFolderName = null;
 }
 
-window.savePitMetaToDB = async function(pitId) {
-    if (!pitId || !window.pitStates[pitId]) return;
-    const state = window.pitStates[pitId];
-    const safeId = pitId.replace(/\s+/g, '_');
+window.saveDisposalMetaToDB = async function(dispId) {
+    if (!dispId || !window.disposalStates[dispId]) return;
+    const state = window.disposalStates[dispId];
+    const safeId = dispId.replace(/\s+/g, '_');
     const meta = {
         buildMethod: state.buildMethod || 'NON_CEN',
         mrFileName: state.mrFileName || null,
@@ -122,19 +126,19 @@ window.savePitMetaToDB = async function(pitId) {
         refFileApplied: state.refFileApplied
     };
     try {
-        if (typeof RizpecDB !== 'undefined') await RizpecDB.set(`rizpec_pit_entity_${safeId}_meta`, meta);
+        if (typeof RizpecDB !== 'undefined') await RizpecDB.set(`rizpec_disp_entity_${safeId}_meta`, meta);
     } catch(e) { console.error("Gagal menyimpan meta ke DB", e); }
 };
 
-window.savePitStatsToStorage = async function(pitId) {
-    await window.savePitMetaToDB(pitId);
+window.saveDisposalStatsToStorage = async function(dispId) {
+    await window.saveDisposalMetaToDB(dispId);
 };
 
-window.updatePitBuildGeometryButtonState = function() {
-    if (!window.activePitId) return;
-    const state = window.pitStates[window.activePitId];
-    const btn = document.getElementById('pit-btn-build-geometry');
-    const neFilenameEl = document.getElementById('pit-ne-filename');
+window.updateDisposalBuildGeometryButtonState = function() {
+    if (!window.activeDisposalId) return;
+    const state = window.disposalStates[window.activeDisposalId];
+    const btn = document.getElementById('disp-btn-build-geometry');
+    const neFilenameEl = document.getElementById('disp-ne-filename');
     if (!btn) return;
 
     const isMrReal = state.mrFile && state.mrFile.size !== undefined;
@@ -145,7 +149,7 @@ window.updatePitBuildGeometryButtonState = function() {
 
     const isBuilt = state.generatedCsv !== null || (neFilenameEl && neFilenameEl.textContent !== "Build Geometry terlebih dahulu");
 
-    const mrClearBtn = document.getElementById('pit-clear-mr');
+    const mrClearBtn = document.getElementById('disp-clear-mr');
     if (mrClearBtn) {
         if (isBuilt) mrClearBtn.disabled = true;
         else mrClearBtn.disabled = !(isMrReal || hasMRPlaceholder);
@@ -153,17 +157,18 @@ window.updatePitBuildGeometryButtonState = function() {
 
     const buildMethod = state.buildMethod || 'NON_CEN';
 
-    const delimBlock = state.substrings['pit-delim-block'];
-    const delimStrip = state.substrings['pit-delim-strip'];
-    const delimBench = state.substrings['pit-delim-bench'];
+    const delimBlock = state.substrings['disp-delim-block'];
+    const delimStrip = state.substrings['disp-delim-strip'];
+    const delimBench = state.substrings['disp-delim-bench'];
     
     const isValidFormat = (val) => /^\d+,\d+$/.test(val ? val.trim() : "");
     const areSubstringsFilled = isValidFormat(delimBlock) && isValidFormat(delimStrip) && isValidFormat(delimBench);
 
     const isFilled = (val) => val && val.trim() !== "";
-    const areColsFilled = isFilled(state.cols['pit-col-blockname']) && isFilled(state.cols['pit-col-bench']);
+    const areColsFilled = isFilled(state.cols['disp-col-blockname']) && isFilled(state.cols['disp-col-bench']);
     
     const isRefValid = true;
+
     const isAllMandatoryFilled = areSubstringsFilled && areColsFilled;
 
     if ((isMrReal || (hasMRPlaceholder && !isBuilt)) && !isAllMandatoryFilled) {
@@ -173,15 +178,15 @@ window.updatePitBuildGeometryButtonState = function() {
         btn.title = !areColsFilled ? "Pilih kolom wajib (*) terlebih dahulu." : "Format Substring wajib Lengkap (Angka,Angka). Contoh: 1,4";
     } else if (isBuilt && isRefReal && !state.refFileApplied) {
         if (!isRefValid) {
-            btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Apply Pro-Rata';
+            btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Apply Accumulate';
             btn.disabled = true;
             btn.className = "mt-1 w-full bg-slate-700 text-slate-400 py-2 rounded text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-not-allowed";
-            btn.title = "Pilih kolom wajib (*) Reformat Interval terlebih dahulu.";
+            btn.title = "Pilih kolom wajib (*) Accumulate terlebih dahulu.";
         } else {
-            btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Apply Pro-Rata';
+            btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Apply Accumulate';
             btn.disabled = false;
             btn.className = "mt-1 w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-pointer";
-            btn.title = "Terapkan Reformat Interval ke Geometri di Background.";
+            btn.title = "Terapkan Accumulate ke Geometri di Background.";
         }
     } else if (isBuilt && !hasRefPlaceholder && buildMethod === 'CEN') {
         btn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Reset Geometry';
@@ -210,30 +215,30 @@ window.updatePitBuildGeometryButtonState = function() {
         btn.title = "";
     }
     
-    if (typeof window.applyPitSafetyDisable === 'function') window.applyPitSafetyDisable();
+    if (typeof window.applyDisposalSafetyDisable === 'function') window.applyDisposalSafetyDisable();
 };
 
-window.saveCurrentPitUIState = async function() {
-    if (!window.activePitId || !window.pitStates[window.activePitId]) return;
-    const state = window.pitStates[window.activePitId];
+window.saveCurrentDisposalUIState = async function() {
+    if (!window.activeDisposalId || !window.disposalStates[window.activeDisposalId]) return;
+    const state = window.disposalStates[window.activeDisposalId];
     
-    const colIds = ['pit-col-blockname', 'pit-col-bench', 'pit-col-subset', 'pit-col-seam', 'pit-col-waste', 'pit-col-resource', 'pit-col-waste-thickness', 'pit-col-resource-thickness', 'pit-col-quality-from', 'pit-col-quality-to', 'pit-col-recon-waste', 'pit-col-recon-resource'];
+    const colIds = ['disp-col-blockname', 'disp-col-bench', 'disp-col-subset', 'disp-col-waste', 'disp-col-bank', 'disp-col-recon-waste'];
     colIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) state.cols[id] = el.value;
     });
 
-    const subIds = ['pit-delim-block', 'pit-delim-strip', 'pit-delim-bench'];
+    const subIds = ['disp-delim-block', 'disp-delim-strip', 'disp-delim-bench'];
     subIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) state.substrings[id] = el.value;
     });
 };
 
-function initPitState(pitId) {
-    if (window.pitStates[pitId]) return;
+function initDisposalState(dispId) {
+    if (window.disposalStates[dispId]) return;
 
-    window.pitStates[pitId] = {
+    window.disposalStates[dispId] = {
         mrFile: null,
         mrFileName: null,
         refFile: null,
@@ -253,18 +258,18 @@ function initPitState(pitId) {
     };
 }
 
-async function restorePitUIState(pitId) {
-    const state = window.pitStates[pitId];
+async function restoreDisposalUIState(dispId) {
+    const state = window.disposalStates[dispId];
     if (!state) return;
 
-    const safeId = pitId.replace(/\s+/g, '_');
+    const safeId = dispId.replace(/\s+/g, '_');
     
     try {
         if (typeof RizpecDB !== 'undefined') {
-            const meta = await RizpecDB.get(`rizpec_pit_entity_${safeId}_meta`);
+            const meta = await RizpecDB.get(`rizpec_disp_entity_${safeId}_meta`);
             if (meta) {
                 state.buildMethod = meta.buildMethod || 'NON_CEN';
-                localStorage.setItem(`rizpec_build_type_${safeId}`, state.buildMethod);
+                localStorage.setItem(`rizpec_disp_build_type_${safeId}`, state.buildMethod);
                 
                 state.mrFileName = meta.mrFileName || null;
                 state.refFileName = meta.refFileName || null;
@@ -284,59 +289,77 @@ async function restorePitUIState(pitId) {
 
     if (!state.generatedCsv) {
         try {
-            const savedCsv = await RizpecDB.get(`rizpec_pit_entity_${safeId}`);
+            const savedCsv = await RizpecDB.get(`rizpec_disp_entity_${safeId}`);
             if (savedCsv) state.generatedCsv = savedCsv;
         } catch(e) {}
     }
 
-    const mrFileEl = document.getElementById('pit-mr-filename');
-    const mrClearBtn = document.getElementById('pit-clear-mr');
+    const mrFileEl = document.getElementById('disp-mr-filename');
+    const mrClearBtn = document.getElementById('disp-clear-mr');
     if (state.mrFile || state.mrFileName) {
-        mrFileEl.textContent = state.mrFile ? state.mrFile.name : state.mrFileName;
-        mrFileEl.classList.replace('text-slate-500', 'text-blue-400');
-        mrFileEl.classList.remove('italic');
+        if(mrFileEl) {
+            mrFileEl.textContent = state.mrFile ? state.mrFile.name : state.mrFileName;
+            mrFileEl.classList.replace('text-slate-500', 'text-blue-400');
+            mrFileEl.classList.remove('italic');
+        }
     } else {
-        mrFileEl.textContent = 'Tidak ada file...';
-        mrFileEl.classList.replace('text-blue-400', 'text-slate-500');
-        mrFileEl.classList.add('italic');
+        if(mrFileEl) {
+            mrFileEl.textContent = 'Tidak ada file...';
+            mrFileEl.classList.replace('text-blue-400', 'text-slate-500');
+            mrFileEl.classList.add('italic');
+        }
         if (mrClearBtn) mrClearBtn.disabled = true;
     }
 
-    const refFileEl = document.getElementById('pit-ref-filename');
-    const refClearBtn = document.getElementById('pit-clear-ref');
+    const refFileEl = document.getElementById('disp-ref-filename');
+    const refClearBtn = document.getElementById('disp-clear-ref');
     if (state.refFile || state.refFileName) {
-        refFileEl.textContent = state.refFile ? state.refFile.name : state.refFileName;
-        refFileEl.classList.replace('text-slate-500', 'text-blue-400');
-        refFileEl.classList.remove('italic');
+        if(refFileEl) {
+            refFileEl.textContent = state.refFile ? state.refFile.name : state.refFileName;
+            refFileEl.classList.replace('text-slate-500', 'text-blue-400');
+            refFileEl.classList.remove('italic');
+        }
         if (refClearBtn) refClearBtn.disabled = false;
     } else {
-        refFileEl.textContent = 'Tidak ada file...';
-        refFileEl.classList.replace('text-blue-400', 'text-slate-500');
-        refFileEl.classList.add('italic');
+        if(refFileEl) {
+            refFileEl.textContent = 'Tidak ada file...';
+            refFileEl.classList.replace('text-blue-400', 'text-slate-500');
+            refFileEl.classList.add('italic');
+        }
         if (refClearBtn) refClearBtn.disabled = true;
     }
 
-    const mrStatUI = document.getElementById('pit-stat-mr');
-    const refStatUI = document.getElementById('pit-stat-ref');
-    const neStatUI = document.getElementById('pit-stat-ne');
+    const mrStatUI = document.getElementById('disp-stat-mr');
+    const refStatUI = document.getElementById('disp-stat-ref');
+    const neStatUI = document.getElementById('disp-stat-ne');
     
     if(mrStatUI) mrStatUI.textContent = state.mrStats.text;
     if(refStatUI) refStatUI.textContent = state.refStats.text;
     if(neStatUI) neStatUI.textContent = state.neStats.text;
 
-    const subIds = ['pit-delim-block', 'pit-delim-strip', 'pit-delim-bench'];
+    const subIds = ['disp-delim-block', 'disp-delim-strip', 'disp-delim-bench'];
     subIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = state.substrings[id] || '';
     });
 
-    window.populatePitColumnDropdowns(state.mrHeaders || [], 'mr');
-    window.populatePitColumnDropdowns(state.refHeaders || [], 'ref');
+    window.populateDisposalColumnDropdowns(state.mrHeaders || [], 'mr');
+    window.populateDisposalColumnDropdowns(state.refHeaders || [], 'ref');
     
-    const newEntityNameEl = document.getElementById('pit-ne-filename');
+    const bankEl = document.getElementById('disp-col-bank');
+    if (bankEl) {
+        if (state.cols['disp-col-bank'] !== undefined && state.cols['disp-col-bank'] !== '') {
+            bankEl.value = state.cols['disp-col-bank'];
+        } else {
+            bankEl.value = "1.0";
+            state.cols['disp-col-bank'] = "1.0";
+        }
+    }
+
+    const newEntityNameEl = document.getElementById('disp-ne-filename');
     if (newEntityNameEl) {
         if (state.neStats && !state.neStats.text.includes('(0 Block')) {
-            newEntityNameEl.textContent = pitId + "_Geometry";
+            newEntityNameEl.textContent = dispId + "_Geometry";
             newEntityNameEl.classList.replace('text-slate-500', 'text-blue-400');
             newEntityNameEl.classList.remove('italic');
         } else {
@@ -346,34 +369,34 @@ async function restorePitUIState(pitId) {
         }
     }
     
-    const mrInput = document.getElementById('pit-mr-file');
-    const refInput = document.getElementById('pit-ref-file');
+    const mrInput = document.getElementById('disp-mr-file');
+    const refInput = document.getElementById('disp-ref-file');
     if (mrInput) mrInput.value = '';
     if (refInput) refInput.value = '';
 
-    window.updatePitBuildGeometryButtonState();
+    window.updateDisposalBuildGeometryButtonState();
 
-    if (typeof window.renderPitGeometryPreview === 'function') {
-        window.renderPitGeometryPreview(state.generatedCsv, state.summaryObj, state.buildMethod);
+    if (typeof window.renderDisposalGeometryPreview === 'function') {
+        window.renderDisposalGeometryPreview(state.generatedCsv, state.summaryObj, state.buildMethod);
     }
 }
 
 // >>> FUNGSI AGREGASI KESELURUHAN (GLOBAL SUMMARY) <<<
-window.aggregateAllPitData = async function() {
-    const pitContainer = document.getElementById('subfolders-folder-pit');
-    if (!pitContainer) return;
-    const pitElements = pitContainer.querySelectorAll('.folder-name-text');
-    const pitNames = Array.from(pitElements).map(el => el.textContent);
+window.aggregateAllDisposalData = async function() {
+    const dispContainer = document.getElementById('subfolders-folder-disp');
+    if (!dispContainer) return;
+    const dispElements = dispContainer.querySelectorAll('.folder-name-text');
+    const dispNames = Array.from(dispElements).map(el => el.textContent);
     
-    if (pitNames.length === 0) {
-         const mrStatUI = document.getElementById('pit-stat-mr');
+    if (dispNames.length === 0) {
+         const mrStatUI = document.getElementById('disp-stat-mr');
          if (mrStatUI) mrStatUI.textContent = `0.00 MB (0 Row)`;
-         const refStatUI = document.getElementById('pit-stat-ref');
+         const refStatUI = document.getElementById('disp-stat-ref');
          if (refStatUI) refStatUI.textContent = `0.00 MB (0 Row)`;
-         const neStatUI = document.getElementById('pit-stat-ne');
+         const neStatUI = document.getElementById('disp-stat-ne');
          if (neStatUI) neStatUI.textContent = `0.00 MB (0 Block Computed)`;
-         if (typeof window.renderPitGeometryPreview === 'function') {
-             window.renderPitGeometryPreview(null, null, '', false, true);
+         if (typeof window.renderDisposalGeometryPreview === 'function') {
+             window.renderDisposalGeometryPreview(null, null, '', false, true);
          }
          return;
     }
@@ -382,18 +405,18 @@ window.aggregateAllPitData = async function() {
     let totalRefSize = 0, totalRefRows = 0;
     let totalVram = 0, totalBlocks = 0;
     
-    let sumWaste = 0;
-    let sumResource = 0;
+    let sumWaste = 0; // Dirender sebagai Total Loose
+    let sumBank = 0; // Dirender sebagai Total Bank
     
     let allHulls = [];
     let globalBounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
     let hasBounds = false;
 
-    for (let pit of pitNames) {
-        const safeId = pit.replace(/\s+/g, '_');
+    for (let disp of dispNames) {
+        const safeId = disp.replace(/\s+/g, '_');
         try {
             if (typeof RizpecDB !== 'undefined') {
-                const meta = await RizpecDB.get(`rizpec_pit_entity_${safeId}_meta`);
+                const meta = await RizpecDB.get(`rizpec_disp_entity_${safeId}_meta`);
                 if (meta) {
                     const stMR = meta.mrStats || {};
                     const stRef = meta.refStats || {};
@@ -415,7 +438,7 @@ window.aggregateAllPitData = async function() {
                     const summary = meta.summaryObj;
                     if (summary) {
                         sumWaste += (summary.totalWaste || 0);
-                        sumResource += (summary.totalResource || 0);
+                        sumBank += (summary.totalBank || 0);
                         
                         if (summary.previewHulls) {
                             allHulls.push(...summary.previewHulls);
@@ -433,52 +456,53 @@ window.aggregateAllPitData = async function() {
         } catch(e) {}
     }
     
-    const mrStatUI = document.getElementById('pit-stat-mr');
+    const mrStatUI = document.getElementById('disp-stat-mr');
     if (mrStatUI) mrStatUI.textContent = `${(totalMrSize/(1024*1024)).toFixed(2)} MB (${totalMrRows} Row)`;
     
-    const refStatUI = document.getElementById('pit-stat-ref');
+    const refStatUI = document.getElementById('disp-stat-ref');
     if (refStatUI) refStatUI.textContent = `${(totalRefSize/(1024*1024)).toFixed(2)} MB (${totalRefRows} Row)`;
     
-    const neStatUI = document.getElementById('pit-stat-ne');
-    if (neStatUI) neStatUI.textContent = `${totalVram.toFixed(2)} MB (${totalBlocks} Block Computed)`;
+    const neStatUI = document.getElementById('disp-stat-ne');
+    if (neStatUI) neStatUI.textContent = `${totalVram.toFixed(2)} MB (${totalBlocks} Computed)`;
     
     const combinedSummary = {
         totalWaste: sumWaste,
-        totalResource: sumResource,
+        totalBank: sumBank,
         previewHulls: allHulls.length > 0 ? allHulls : null,
         previewBounds: hasBounds ? globalBounds : null
     };
     
-    if (typeof window.renderPitGeometryPreview === 'function') {
-        window.renderPitGeometryPreview(null, combinedSummary, 'Agregasi', false, true);
+    if (typeof window.renderDisposalGeometryPreview === 'function') {
+        window.renderDisposalGeometryPreview(null, combinedSummary, 'Agregasi', false, true);
     }
 };
 
-// >>> ROUTER UTAMA PIT DATA <<<
-window.onPitFolderSelected = async function(name, type, rootName) {
-    if (rootName !== 'Pit Data') {
-        window.activePitId = null;
-	window._lastSelectedFolderName = null; // Tambahkan reset tracker
+// >>> ROUTER UTAMA DISPOSAL DATA <<<
+window.onDisposalFolderSelected = async function(name, type, rootName) {
+    if (rootName !== 'Disposal Data') {
+        window.activeDisposalId = null;
+	window._lastSelectedDisposalFolderName = null; // Tambahkan reset tracker
         return; 
     }
     
-    // Tampilkan Wrapper Kanan Khusus Pit, Sembunyikan Disposal
+    // Tampilkan Wrapper Kanan Khusus Disposal, Sembunyikan Pit
     const pitWrap = document.getElementById('pit-summary-wrapper');
     const dispWrap = document.getElementById('disp-summary-wrapper');
     const dxfWrap = document.getElementById('dxf-summary-wrapper');
-    if (pitWrap) { pitWrap.classList.remove('hidden'); pitWrap.classList.add('flex'); }
-    if (dispWrap) { dispWrap.classList.add('hidden'); dispWrap.classList.remove('flex'); }
+    if (pitWrap) { pitWrap.classList.add('hidden'); pitWrap.classList.remove('flex'); } // FIX: Matikan Pit
+    if (dispWrap) { dispWrap.classList.remove('hidden'); dispWrap.classList.add('flex'); } // FIX: Nyalakan Disposal
     if (dxfWrap) { dxfWrap.classList.add('hidden'); dxfWrap.classList.remove('flex'); }
 
-    // --- FIX UI HILANG SAAT DOUBLE CLICK ---
-    const container = document.getElementById('geometry-pit-manager');
+    // PINDAHKAN MANAJEMEN VISIBILITAS UI KE SINI (SEBELUM EARLY RETURN)
+    // Tujuannya agar saat double click, UI Geometry Manager tetap dimunculkan
+    const container = document.getElementById('geometry-disp-manager');
     if (container) {
         if (type === 'Root Folder') {
             container.classList.remove('hidden');
             container.classList.add('flex');
             
-            if (typeof window.updateGeometryPitListUI === 'function') {
-                window.updateGeometryPitListUI();
+            if (typeof window.updateGeometryDisposalListUI === 'function') {
+                window.updateGeometryDisposalListUI();
             }
         } else {
             container.classList.add('hidden');
@@ -486,56 +510,56 @@ window.onPitFolderSelected = async function(name, type, rootName) {
         }
     }
 
-    if (window._lastSelectedFolderName === name) return;
+    if (window._lastSelectedDisposalFolderName === name) return; 
     
     if (typeof window.resetUnsavedColorChanges === 'function') {
         window.resetUnsavedColorChanges();
     }
 
-    window._lastSelectedFolderName = name;
+    window._lastSelectedDisposalFolderName = name;
 
-    if (window.activePitId && window.activePitId !== name) {
-        if (window.hasUnsavedPitConfigChanges && typeof window.discardUnsavedPitConfigChanges === 'function') {
-            await window.discardUnsavedPitConfigChanges();
+    if (window.activeDisposalId && window.activeDisposalId !== name) {
+        if (window.hasUnsavedDisposalConfigChanges && typeof window.discardUnsavedDisposalConfigChanges === 'function') {
+            await window.discardUnsavedDisposalConfigChanges();
         } else {
-            await window.saveCurrentPitUIState();
+            await window.saveCurrentDisposalUIState();
         }
 
-        if (window.pitStates[window.activePitId]) {
-            window.lastActivePitId = window.activePitId;
+        if (window.disposalStates[window.activeDisposalId]) {
+            window.lastActiveDisposalId = window.activeDisposalId;
         }
     }
 
     if (type !== 'Root Folder') {
-        window.activePitId = name;
-        initPitState(name);
-        await restorePitUIState(name);
+        window.activeDisposalId = name;
+        initDisposalState(name);
+        await restoreDisposalUIState(name);
     } else {
-        window.activePitId = null;
-        if (typeof window.aggregateAllPitData === 'function') {
-            await window.aggregateAllPitData();
+        window.activeDisposalId = null;
+        if (typeof window.aggregateAllDisposalData === 'function') {
+            await window.aggregateAllDisposalData();
         }
     }
 };
 
-window.onPitFolderRenamed = async function(oldName, newName, rootName) {
-    if (rootName === 'Pit Data') {
-        if (window._lastSelectedFolderName === oldName) window._lastSelectedFolderName = newName;
+window.onDisposalFolderRenamed = async function(oldName, newName, rootName) {
+    if (rootName === 'Disposal Data') {
+        if (window._lastSelectedDisposalFolderName === oldName) window._lastSelectedDisposalFolderName = newName;
 
-        if (window.pitStates[oldName]) {
-            window.pitStates[newName] = window.pitStates[oldName];
-            delete window.pitStates[oldName];
+        if (window.disposalStates[oldName]) {
+            window.disposalStates[newName] = window.disposalStates[oldName];
+            delete window.disposalStates[oldName];
         }
         
-        const oldKey = `rizpec_pit_entity_${oldName.replace(/\s+/g, '_')}`;
-        const newKey = `rizpec_pit_entity_${newName.replace(/\s+/g, '_')}`;
+        const oldKey = `rizpec_disp_entity_${oldName.replace(/\s+/g, '_')}`;
+        const newKey = `rizpec_disp_entity_${newName.replace(/\s+/g, '_')}`;
         const oldMetaKey = `${oldKey}_meta`;
         const newMetaKey = `${newKey}_meta`;
         
         const oldSafe = oldName.replace(/\s+/g, '_');
         const newSafe = newName.replace(/\s+/g, '_');
-        const oldTypeKey = `rizpec_build_type_${oldSafe}`;
-        const newTypeKey = `rizpec_build_type_${newSafe}`;
+        const oldTypeKey = `rizpec_disp_build_type_${oldSafe}`;
+        const newTypeKey = `rizpec_disp_build_type_${newSafe}`;
         const savedType = localStorage.getItem(oldTypeKey);
         if (savedType) {
             localStorage.setItem(newTypeKey, savedType);
@@ -557,79 +581,77 @@ window.onPitFolderRenamed = async function(oldName, newName, rootName) {
             }
         } catch(e) {}
 
-        if (window.activePitId === oldName) {
-            window.activePitId = newName;
-            const newEntityNameEl = document.getElementById('pit-ne-filename');
+        if (window.activeDisposalId === oldName) {
+            window.activeDisposalId = newName;
+            const newEntityNameEl = document.getElementById('disp-ne-filename');
             if (newEntityNameEl && newEntityNameEl.textContent !== "Build Geometry terlebih dahulu") {
                 newEntityNameEl.textContent = newName + "_Geometry";
             }
         }
-        if (window.lastActivePitId === oldName) window.lastActivePitId = newName;
+        if (window.lastActiveDisposalId === oldName) window.lastActiveDisposalId = newName;
         
         const oldNormalized = oldSafe.replace(/_/g, ' ');
 
-        if (window.loadedPits && (window.loadedPits.has(oldName) || window.loadedPits.has(oldNormalized))) {
-            window.loadedPits.delete(oldName);
-            window.loadedPits.delete(oldNormalized);
+        if (window.loadedDisposals && (window.loadedDisposals.has(oldName) || window.loadedDisposals.has(oldNormalized))) {
+            window.loadedDisposals.delete(oldName);
+            window.loadedDisposals.delete(oldNormalized);
             
-            window.loadedPits.add(newName);
+            window.loadedDisposals.add(newName);
             
-            if (window.renderedPits) {
-                window.renderedPits.delete(oldName);
-                window.renderedPits.delete(oldNormalized);
+            if (window.renderedDisposals) {
+                window.renderedDisposals.delete(oldName);
+                window.renderedDisposals.delete(oldNormalized);
             }
-            // FIX BUGS: Menambahkan spesifik tipe 'pit'
-            if (typeof window.unloadPitGeometry === 'function') {
-                window.unloadPitGeometry(oldName, 'pit');
-                if (oldName !== oldNormalized) window.unloadPitGeometry(oldNormalized, 'pit');
+            if (typeof window.unloadDisposalGeometry === 'function') {
+                window.unloadDisposalGeometry(oldName);
+                if (oldName !== oldNormalized) window.unloadDisposalGeometry(oldNormalized);
             }
         }
 
-        if (typeof window.updateGeometryPitListUI === 'function') window.updateGeometryPitListUI();
+        if (typeof window.updateGeometryDisposalListUI === 'function') window.updateGeometryDisposalListUI();
     }
 };
 
-window.onPitFolderDeleted = async function(name, rootName) {
-    if (rootName === 'Pit Data') {
-        if (window._lastSelectedFolderName === name) window._lastSelectedFolderName = null;
+window.onDisposalFolderDeleted = async function(name, rootName) {
+    if (rootName === 'Disposal Data') {
+        if (window._lastSelectedDisposalFolderName === name) window._lastSelectedDisposalFolderName = null;
 
-        delete window.pitStates[name];
+        delete window.disposalStates[name];
         
         const safeName = name.replace(/\s+/g, '_');
-        const normalizedPitName = safeName.replace(/_/g, ' '); 
+        const normalizedDispName = safeName.replace(/_/g, ' '); 
         
-        localStorage.removeItem(`rizpec_build_type_${safeName}`);
+        localStorage.removeItem(`rizpec_disp_build_type_${safeName}`);
 
         try {
             if (typeof RizpecDB !== 'undefined') {
-                await RizpecDB.remove(`rizpec_pit_entity_${safeName}`);
-                await RizpecDB.remove(`rizpec_pit_entity_${safeName}_meta`);
+                await RizpecDB.remove(`rizpec_disp_entity_${safeName}`);
+                await RizpecDB.remove(`rizpec_disp_entity_${safeName}_meta`);
             }
         } catch(e) {}
         
-        if (window.loadedPits) {
-            window.loadedPits.delete(name);
-            window.loadedPits.delete(normalizedPitName);
+        if (window.loadedDisposals) {
+            window.loadedDisposals.delete(name);
+            window.loadedDisposals.delete(normalizedDispName);
         }
-        if (window.renderedPits) {
-            window.renderedPits.delete(name);
-            window.renderedPits.delete(normalizedPitName);
-        }
-        
-        // FIX BUGS: Menambahkan spesifik tipe 'pit'
-        if (typeof window.unloadPitGeometry === 'function') {
-            window.unloadPitGeometry(name, 'pit');
-            if (name !== normalizedPitName) window.unloadPitGeometry(normalizedPitName, 'pit');
+        if (window.renderedDisposals) {
+            window.renderedDisposals.delete(name);
+            window.renderedDisposals.delete(normalizedDispName);
         }
         
-        if (typeof window.updateGeometryPitListUI === 'function') window.updateGeometryPitListUI();
+        if (typeof window.unloadDisposalGeometry === 'function') {
+            window.unloadDisposalGeometry(name);
+            if (name !== normalizedDispName) window.unloadDisposalGeometry(normalizedDispName);
+        }
+        
+        if (typeof window.updateGeometryDisposalListUI === 'function') window.updateGeometryDisposalListUI();
 
-        if (window.activePitId === name) window.activePitId = null;
-        if (window.lastActivePitId === name) window.lastActivePitId = null;
+        if (window.activeDisposalId === name) window.activeDisposalId = null;
+        if (window.lastActiveDisposalId === name) window.lastActiveDisposalId = null;
         
         const summaryName = document.getElementById('summary-name');
-        if (summaryName && summaryName.textContent === 'Pit Data') {
-            if (typeof window.aggregateAllPitData === 'function') await window.aggregateAllPitData();
+        if (summaryName && summaryName.textContent === 'Disposal Data') {
+            if (typeof window.aggregateAllDisposalData === 'function') await window.aggregateAllDisposalData();
         }
 
         const geoTab = document.getElementById('panel-geometry');
@@ -643,7 +665,7 @@ window.onPitFolderDeleted = async function(name, rootName) {
 // SUB-FILE UPLOAD & CALCULATION LOGIC
 // ==============================================================
 
-function extractPitHeaders(file) {
+function extractDisposalHeaders(file) {
     return new Promise(resolve => {
         const reader = new FileReader();
         reader.onload = e => {
@@ -659,28 +681,28 @@ function extractPitHeaders(file) {
     });
 }
 
-function inheritPitHistoryIfEmpty(state) {
-    const isColEmpty = !state.cols['pit-col-blockname'];
-    if (isColEmpty && window.lastActivePitId && window.pitStates[window.lastActivePitId]) {
-        const lastState = window.pitStates[window.lastActivePitId];
+function inheritDisposalHistoryIfEmpty(state) {
+    const isColEmpty = !state.cols['disp-col-blockname'];
+    if (isColEmpty && window.lastActiveDisposalId && window.disposalStates[window.lastActiveDisposalId]) {
+        const lastState = window.disposalStates[window.lastActiveDisposalId];
         Object.assign(state.cols, lastState.cols);
         Object.assign(state.substrings, lastState.substrings);
     }
 }
 
-async function recalculatePitHeaders() {
-    const state = window.pitStates[window.activePitId];
+async function recalculateDisposalHeaders() {
+    const state = window.disposalStates[window.activeDisposalId];
     if (!state) return;
     
     let promises = [];
 
     if (state.mrFile && state.mrFile.size !== undefined) {
-        promises.push(extractPitHeaders(state.mrFile).then(data => { 
+        promises.push(extractDisposalHeaders(state.mrFile).then(data => { 
             state.mrHeaders = data.headers;
-            inheritPitHistoryIfEmpty(state);
-            window.populatePitColumnDropdowns(data.headers, 'mr', data.firstRow); 
+            inheritDisposalHistoryIfEmpty(state);
+            window.populateDisposalColumnDropdowns(data.headers, 'mr', data.firstRow); 
             
-            const subIds = ['pit-delim-block', 'pit-delim-strip', 'pit-delim-bench'];
+            const subIds = ['disp-delim-block', 'disp-delim-strip', 'disp-delim-bench'];
             subIds.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.value = state.substrings[id] || '';
@@ -688,48 +710,40 @@ async function recalculatePitHeaders() {
         }));
     } else if (!state.mrFile) {
         state.mrHeaders = [];
-        window.populatePitColumnDropdowns([], 'mr', []);
+        window.populateDisposalColumnDropdowns([], 'mr', []);
     }
 
     if (state.refFile && state.refFile.size !== undefined) {
-        promises.push(extractPitHeaders(state.refFile).then(data => { 
+        promises.push(extractDisposalHeaders(state.refFile).then(data => { 
             state.refHeaders = data.headers; 
-            window.populatePitColumnDropdowns(data.headers, 'ref', data.firstRow); 
+            window.populateDisposalColumnDropdowns(data.headers, 'ref', data.firstRow); 
         }));
     } else if (!state.refFile) {
         state.refHeaders = [];
-        window.populatePitColumnDropdowns([], 'ref', []);
+        window.populateDisposalColumnDropdowns([], 'ref', []);
     }
 
     await Promise.all(promises);
-    await window.savePitMetaToDB(window.activePitId);
+    await window.saveDisposalMetaToDB(window.activeDisposalId);
 }
 
-window.populatePitColumnDropdowns = (headers, type = 'mr', firstRow = []) => {
+// Menyesuaikan populate agar tidak memproses elemen disp-col-bank sebagai dropdown
+window.populateDisposalColumnDropdowns = (headers, type = 'mr', firstRow = []) => {
     let selectIds = [];
     let autoFillMap = {};
 
     if (type === 'mr') {
         selectIds = [
-            'pit-col-blockname', 'pit-col-bench', 'pit-col-subset', 'pit-col-seam', 'pit-col-waste', 'pit-col-resource',
-            'pit-col-waste-thickness', 'pit-col-resource-thickness', 'pit-col-quality-from', 'pit-col-quality-to'
+            'disp-col-blockname', 'disp-col-bench', 'disp-col-subset', 'disp-col-waste'
         ];
         
         autoFillMap = {
-            'pit-col-blockname': 'BLOCKNAME', 'pit-col-bench': 'BENCH', 'pit-col-subset': 'SUBSET', 'pit-col-seam': 'SEAM',
-            'pit-col-waste': 'TOTALVOLUME', 'pit-col-resource': 'RAWRECMASS', 'pit-col-waste-thickness': 'TRUEVERTTHK', 'pit-col-resource-thickness': 'TRUETHK'
+            'disp-col-blockname': 'BLOCKNAME', 'disp-col-bench': 'BENCH', 'disp-col-subset': 'SUBSET',
+            'disp-col-waste': 'TOTALVOLUME' // Digunakan sebagai Loose Capacity
         };
         
-        if (headers.includes('BOTSURFACE')) {
-            const idx = headers.indexOf('BOTSURFACE');
-            if (idx + 1 < headers.length) autoFillMap['pit-col-quality-from'] = headers[idx + 1];
-        }
-        if (headers.includes('LOSSVOL')) {
-            const idx = headers.indexOf('LOSSVOL');
-            if (idx - 1 >= 0) autoFillMap['pit-col-quality-to'] = headers[idx - 1];
-        }
     } else if (type === 'ref') {
-        selectIds = ['pit-col-recon-waste', 'pit-col-recon-resource'];
+        selectIds = ['disp-col-recon-waste'];
     }
 
     const selects = selectIds.map(id => document.getElementById(id));
@@ -749,8 +763,8 @@ window.populatePitColumnDropdowns = (headers, type = 'mr', firstRow = []) => {
         let valueToSet = "";
         let savedVal = null;
         
-        if (window.activePitId && window.pitStates[window.activePitId]) {
-            savedVal = window.pitStates[window.activePitId].cols[selectEl.id];
+        if (window.activeDisposalId && window.disposalStates[window.activeDisposalId]) {
+            savedVal = window.disposalStates[window.activeDisposalId].cols[selectEl.id];
         }
         
         if (savedVal && (headers.length === 0 || headers.includes(savedVal))) valueToSet = savedVal;
@@ -770,17 +784,17 @@ window.populatePitColumnDropdowns = (headers, type = 'mr', firstRow = []) => {
     });
 };
 
-async function updatePitFileStats(file, type) {
-    const state = window.pitStates[window.activePitId];
-    const statEl = document.getElementById(type === 'mr' ? 'pit-stat-mr' : 'pit-stat-ref');
+async function updateDisposalFileStats(file, type) {
+    const state = window.disposalStates[window.activeDisposalId];
+    const statEl = document.getElementById(type === 'mr' ? 'disp-stat-mr' : 'disp-stat-ref');
     
     if (type === 'mr') {
         state.neStats = { text: '0.00 MB (0 Block Computed)' };
         state.generatedCsv = null; 
-        const neStatEl = document.getElementById('pit-stat-ne');
+        const neStatEl = document.getElementById('disp-stat-ne');
         if (neStatEl) neStatEl.textContent = state.neStats.text;
         
-        const neFilenameEl = document.getElementById('pit-ne-filename');
+        const neFilenameEl = document.getElementById('disp-ne-filename');
         if (neFilenameEl) {
             neFilenameEl.textContent = "Build Geometry terlebih dahulu";
             neFilenameEl.classList.replace('text-blue-400', 'text-slate-500');
@@ -794,9 +808,9 @@ async function updatePitFileStats(file, type) {
         if (type === 'ref') state.refStats = emptyStats;
         if (statEl) statEl.textContent = emptyStats.text;
         
-        await window.savePitMetaToDB(window.activePitId);
-        await recalculatePitHeaders();
-        window.updatePitBuildGeometryButtonState();
+        await window.saveDisposalMetaToDB(window.activeDisposalId);
+        await recalculateDisposalHeaders();
+        window.updateDisposalBuildGeometryButtonState();
         return;
     }
 
@@ -816,9 +830,9 @@ async function updatePitFileStats(file, type) {
         if (type === 'mr') state.mrStats = statsObj;
         if (type === 'ref') state.refStats = statsObj;
         
-        await window.savePitMetaToDB(window.activePitId);
-        await recalculatePitHeaders();
-        window.updatePitBuildGeometryButtonState();
+        await window.saveDisposalMetaToDB(window.activeDisposalId);
+        await recalculateDisposalHeaders();
+        window.updateDisposalBuildGeometryButtonState();
     };
     reader.readAsText(file);
 }
@@ -827,17 +841,17 @@ async function updatePitFileStats(file, type) {
 // EVENT LISTENERS (Dibungkus dalam IIFE agar terhindar dari bentrok global)
 // ==============================================================
 (() => {
-    const pitReserveInput = document.getElementById('pit-mr-file');
-    if (pitReserveInput) {
-        pitReserveInput.addEventListener('change', async (e) => {
-            if (!window.activePitId) return; // GUARD
+    const miningReserveInput = document.getElementById('disp-mr-file');
+    if (miningReserveInput) {
+        miningReserveInput.addEventListener('change', async (e) => {
+            if (!window.activeDisposalId) return; // GUARD
             const file = e.target.files[0];
-            const state = window.pitStates[window.activePitId];
+            const state = window.disposalStates[window.activeDisposalId];
             state.mrFile = file || null;
             state.mrFileName = file ? file.name : null;
             
-            const filenameEl = document.getElementById('pit-mr-filename');
-            const clearBtn = document.getElementById('pit-clear-mr');
+            const filenameEl = document.getElementById('disp-mr-filename');
+            const clearBtn = document.getElementById('disp-clear-mr');
             
             if (file) {
                 if (filenameEl) {
@@ -846,23 +860,23 @@ async function updatePitFileStats(file, type) {
                     filenameEl.classList.remove('italic');
                 }
                 if (clearBtn) clearBtn.disabled = false;
-                await updatePitFileStats(file, 'mr');
+                await updateDisposalFileStats(file, 'mr');
             }
         });
     }
 
-    const pitRefInput = document.getElementById('pit-ref-file');
-    if (pitRefInput) {
-        pitRefInput.addEventListener('change', async (e) => {
-            if (!window.activePitId) return; // GUARD
+    const reformatFileInput = document.getElementById('disp-ref-file');
+    if (reformatFileInput) {
+        reformatFileInput.addEventListener('change', async (e) => {
+            if (!window.activeDisposalId) return; // GUARD
             const file = e.target.files[0];
-            const state = window.pitStates[window.activePitId];
+            const state = window.disposalStates[window.activeDisposalId];
             state.refFile = file || null;
             state.refFileName = file ? file.name : null;
             if (file) state.refFileApplied = false;
             
-            const filenameEl = document.getElementById('pit-ref-filename');
-            const clearBtn = document.getElementById('pit-clear-ref');
+            const filenameEl = document.getElementById('disp-ref-filename');
+            const clearBtn = document.getElementById('disp-clear-ref');
             
             if (file) {
                 if (filenameEl) {
@@ -871,21 +885,21 @@ async function updatePitFileStats(file, type) {
                     filenameEl.classList.remove('italic');
                 }
                 if (clearBtn) clearBtn.disabled = false;
-                await updatePitFileStats(file, 'ref');
+                await updateDisposalFileStats(file, 'ref');
             }
         });
     }
 
-    const clearMiningBtn = document.getElementById('pit-clear-mr');
+    const clearMiningBtn = document.getElementById('disp-clear-mr');
     if (clearMiningBtn) {
         clearMiningBtn.addEventListener('click', async () => {
-            if (!window.activePitId) return; // GUARD
-            const state = window.pitStates[window.activePitId];
+            if (!window.activeDisposalId) return; // GUARD
+            const state = window.disposalStates[window.activeDisposalId];
             
-            window.hasUnsavedPitConfigChanges = false;
+            window.hasUnsavedDisposalConfigChanges = false;
             state.mrFile = null;
             state.mrFileName = null;
-            const filenameEl = document.getElementById('pit-mr-filename');
+            const filenameEl = document.getElementById('disp-mr-filename');
             
             if (filenameEl) {
                 filenameEl.textContent = 'Tidak ada file...';
@@ -900,52 +914,56 @@ async function updatePitFileStats(file, type) {
             state.buildMethod = 'NON_CEN';
             state.neStats = { text: '0.00 MB (0 Block Computed)', rows: 0, cols: 0, size: 0 };
             
-            const neFilenameEl = document.getElementById('pit-ne-filename');
+            // Mengembalikan Bank condition ke 1.0 saat di reset
+            state.cols['disp-col-bank'] = '1.0';
+            const bankEl = document.getElementById('disp-col-bank');
+            if (bankEl) bankEl.value = '1.0';
+            
+            const neFilenameEl = document.getElementById('disp-ne-filename');
             if (neFilenameEl) {
                 neFilenameEl.textContent = "Build Geometry terlebih dahulu";
                 neFilenameEl.classList.replace('text-blue-400', 'text-slate-500');
                 neFilenameEl.classList.add('italic');
             }
 
-            const safePitId = window.activePitId.replace(/\s+/g, '_');
-            const normalizedPitName = safePitId.replace(/_/g, ' ');
+            const safeDispId = window.activeDisposalId.replace(/\s+/g, '_');
+            const normalizedDispName = safeDispId.replace(/_/g, ' ');
             
-            localStorage.removeItem(`rizpec_build_type_${safePitId}`);
+            localStorage.removeItem(`rizpec_disp_build_type_${safeDispId}`);
 
-            await updatePitFileStats(null, 'mr'); 
+            await updateDisposalFileStats(null, 'mr'); 
             
             if (typeof RizpecDB !== 'undefined') {
-                await RizpecDB.remove(`rizpec_pit_entity_${safePitId}`).catch(()=>{});
-                await window.savePitMetaToDB(window.activePitId);
+                await RizpecDB.remove(`rizpec_disp_entity_${safeDispId}`).catch(()=>{});
+                await window.saveDisposalMetaToDB(window.activeDisposalId);
             }
             
-            const mrInput = document.getElementById('pit-mr-file');
+            const mrInput = document.getElementById('disp-mr-file');
             if (mrInput) mrInput.value = '';
 
-            if (typeof window.renderPitGeometryPreview === 'function') window.renderPitGeometryPreview(null, null);
+            if (typeof window.renderDisposalGeometryPreview === 'function') window.renderDisposalGeometryPreview(null, null);
             
-            // FIX BUGS: Menambahkan spesifik tipe 'pit'
-            if (typeof window.unloadPitGeometry === 'function') {
-                window.unloadPitGeometry(window.activePitId, 'pit');
-                if (window.activePitId !== normalizedPitName) window.unloadPitGeometry(normalizedPitName, 'pit');
+            if (typeof window.unloadDisposalGeometry === 'function') {
+                window.unloadDisposalGeometry(window.activeDisposalId);
+                if (window.activeDisposalId !== normalizedDispName) window.unloadDisposalGeometry(normalizedDispName);
             }
             
-            if (typeof window.updateGeometryPitListUI === 'function') window.updateGeometryPitListUI();
+            if (typeof window.updateGeometryDisposalListUI === 'function') window.updateGeometryDisposalListUI();
             if (typeof window.resetSequenceAndView === 'function') window.resetSequenceAndView();
         });
     }
 
-    const clearReformatBtn = document.getElementById('pit-clear-ref');
+    const clearReformatBtn = document.getElementById('disp-clear-ref');
     if (clearReformatBtn) {
         clearReformatBtn.addEventListener('click', async () => {
-            if (!window.activePitId) return; // GUARD
-            const state = window.pitStates[window.activePitId];
+            if (!window.activeDisposalId) return; // GUARD
+            const state = window.disposalStates[window.activeDisposalId];
             
-            window.hasUnsavedPitConfigChanges = false;
+            window.hasUnsavedDisposalConfigChanges = false;
             state.refFile = null;
             state.refFileName = null; 
             state.refFileApplied = false; 
-            const filenameEl = document.getElementById('pit-ref-filename');
+            const filenameEl = document.getElementById('disp-ref-filename');
             
             if (filenameEl) {
                 filenameEl.textContent = 'Tidak ada file...';
@@ -954,34 +972,31 @@ async function updatePitFileStats(file, type) {
             }
             clearReformatBtn.disabled = true;
             
-            state.cols['pit-col-recon-waste'] = '';
-            state.cols['pit-col-recon-resource'] = '';
-            const ddWaste = document.getElementById('pit-col-recon-waste');
-            const ddRes = document.getElementById('pit-col-recon-resource');
+            state.cols['disp-col-recon-waste'] = '';
+            const ddWaste = document.getElementById('disp-col-recon-waste');
             if (ddWaste) ddWaste.value = '';
-            if (ddRes) ddRes.value = '';
             
-            await updatePitFileStats(null, 'ref'); 
-            await window.savePitMetaToDB(window.activePitId);
+            await updateDisposalFileStats(null, 'ref'); 
+            await window.saveDisposalMetaToDB(window.activeDisposalId);
             
-            const refInput = document.getElementById('pit-ref-file');
+            const refInput = document.getElementById('disp-ref-file');
             if (refInput) refInput.value = '';
         });
     }
 
     // ==============================================================
-    // BUILD GEOMETRY PROCESSING LOGIC
+    // BUILD GEOMETRY PROCESSING LOGIC (Global Pro-Rata Agregasi)
     // ==============================================================
-    const btnBuildGeometry = document.getElementById('pit-btn-build-geometry');
-    const statNewEntity = document.getElementById('pit-stat-ne');
+    const btnBuildGeometry = document.getElementById('disp-btn-build-geometry');
+    const statNewEntity = document.getElementById('disp-stat-ne');
 
     if (btnBuildGeometry) {
         btnBuildGeometry.addEventListener('click', async () => {
-            if (!window.activePitId) return; // GUARD
+            if (!window.activeDisposalId) return; // GUARD
             
-            if (typeof window.saveCurrentPitUIState === 'function') await window.saveCurrentPitUIState();
+            if (typeof window.saveCurrentDisposalUIState === 'function') await window.saveCurrentDisposalUIState();
 
-            const state = window.pitStates[window.activePitId];
+            const state = window.disposalStates[window.activeDisposalId];
             if (!state) return;
 
             const mrFile = state.mrFile;
@@ -1003,7 +1018,7 @@ async function updatePitFileStats(file, type) {
                 const isRefReal = state.refFile && state.refFile.size !== undefined;
                 const hasRefPlaceholder = !!state.refFileName;
                 const isBuilt = state.generatedCsv !== null;
-                const safePitId = window.activePitId.replace(/\s+/g, '_');
+                const safeDispId = window.activeDisposalId.replace(/\s+/g, '_');
                 const savedBuildMethod = state.buildMethod || 'NON_CEN';
 
                 let action = 'BUILD';
@@ -1034,7 +1049,7 @@ async function updatePitFileStats(file, type) {
                 const workerCode = `
                     self.onmessage = function(e) {
                         try {
-                            const { action, pitId, mrText, refText, generatedCsv, originalSummaryObj, summaryObj, cols, substrings, savedBuildMethod, refFileName } = e.data;
+                            const { action, dispId, mrText, refText, generatedCsv, originalSummaryObj, summaryObj, cols, substrings, savedBuildMethod, refFileName } = e.data;
 
                             const cleanNum = (val) => parseFloat((val || '').toString().replace(/['",]/g, '')) || 0;
                             const getIdx = (headers, mapped, fallback) => {
@@ -1071,8 +1086,9 @@ async function updatePitFileStats(file, type) {
                             let result = {};
 
                             if (action === 'APPLY_PRORATA' || action === 'RESET') {
-                                let globalRefWaste = 0, globalRefResource = 0;
-                                let factorWaste = 1, factorResource = 1;
+                                let globalRefWaste = 0;
+                                let factorWaste = 1;
+                                
                                 let newOriginalSummaryObj = originalSummaryObj;
                                 if (!newOriginalSummaryObj) {
                                     newOriginalSummaryObj = JSON.parse(JSON.stringify(summaryObj));
@@ -1081,24 +1097,23 @@ async function updatePitFileStats(file, type) {
                                 if (action === 'APPLY_PRORATA') {
                                     const refLinesArr = refText.split(/\\r?\\n/).filter(l => l.trim() !== '');
                                     const refHeadersArr = refLinesArr[0] ? refLinesArr[0].split(',').map(h => h.trim().toUpperCase()) : [];
-                                    const mappedReconWaste = cols['pit-col-recon-waste'];
-                                    const mappedReconResource = cols['pit-col-recon-resource'];
-
+                                    const mappedReconWaste = cols['disp-col-recon-waste'];
+                                    
                                     const refIdxWaste = getIdx(refHeadersArr, mappedReconWaste, 'WASTE');
-                                    const refIdxResource = getIdx(refHeadersArr, mappedReconResource, 'RESOURCE');
 
                                     for (let i = 1; i < refLinesArr.length; i++) {
                                         const rowCols = refLinesArr[i].split(',');
                                         if (rowCols.length < 2) continue;
                                         if (refIdxWaste !== -1) globalRefWaste += cleanNum(rowCols[refIdxWaste]);
-                                        if (refIdxResource !== -1) globalRefResource += cleanNum(rowCols[refIdxResource]);
                                     }
 
                                     const baseTotalW = newOriginalSummaryObj.totalWaste || 0;
-                                    const baseTotalR = newOriginalSummaryObj.totalResource || 0;
                                     factorWaste = baseTotalW > 0 ? (globalRefWaste / baseTotalW) : 0;
-                                    factorResource = baseTotalR > 0 ? (globalRefResource / baseTotalR) : 0;
                                 }
+                                
+                                const mappedBank = cols['disp-col-bank']; 
+                                const bankCondition = parseFloat(mappedBank);
+                                const actualBankCondition = isNaN(bankCondition) ? 1.0 : Math.min(1.0, Math.max(0.0, bankCondition));
 
                                 const csvLines = generatedCsv.split(/\\r?\\n/);
                                 const newCsvLines = [csvLines[0]];
@@ -1107,34 +1122,27 @@ async function updatePitFileStats(file, type) {
                                 const baseTotalW = newOriginalSummaryObj.totalWaste || 0;
                                 const oldFactorWaste = baseTotalW > 0 ? (oldTotalW / baseTotalW) : 1;
 
-                                const oldTotalR = summaryObj.totalResource || 0;
-                                const baseTotalR = newOriginalSummaryObj.totalResource || 0;
-                                const oldFactorResource = baseTotalR > 0 ? (oldTotalR / baseTotalR) : 1;
-
                                 for (let i = 1; i < csvLines.length; i++) {
                                     const line = csvLines[i];
                                     if (!line.trim()) continue;
                                     const rowCols = line.split(',');
 
-                                    const idxRes = rowCols.length - 1;
-                                    const idxWaste = rowCols.length - 2;
+                                    const idxBank = rowCols.length - 1;
+                                    const idxLoose = rowCols.length - 2;
 
-                                    const currentW = parseFloat(rowCols[idxWaste]) || 0;
-                                    const currentR = parseFloat(rowCols[idxRes]) || 0;
+                                    const currentLoose = parseFloat(rowCols[idxLoose]) || 0;
 
-                                    let baseW = currentW;
-                                    let baseR = currentR;
+                                    let baseLoose = currentLoose;
 
                                     if (savedBuildMethod === 'CEN') {
-                                        baseW = oldFactorWaste > 0 ? (currentW / oldFactorWaste) : 0;
-                                        baseR = oldFactorResource > 0 ? (currentR / oldFactorResource) : 0;
+                                        baseLoose = oldFactorWaste > 0 ? (currentLoose / oldFactorWaste) : 0;
                                     }
 
-                                    const newW = baseW * factorWaste;
-                                    const newR = baseR * factorResource;
+                                    const newLoose = baseLoose * factorWaste;
+                                    const newBank = newLoose * actualBankCondition; // Total Bank = Total Loose * Bank
 
-                                    rowCols[idxWaste] = newW.toFixed(4);
-                                    rowCols[idxRes] = newR.toFixed(4);
+                                    rowCols[idxLoose] = newLoose.toFixed(4);
+                                    rowCols[idxBank] = newBank.toFixed(4);
 
                                     newCsvLines.push(rowCols.join(','));
                                 }
@@ -1147,7 +1155,7 @@ async function updatePitFileStats(file, type) {
                                 if (summaryObj.subsets) newSummaryObj.subsets = summaryObj.subsets;
 
                                 newSummaryObj.totalWaste = newOriginalSummaryObj.totalWaste * factorWaste;
-                                newSummaryObj.totalResource = newOriginalSummaryObj.totalResource * factorResource;
+                                newSummaryObj.totalBank = newSummaryObj.totalWaste * actualBankCondition; // Total Bank (Loose * Bank)
 
                                 const newBuildMethod = action === 'APPLY_PRORATA' ? 'CEN' : 'NON_CEN';
 
@@ -1160,65 +1168,41 @@ async function updatePitFileStats(file, type) {
                                 const mrHeaders = mrLines[0] ? mrLines[0].split(',').map(h => h.trim().toUpperCase()) : [];
                                 const refHeaders = refLines[0] ? refLines[0].split(',').map(h => h.trim().toUpperCase()) : [];
 
-                                const mappedBlock = cols['pit-col-blockname'];
-                                const mappedBench = cols['pit-col-bench'];
-                                const mappedSeam = cols['pit-col-seam']; 
-                                const mappedSubset = cols['pit-col-subset'];
-                                const mappedWaste = cols['pit-col-waste']; 
-                                const mappedResource = cols['pit-col-resource']; 
-                                const mappedWasteThick = cols['pit-col-waste-thickness'];
-                                const mappedResThick = cols['pit-col-resource-thickness'];
-                                const mappedQualFrom = cols['pit-col-quality-from'];
-                                const mappedQualTo = cols['pit-col-quality-to'];
-                                const mappedReconWaste = cols['pit-col-recon-waste']; 
-                                const mappedReconResource = cols['pit-col-recon-resource']; 
+                                const mappedBlock = cols['disp-col-blockname'];
+                                const mappedBench = cols['disp-col-bench'];
+                                const mappedSubset = cols['disp-col-subset'];
+                                const mappedWaste = cols['disp-col-waste']; // Untuk Loose
+                                const mappedBank = cols['disp-col-bank'];   // Untuk Bank
+                                const mappedReconWaste = cols['disp-col-recon-waste']; 
 
-                                const delimBlock = substrings['pit-delim-block'];
-                                const delimStrip = substrings['pit-delim-strip'];
-                                const delimBench = substrings['pit-delim-bench'];
+                                const delimBlock = substrings['disp-delim-block'];
+                                const delimStrip = substrings['disp-delim-strip'];
+                                const delimBench = substrings['disp-delim-bench'];
 
                                 const mrIdxBlock = getIdx(mrHeaders, 'BLOCKNAME', mappedBlock);
                                 const mrIdxBench = getIdx(mrHeaders, 'BENCH', mappedBench);
-                                let mrIdxSeam = getIdx(mrHeaders, 'SEAM', 'INTERVAL');
-                                if (mrIdxSeam === -1) mrIdxSeam = getIdx(mrHeaders, mappedSeam, null); 
                                 const mrIdxSubset = getIdx(mrHeaders, 'SUBSET', mappedSubset);
                                 const mrIdxWaste = getIdx(mrHeaders, mappedWaste, null);
-                                const mrIdxResource = getIdx(mrHeaders, mappedResource, null);
-                                const mrIdxWasteThick = getIdx(mrHeaders, mappedWasteThick, null);
-                                const mrIdxResThick = getIdx(mrHeaders, mappedResThick, null);
-                                const mrIdxBurden = getIdx(mrHeaders, 'BURDEN', null);
+                                const bankCondition = parseFloat(mappedBank); // Baca nilai dari input
+                                const actualBankCondition = isNaN(bankCondition) ? 1.0 : Math.min(1.0, Math.max(0.0, bankCondition));
                                 
-                                const qualityIndices = new Set();
-                                if (mappedQualFrom && mappedQualTo) {
-                                    const idxFrom = mrHeaders.indexOf(mappedQualFrom.toUpperCase());
-                                    const idxTo = mrHeaders.indexOf(mappedQualTo.toUpperCase());
-                                    if (idxFrom !== -1 && idxTo !== -1) {
-                                        const start = Math.min(idxFrom, idxTo);
-                                        const end = Math.max(idxFrom, idxTo);
-                                        for (let i = start; i <= end; i++) qualityIndices.add(i);
-                                    }
-                                }
-
                                 const mrKeepIndices = [];
                                 mrHeaders.forEach((h, i) => {
-                                    if (qualityIndices.has(i) || i === mrIdxWasteThick || i === mrIdxResThick) return; 
                                     mrKeepIndices.push(i);
                                 });
 
                                 const refIdxWaste = getIdx(refHeaders, mappedReconWaste, 'WASTE');
-                                const refIdxResource = getIdx(refHeaders, mappedReconResource, 'RESOURCE');
 
-                                let globalRefWaste = 0, globalRefResource = 0;
+                                let globalRefWaste = 0;
                                 if (refText) {
                                     for (let i = 1; i < refLines.length; i++) {
                                         const rowCols = refLines[i].split(',');
                                         if (rowCols.length < 2) continue;
                                         if (refIdxWaste !== -1) globalRefWaste += cleanNum(rowCols[refIdxWaste]);
-                                        if (refIdxResource !== -1) globalRefResource += cleanNum(rowCols[refIdxResource]);
                                     }
                                 }
 
-                                let globalMRWaste = 0, globalMRResource = 0;
+                                let globalMRWaste = 0;
                                 const blocksMap = new Map();
                                 let validRowsCount = 0;
                                 const subsetsSet = new Set();
@@ -1232,144 +1216,64 @@ async function updatePitFileStats(file, type) {
 
                                     const rawBlock = mrIdxBlock !== -1 ? (mrCols[mrIdxBlock] || '').trim() : '';
                                     const rawBench = mrIdxBench !== -1 ? (mrCols[mrIdxBench] || '').trim() : '';
-                                    const rawSeam = mrIdxSeam !== -1 ? (mrCols[mrIdxSeam] || '').trim() : '';
-                                    let rawSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
-                                    const rawBurden = mrIdxBurden !== -1 ? (mrCols[mrIdxBurden] || '').trim().toUpperCase() : '';
                                     
-                                    if (rawBurden === 'RESOURCE') {
-                                        rawSubset = 'Resource';
-                                    } else if (rawSubset) {
-                                        rawSubset = toProperCase(rawSubset);
+                                    let cellSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
+                                    
+                                    let resolvedSubset = '';
+                                    if (!cellSubset) {
+                                        resolvedSubset = 'Waste'; // Jika Subset None, ubah ke Waste
+                                    } else {
+                                        resolvedSubset = toProperCase(cellSubset);
                                     }
 
-                                    if (rawSubset) subsetsSet.add(rawSubset);
+                                    // Hanya tambahkan ke palet subset JIKA subset beneran didefinisikan
+                                    if (cellSubset) subsetsSet.add(resolvedSubset);
 
-                                    const idPit = pitId || '';
+                                    const idDisp = dispId || '';
                                     const idBlock = delimBlock ? getSubstr(rawBlock, delimBlock) : rawBlock;
                                     const idStrip = delimStrip ? getSubstr(rawBlock, delimStrip) : rawBlock;
                                     const idBench = delimBench ? getSubstr(rawBench, delimBench) : rawBench;
-                                    const compositeId = idPit + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + rawSeam + '/' + rawSubset;
+                                    
+                                    // Komposit ID Format (Disposal/Block/Strip/Bench/Subset)
+                                    const compositeId = idDisp + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + resolvedSubset;
 
                                     if (!blocksMap.has(compositeId)) {
-                                        blocksMap.set(compositeId, { wasteThickWt: 0, resThickWt: 0, sumWasteWeight: 0, sumResWeight: 0, qualities: {}, count: 0 });
+                                        blocksMap.set(compositeId, { sumWasteWeight: 0, count: 0 });
                                     }
 
                                     const b = blocksMap.get(compositeId);
-                                    let isResourceTriangle = false;
                                     
-                                    if (rawBurden !== '') isResourceTriangle = (rawBurden === 'RESOURCE');
-                                    else if (mrIdxResource !== -1) isResourceTriangle = (cleanNum(mrCols[mrIdxResource]) > 0);
-
-                                    let wVal = 0, rVal = 0;
+                                    // Akumulasi langsung Loose
+                                    let wVal = mrIdxWaste !== -1 ? cleanNum(mrCols[mrIdxWaste]) : 0;
                                     
-                                    if (!isResourceTriangle) {
-                                        wVal = mrIdxWaste !== -1 ? cleanNum(mrCols[mrIdxWaste]) : 0;
-                                        globalMRWaste += wVal;
-                                        b.sumWasteWeight += (mrIdxWaste !== -1 ? wVal : 1);
-                                    } else {
-                                        rVal = mrIdxResource !== -1 ? cleanNum(mrCols[mrIdxResource]) : 0;
-                                        globalMRResource += rVal;
-                                        b.sumResWeight += (mrIdxResource !== -1 ? rVal : 1);
-                                    }
+                                    globalMRWaste += wVal;
 
-                                    const wtVal = mrIdxWasteThick !== -1 ? cleanNum(mrCols[mrIdxWasteThick]) : 0;
-                                    const rtVal = mrIdxResThick !== -1 ? cleanNum(mrCols[mrIdxResThick]) : 0;
-
-                                    if (!isResourceTriangle) b.wasteThickWt += (wtVal * (mrIdxWaste !== -1 ? wVal : 1));
-                                    if (isResourceTriangle) b.resThickWt += (rtVal * (mrIdxResource !== -1 ? rVal : 1));
-
-                                    if (isResourceTriangle) {
-                                        qualityIndices.forEach(qIdx => {
-                                            const qVal = cleanNum(mrCols[qIdx]);
-                                            if (!b.qualities[qIdx]) b.qualities[qIdx] = 0;
-                                            b.qualities[qIdx] += (qVal * (mrIdxResource !== -1 ? rVal : 1));
-                                        });
-                                    }
+                                    b.sumWasteWeight += wVal;
                                     b.count++;
                                 }
 
+                                // Total Bank menggunakan Rumus (Total Loose * Bank Condition)
+                                let globalMRBank = globalMRWaste * actualBankCondition;
+
                                 const factorWaste = refText ? (globalMRWaste > 0 ? (globalRefWaste / globalMRWaste) : 0) : 1;
-                                const factorResource = refText ? (globalMRResource > 0 ? (globalRefResource / globalMRResource) : 0) : 1;
 
                                 const newSummaryObj = {
                                     totalWaste: globalMRWaste * factorWaste,
-                                    totalResource: globalMRResource * factorResource,
-                                    avgWasteThick: 0, minWasteThick: Infinity, maxWasteThick: -Infinity,
-                                    avgResThick: 0, minResThick: Infinity, maxResThick: -Infinity,
-                                    qualities: {}, previewHulls: null, previewBounds: null,
-                                    subsets: Array.from(subsetsSet)
+                                    totalBank: (globalMRWaste * factorWaste) * actualBankCondition,
+                                    previewHulls: null, previewBounds: null,
+                                    subsets: Array.from(subsetsSet) // Kosong jika subset None
                                 };
                                 
                                 const newOriginalSummaryObj = {
                                     totalWaste: globalMRWaste,
-                                    totalResource: globalMRResource,
-                                    avgWasteThick: 0, minWasteThick: Infinity, maxWasteThick: -Infinity,
-                                    avgResThick: 0, minResThick: Infinity, maxResThick: -Infinity,
+                                    totalBank: globalMRBank,
                                     qualities: {}
                                 };
                                 
-                                let gSumWThickWt = 0, gSumRThickWt = 0, gSumWWt = 0, gSumRWt = 0;
-                                let gQualWt = {}, qMinMax = {};
-                                qualityIndices.forEach(qIdx => qMinMax[qIdx] = { min: Infinity, max: -Infinity });
-
-                                blocksMap.forEach(b => {
-                                    gSumWThickWt += b.wasteThickWt; gSumRThickWt += b.resThickWt;
-                                    gSumWWt += b.sumWasteWeight; gSumRWt += b.sumResWeight;
-                                    
-                                    const bWtAvg = b.sumWasteWeight > 0 ? (b.wasteThickWt / b.sumWasteWeight) : 0;
-                                    const bRtAvg = b.sumResWeight > 0 ? (b.resThickWt / b.sumResWeight) : 0;
-                                    
-                                    if (b.sumWasteWeight > 0 && bWtAvg > 0) {
-                                        if (bWtAvg < newSummaryObj.minWasteThick) newSummaryObj.minWasteThick = bWtAvg;
-                                        if (bWtAvg > newSummaryObj.maxWasteThick) newSummaryObj.maxWasteThick = bWtAvg;
-                                    }
-                                    if (b.sumResWeight > 0 && bRtAvg > 0) {
-                                        if (bRtAvg < newSummaryObj.minResThick) newSummaryObj.minResThick = bRtAvg;
-                                        if (bRtAvg > newSummaryObj.maxResThick) newSummaryObj.maxResThick = bRtAvg;
-                                    }
-
-                                    qualityIndices.forEach(qIdx => {
-                                        if (!gQualWt[qIdx]) gQualWt[qIdx] = 0;
-                                        gQualWt[qIdx] += b.qualities[qIdx] || 0;
-                                        const bQAvg = b.sumResWeight > 0 ? ((b.qualities[qIdx] || 0) / b.sumResWeight) : 0;
-                                        if (b.sumResWeight > 0 && bQAvg > 0) {
-                                            if (bQAvg < qMinMax[qIdx].min) qMinMax[qIdx].min = bQAvg;
-                                            if (bQAvg > qMinMax[qIdx].max) qMinMax[qIdx].max = bQAvg;
-                                        }
-                                    });
-                                });
-
-                                newSummaryObj.avgWasteThick = gSumWWt > 0 ? (gSumWThickWt / gSumWWt) : 0;
-                                newSummaryObj.avgResThick = gSumRWt > 0 ? (gSumRThickWt / gSumRWt) : 0;
-                                
-                                if (newSummaryObj.minWasteThick === Infinity) newSummaryObj.minWasteThick = 0;
-                                if (newSummaryObj.maxWasteThick === -Infinity) newSummaryObj.maxWasteThick = 0;
-                                if (newSummaryObj.minResThick === Infinity) newSummaryObj.minResThick = 0;
-                                if (newSummaryObj.maxResThick === -Infinity) newSummaryObj.maxResThick = 0;
-                                
-                                qualityIndices.forEach(qIdx => {
-                                    newSummaryObj.qualities[mrHeaders[qIdx]] = {
-                                        avg: gSumRWt > 0 ? (gQualWt[qIdx] / gSumRWt) : 0,
-                                        min: qMinMax[qIdx].min === Infinity ? 0 : qMinMax[qIdx].min,
-                                        max: qMinMax[qIdx].max === -Infinity ? 0 : qMinMax[qIdx].max
-                                    };
-                                });
-
-                                newOriginalSummaryObj.avgWasteThick = newSummaryObj.avgWasteThick;
-                                newOriginalSummaryObj.avgResThick = newSummaryObj.avgResThick;
-                                newOriginalSummaryObj.minWasteThick = newSummaryObj.minWasteThick;
-                                newOriginalSummaryObj.maxWasteThick = newSummaryObj.maxWasteThick;
-                                newOriginalSummaryObj.minResThick = newSummaryObj.minResThick;
-                                newOriginalSummaryObj.maxResThick = newSummaryObj.maxResThick;
-                                newOriginalSummaryObj.qualities = newSummaryObj.qualities;
-
                                 const newHeaders = [];
                                 mrKeepIndices.forEach(i => newHeaders.push(mrHeaders[i]));
-                                // MENGUBAH URUTAN DAN NAMA HEADER CSV SESUAI PERMINTAAN
-                                newHeaders.push("ID P-Composite", "ID P-Name", "ID P-Block", "ID P-Strip", "ID P-Bench", "ID P-Seam", "ID P-Subset");
-                                newHeaders.push("Waste Thickness", "Resource Thickness");
-                                qualityIndices.forEach(qIdx => newHeaders.push(mrHeaders[qIdx]));
-                                newHeaders.push("PRO_RATA_WASTE", "PRO_RATA_RESOURCE");
+                                newHeaders.push("ID D-Composite", "ID D-Name", "ID D-Block", "ID D-Strip", "ID D-Bench", "ID D-Subset");
+                                newHeaders.push("LOOSE_VOLUME", "BANK_VOLUME");
                                 
                                 let combinedLines = [newHeaders.join(',')];
 
@@ -1380,58 +1284,35 @@ async function updatePitFileStats(file, type) {
 
                                     const rawBlock = mrIdxBlock !== -1 ? (mrCols[mrIdxBlock] || '').trim() : '';
                                     const rawBench = mrIdxBench !== -1 ? (mrCols[mrIdxBench] || '').trim() : '';
-                                    const rawSeam = mrIdxSeam !== -1 ? (mrCols[mrIdxSeam] || '').trim() : '';
-                                    let rawSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
-                                    const rawBurden = mrIdxBurden !== -1 ? (mrCols[mrIdxBurden] || '').trim().toUpperCase() : '';
                                     
-                                    if (rawBurden === 'RESOURCE') {
-                                        rawSubset = 'Resource';
-                                    } else if (rawSubset) {
-                                        rawSubset = toProperCase(rawSubset);
+                                    let cellSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
+                                    
+                                    let resolvedSubset = '';
+                                    if (!cellSubset) {
+                                        resolvedSubset = 'Waste'; // Jika Subset None, ubah ke Waste
+                                    } else {
+                                        resolvedSubset = toProperCase(cellSubset);
                                     }
 
-                                    const idPit = pitId || '';
+                                    const idDisp = dispId || '';
                                     const idBlock = delimBlock ? getSubstr(rawBlock, delimBlock) : rawBlock;
                                     const idStrip = delimStrip ? getSubstr(rawBlock, delimStrip) : rawBlock;
                                     const idBench = delimBench ? getSubstr(rawBench, delimBench) : rawBench;
-                                    const compositeId = idPit + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + rawSeam + '/' + rawSubset;
                                     
-                                    const b = blocksMap.get(compositeId);
+                                    // Komposit ID Format (Disposal/Block/Strip/Bench/Subset)
+                                    const compositeId = idDisp + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + resolvedSubset;
+                                    
                                     const row = [];
-                                    
-                                    let isResourceTriangle = false;
-                                    if (rawBurden !== '') isResourceTriangle = (rawBurden === 'RESOURCE');
-                                    else if (mrIdxResource !== -1) isResourceTriangle = (cleanNum(mrCols[mrIdxResource]) > 0);
 
                                     mrKeepIndices.forEach(idx => row.push(mrCols[idx] !== undefined ? mrCols[idx] : ''));
 
-                                    const originalSeam = mrIdxSeam !== -1 && mrCols[mrIdxSeam] !== undefined ? mrCols[mrIdxSeam] : '';
-                                    const originalSubset = rawSubset;
-                                    
-                                    // PUSH DATA SESUAI URUTAN HEADER BARU
-                                    row.push(compositeId, idPit, idBlock, idStrip, idBench, originalSeam, originalSubset);
-
-                                    if (b) {
-                                        const wtAvg = b.sumWasteWeight > 0 ? (b.wasteThickWt / b.sumWasteWeight) : 0;
-                                        row.push(wtAvg.toFixed(2));
-                                        const rtAvg = b.sumResWeight > 0 ? (b.resThickWt / b.sumResWeight) : 0;
-                                        row.push(rtAvg.toFixed(2));
-
-                                        qualityIndices.forEach(qIdx => {
-                                            const qAvg = b.sumResWeight > 0 ? (b.qualities[qIdx] / b.sumResWeight) : 0;
-                                            row.push(qAvg.toFixed(2));
-                                        });
-                                    } else {
-                                        row.push("0", "0");
-                                        qualityIndices.forEach(() => row.push("0"));
-                                    }
+                                    row.push(compositeId, idDisp, idBlock, idStrip, idBench, resolvedSubset);
 
                                     let wVal = mrIdxWaste !== -1 ? cleanNum(mrCols[mrIdxWaste]) : 0;
-                                    let rVal = mrIdxResource !== -1 ? cleanNum(mrCols[mrIdxResource]) : 0;
-                                    let finalRowWaste = !isResourceTriangle ? wVal * factorWaste : 0;
-                                    let finalRowResource = isResourceTriangle ? rVal * factorResource : 0;
+                                    let finalRowLoose = wVal * factorWaste;
+                                    let finalRowBank = finalRowLoose * actualBankCondition; // Total Bank (Loose * Bank)
 
-                                    row.push(finalRowWaste.toFixed(4), finalRowResource.toFixed(4));
+                                    row.push(finalRowLoose.toFixed(4), finalRowBank.toFixed(4));
                                     combinedLines.push(row.join(','));
                                 }
 
@@ -1463,34 +1344,25 @@ async function updatePitFileStats(file, type) {
                         return;
                     }
 
-                    window.hasUnsavedPitConfigChanges = false;
+                    window.hasUnsavedDisposalConfigChanges = false;
 
                     const result = e.data.result;
 
                     state.generatedCsv = result.combinedCsv;
-                    
-                    // [UPDATE]: Ekstrak & Kunci koordinat Origin langsung tanpa menunggu dicentang!
-                    if (typeof window.establishWorldOrigin === 'function') {
-                        window.establishWorldOrigin(result.combinedCsv);
-                    }
-
                     state.summaryObj = result.newSummaryObj;
                     if (result.newOriginalSummaryObj) state.originalSummaryObj = result.newOriginalSummaryObj;
                     state.buildMethod = result.newBuildMethod;
 
-                    localStorage.setItem(`rizpec_build_type_${safePitId}`, result.newBuildMethod);
+                    localStorage.setItem(`rizpec_disp_build_type_${safeDispId}`, result.newBuildMethod);
 
                     if (action === 'APPLY_PRORATA') {
                         state.refFile = null; 
                         state.refFileApplied = true;
                     } else if (action === 'RESET') {
                         state.refFileApplied = false;
-                        state.cols['pit-col-recon-waste'] = '';
-                        state.cols['pit-col-recon-resource'] = '';
-                        const ddWaste = document.getElementById('pit-col-recon-waste');
-                        const ddRes = document.getElementById('pit-col-recon-resource');
+                        state.cols['disp-col-recon-waste'] = '';
+                        const ddWaste = document.getElementById('disp-col-recon-waste');
                         if (ddWaste) ddWaste.value = '';
-                        if (ddRes) ddRes.value = '';
                     } else if (action === 'BUILD') {
                         if (state.refFileName) {
                             state.refFile = null;
@@ -1498,17 +1370,17 @@ async function updatePitFileStats(file, type) {
                         }
                     }
 
-                    if (typeof window.renderPitGeometryPreview === 'function') {
-                        window.renderPitGeometryPreview(result.combinedCsv, state.summaryObj, result.newBuildMethod);
+                    if (typeof window.renderDisposalGeometryPreview === 'function') {
+                        window.renderDisposalGeometryPreview(result.combinedCsv, state.summaryObj, result.newBuildMethod);
                     }
 
                     try {
-                        if (typeof RizpecDB !== 'undefined') await RizpecDB.set(`rizpec_pit_entity_${safePitId}`, result.combinedCsv);
-                        await window.savePitMetaToDB(window.activePitId);
+                        if (typeof RizpecDB !== 'undefined') await RizpecDB.set(`rizpec_disp_entity_${safeDispId}`, result.combinedCsv);
+                        await window.saveDisposalMetaToDB(window.activeDisposalId);
                     } catch(e) {}
 
-                    if (typeof window.updatePitFolderBadge === 'function') window.updatePitFolderBadge(window.activePitId, result.newBuildMethod);
-                    if (typeof window.updateGeometryPitListUI === 'function') window.updateGeometryPitListUI();
+                    if (typeof window.updateDisposalFolderBadge === 'function') window.updateDisposalFolderBadge(window.activeDisposalId, result.newBuildMethod);
+                    if (typeof window.updateGeometryDisposalListUI === 'function') window.updateGeometryDisposalListUI();
 
                     if (statNewEntity) {
                         if (action === 'BUILD') {
@@ -1518,14 +1390,13 @@ async function updatePitFileStats(file, type) {
                         } else {
                             statNewEntity.textContent = state.neStats.text;
                         }
-                        await window.savePitMetaToDB(window.activePitId);
+                        await window.saveDisposalMetaToDB(window.activeDisposalId);
                     }
 
-                    if (window.loadedPits && window.loadedPits.has(window.activePitId)) {
-                        if (window.renderedPits) window.renderedPits.delete(window.activePitId);
-                        // FIX BUGS: Menambahkan spesifik tipe 'pit'
-                        if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(window.activePitId, 'pit');
-                        window.loadedPits.add(window.activePitId); 
+                    if (window.loadedDisposals && window.loadedDisposals.has(window.activeDisposalId)) {
+                        if (window.renderedDisposals) window.renderedDisposals.delete(window.activeDisposalId);
+                        if (typeof window.unloadDisposalGeometry === 'function') window.unloadDisposalGeometry(window.activeDisposalId);
+                        window.loadedDisposals.add(window.activeDisposalId); 
                         
                         const geoTab = document.getElementById('panel-geometry');
                         const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
@@ -1541,14 +1412,14 @@ async function updatePitFileStats(file, type) {
                         }
                     }
                     
-                    const neFilenameEl = document.getElementById('pit-ne-filename');
+                    const neFilenameEl = document.getElementById('disp-ne-filename');
                     if (neFilenameEl) {
-                        neFilenameEl.textContent = `${window.activePitId}_Geometry`;
+                        neFilenameEl.textContent = `${window.activeDisposalId}_Geometry`;
                         neFilenameEl.classList.replace('text-slate-500', 'text-blue-400');
                         neFilenameEl.classList.remove('italic');
                     }
 
-                    window.updatePitBuildGeometryButtonState();
+                    window.updateDisposalBuildGeometryButtonState();
 
                     if (statNewEntity) {
                         statNewEntity.classList.add('text-emerald-400');
@@ -1567,13 +1438,13 @@ async function updatePitFileStats(file, type) {
                     btnBuildGeometry.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Gagal! Cek Log/Upload Ulang';
                     btnBuildGeometry.className = "mt-1 w-full bg-rose-600 text-white py-2 rounded text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-default";
                     if (msg && msg.includes("File fisik")) alert(msg);
-                    setTimeout(() => window.updatePitBuildGeometryButtonState(), 2000);
+                    setTimeout(() => window.updateDisposalBuildGeometryButtonState(), 2000);
                     if (typeof hideFullscreenLoading === 'function') hideFullscreenLoading();
                 };
 
                 worker.postMessage({
                     action,
-                    pitId: window.activePitId,
+                    dispId: window.activeDisposalId,
                     mrText,
                     refText,
                     generatedCsv: state.generatedCsv,
@@ -1589,7 +1460,7 @@ async function updatePitFileStats(file, type) {
                 btnBuildGeometry.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Gagal! Cek Log/Upload Ulang';
                 btnBuildGeometry.className = "mt-1 w-full bg-rose-600 text-white py-2 rounded text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-default";
                 if (err.message.includes("File fisik")) alert(err.message);
-                setTimeout(() => window.updatePitBuildGeometryButtonState(), 2000);
+                setTimeout(() => window.updateDisposalBuildGeometryButtonState(), 2000);
                 if (typeof hideFullscreenLoading === 'function') hideFullscreenLoading();
             }
         });
@@ -1599,11 +1470,11 @@ async function updatePitFileStats(file, type) {
 // ==============================================================
 // GEOMETRY 2D PREVIEW & SUMMARY TABLE LOGIC (PURE HTML5 CANVAS)
 // ==============================================================
-window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'NON_CEN', updateSummaryOnly = false, isAggregated = false) {
-    const placeholder = document.getElementById('pit-preview-placeholder');
-    const summaryTable = document.getElementById('pit-preview-summary-table');
-    const summaryContent = document.getElementById('pit-preview-summary-content');
-    const canvasContainer = document.getElementById('pit-preview-3d-canvas');
+window.renderDisposalGeometryPreview = function(csvData, summaryObj, buildMethod = 'NON_CEN', updateSummaryOnly = false, isAggregated = false) {
+    const placeholder = document.getElementById('disp-preview-placeholder');
+    const summaryTable = document.getElementById('disp-preview-summary-table');
+    const summaryContent = document.getElementById('disp-preview-summary-content');
+    const canvasContainer = document.getElementById('disp-preview-3d-canvas');
 
     if (!summaryObj) {
         placeholder?.classList.remove('hidden');
@@ -1612,7 +1483,7 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
         return;
     }
 
-    const titleLabel = isAggregated ? 'Summary (Agregasi Pit)' : (buildMethod === 'CEN' ? 'Summary (Centeroid)' : 'Summary (Non-Centeroid)');
+    const titleLabel = isAggregated ? 'Summary (Agregasi Disposal)' : (buildMethod === 'CEN' ? 'Summary (Centeroid)' : 'Summary (Non-Centeroid)');
     if (summaryTable) {
         const titleEl = summaryTable.querySelector('h3');
         if (titleEl) {
@@ -1620,62 +1491,18 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
         }
     }
 
+    // RULE 3 & 4: Output Total Loose dan Total Bank
     let html = `
-        <div class="text-blue-400 font-semibold mb-1 border-b border-slate-600 pb-0.5">Reserve</div>
+        <div class="text-blue-400 font-semibold mb-1 border-b border-slate-600 pb-0.5">Capacity</div>
         <div class="flex justify-between border-b border-slate-700/50 pb-1 items-center">
-            <span class="text-slate-400">Total Waste</span>
+            <span class="text-slate-400">Total Loose</span>
             <span class="font-bold text-slate-200">${(summaryObj.totalWaste || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
         </div>
         <div class="flex justify-between border-b border-slate-700/50 pb-1 items-center">
-            <span class="text-slate-400">Total Resource</span>
-            <span class="font-bold text-slate-200">${(summaryObj.totalResource || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
-        </div>
-        <div class="flex justify-between border-b border-slate-700/50 pb-1 items-center">
-            <span class="text-slate-400">Stripping Ratio</span>
-            <span class="font-bold text-slate-200">${summaryObj.totalResource > 0 ? (summaryObj.totalWaste / summaryObj.totalResource).toFixed(2) : '0.00'}</span>
+            <span class="text-slate-400">Total Bank</span>
+            <span class="font-bold text-slate-200">${(summaryObj.totalBank || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
         </div>
     `;
-
-    if (!isAggregated) {
-        html += `
-            <div class="text-blue-400 font-semibold mt-2 mb-1 border-b border-slate-600 pb-0.5">Thickness</div>
-            <div class="flex justify-between border-b border-slate-700/50 pb-1 items-center">
-                <span class="text-slate-400">Waste Thick</span>
-                <span class="text-right shrink-0">
-                    <span class="font-bold text-slate-200">${(summaryObj.avgWasteThick || 0).toFixed(2)}</span>
-                    <span class="text-slate-400 italic font-normal text-[9px] whitespace-nowrap"> (${(summaryObj.minWasteThick || 0).toFixed(2)} - ${(summaryObj.maxWasteThick || 0).toFixed(2)})</span>
-                </span>
-            </div>
-            <div class="flex justify-between border-b border-slate-700/50 pb-1 items-center">
-                <span class="text-slate-400">Resource Thick</span>
-                <span class="text-right shrink-0">
-                    <span class="font-bold text-slate-200">${(summaryObj.avgResThick || 0).toFixed(2)}</span>
-                    <span class="text-slate-400 italic font-normal text-[9px] whitespace-nowrap"> (${(summaryObj.minResThick || 0).toFixed(2)} - ${(summaryObj.maxResThick || 0).toFixed(2)})</span>
-                </span>
-            </div>
-        `;
-
-        if (summaryObj.qualities && Object.keys(summaryObj.qualities).length > 0) {
-            html += `<div class="text-blue-400 font-semibold mt-2 mb-1 border-b border-slate-600 pb-0.5">Qualities</div>`;
-            for (let [qName, qData] of Object.entries(summaryObj.qualities)) {
-                const qAvg = typeof qData === 'number' ? qData : (qData.avg || 0);
-                const qMin = typeof qData === 'number' ? 0 : (qData.min || 0);
-                const qMax = typeof qData === 'number' ? 0 : (qData.max || 0);
-
-                html += `
-                <div class="flex justify-between border-b border-slate-700/50 pb-1 items-center">
-                    <span class="text-slate-400 truncate pr-2" title="${qName}">${qName}</span>
-                    <span class="text-right shrink-0">
-                        <span class="font-bold text-slate-200">${qAvg.toFixed(2)}</span>
-                        <span class="text-slate-400 italic font-normal text-[9px] whitespace-nowrap"> (${qMin.toFixed(2)} - ${qMax.toFixed(2)})</span>
-                    </span>
-                </div>
-                `;
-            }
-        }
-    } else {
-        html += `<div class="text-slate-500 italic text-[10px] mt-3 text-center border-t border-slate-700/50 pt-2 leading-relaxed">Thickness & Qualities tidak diakumulasikan dalam mode Agregasi.</div>`;
-    }
     
     if (summaryContent) summaryContent.innerHTML = html;
     placeholder?.classList.add('hidden');
@@ -1698,8 +1525,7 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
     } else if (csvData) {
         const lines = csvData.split(/\r?\n/);
         const headers = lines[0].split(',').map(h => h.trim().toUpperCase());
-        // MENGUBAH IDENTIFIER UNTUK PREVIEW MENJADI HEADER BARU
-        const idIdx = headers.indexOf('ID P-COMPOSITE'); 
+        const idIdx = headers.indexOf('ID D-COMPOSITE'); 
         
         const e1 = headers.indexOf('EASTING_1'), n1 = headers.indexOf('NORTHING_1');
         const e2 = headers.indexOf('EASTING_2'), n2 = headers.indexOf('NORTHING_2');
@@ -1729,7 +1555,7 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
                 let baseBlock = 'BLK', baseStrip = 'STP';
                 if (compositeId) {
                     const parts = compositeId.split('/');
-                    if (parts.length > 2) {
+                    if (parts.length >= 3) {
                         baseBlock = parts[1];
                         baseStrip = parts[2];
                     } else {
@@ -1745,35 +1571,36 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
         }
 
         const convexHull = (points) => {
-            const unique = [];
-            const seen = new Set();
+            const uniqueMap = new Map();
             for (let p of points) {
-                const key = p[0].toFixed(2) + '_' + p[1].toFixed(2);
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    unique.push(p);
-                }
+                const key = p[0].toFixed(3) + '_' + p[1].toFixed(3);
+                if (!uniqueMap.has(key)) uniqueMap.set(key, p);
             }
-            if (unique.length <= 3) return unique;
+            const unique = Array.from(uniqueMap.values());
+            
+            if (unique.length <= 2) return unique;
 
-            unique.sort((a, b) => a[0] === b[0] ? a[1] - b[1] : a[0] - b[0]);
+            unique.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+            
             const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
 
             const lower = [];
             for (let i = 0; i < unique.length; i++) {
-                while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], unique[i]) <= 0) lower.pop();
+                while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], unique[i]) <= 1e-9) lower.pop();
                 lower.push(unique[i]);
             }
 
             const upper = [];
             for (let i = unique.length - 1; i >= 0; i--) {
-                while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], unique[i]) <= 0) upper.pop();
+                while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], unique[i]) <= 1e-9) upper.pop();
                 upper.push(unique[i]);
             }
 
-            upper.pop();
             lower.pop();
-            return lower.concat(upper);
+            upper.pop();
+            
+            const hull = lower.concat(upper);
+            return hull.length >= 3 ? hull : unique;
         };
 
         blockMap.forEach(pts => hulls.push(convexHull(pts)));
@@ -1781,9 +1608,9 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
         summaryObj.previewHulls = hulls;
         summaryObj.previewBounds = { minX: globalMinX, maxX: globalMaxX, minY: globalMinY, maxY: globalMaxY };
         
-        if (window.activePitId && window.pitStates[window.activePitId]) {
-            window.pitStates[window.activePitId].summaryObj = summaryObj;
-            window.savePitMetaToDB(window.activePitId);
+        if (window.activeDisposalId && window.disposalStates[window.activeDisposalId]) {
+            window.disposalStates[window.activeDisposalId].summaryObj = summaryObj;
+            window.saveDisposalMetaToDB(window.activeDisposalId);
         }
 
     } else {
@@ -1869,17 +1696,15 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
 // ==============================================================
 // GLOBAL PALETTE COLORS APPLIER
 // ==============================================================
-window.applyPitPaletteColors = function() {
-};
+window.applyDisposalPaletteColors = function() {};
 
-window.markPitsForRebuildOnColorChange = function(type, changedName) {
-};
+window.markDisposalsForRebuildOnColorChange = function(type, changedName) {};
 
-window.updatePitApplyColorButton = function() {
-    const btn = document.getElementById('pit-btn-apply-colors');
+window.updateDisposalApplyColorButton = function() {
+    const btn = document.getElementById('disp-btn-apply-colors');
     if (!btn) return;
     
-    if (window.hasUnsavedColorChanges) {
+    if (window.hasUnsavedDisposalColorChanges) {
         btn.disabled = false;
         btn.className = "w-full bg-blue-600 hover:bg-blue-500 text-white py-1.5 rounded text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-pointer";
     } else {
@@ -1888,39 +1713,39 @@ window.updatePitApplyColorButton = function() {
     }
 };
 
-window.resetUnsavedPitColorChanges = function() {
-    if (window.hasUnsavedColorChanges) {
-        window.hasUnsavedColorChanges = false;
+window.resetUnsavedDisposalColorChanges = function() {
+    if (window.hasUnsavedDisposalColorChanges) {
+        window.hasUnsavedDisposalColorChanges = false;
         
-        const savedBurden = localStorage.getItem('rizpec_burden_palette');
-        if (savedBurden) window.burdenPalette = JSON.parse(savedBurden);
+        const savedBurden = localStorage.getItem('rizpec_disp_burden_palette');
+        if (savedBurden) window.dispBurdenPalette = JSON.parse(savedBurden);
         
-        const savedSubset = localStorage.getItem('rizpec_subset_palette');
-        if (savedSubset) window.subsetPalette = JSON.parse(savedSubset);
+        const savedSubset = localStorage.getItem('rizpec_disp_subset_palette');
+        if (savedSubset) window.dispSubsetPalette = JSON.parse(savedSubset);
         
-        if (typeof window.renderPitPaletteUI === 'function') window.renderPitPaletteUI();
-        if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
+        if (typeof window.renderDisposalPaletteUI === 'function') window.renderDisposalPaletteUI();
+        if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
     }
 };
 
 // ==============================================================
-// INIT GEOMETRY PIT LIST & PALETTE UI
+// INIT GEOMETRY DISPOSAL LIST & PALETTE UI
 // ==============================================================
 
-window.loadedPits = window.loadedPits || new Set();
-window.renderedPits = window.renderedPits || new Set();
+window.loadedDisposals = window.loadedDisposals || new Set();
+window.renderedDisposals = window.renderedDisposals || new Set();
 
-window.initGeometryPitListUI = function() {
+window.initGeometryDisposalListUI = function() {
     const leftPanel = document.querySelector('#file-summary-content > div:first-child');
     if (!leftPanel) return;
     
-    let container = document.getElementById('geometry-pit-manager');
+    let container = document.getElementById('geometry-disp-manager');
     if (!container) {
         container = document.createElement('div');
-        container.id = 'geometry-pit-manager';
+        container.id = 'geometry-disp-manager';
         
         const summaryNameEl = document.getElementById('summary-name');
-        const isRootFolder = summaryNameEl && summaryNameEl.textContent === 'Pit Data' && !window.activePitId;
+        const isRootFolder = summaryNameEl && summaryNameEl.textContent === 'Disposal Data' && !window.activeDisposalId;
         
         if (isRootFolder) {
             container.className = 'flex flex-col gap-3 pt-3 h-full px-3 overflow-hidden';
@@ -1935,7 +1760,7 @@ window.initGeometryPitListUI = function() {
                     <i class="fa-solid fa-list-ul"></i> List
                 </h4>
             </div>
-            <div id="geometry-pit-list" class="flex flex-col gap-1.5 overflow-y-auto max-h-[150px] shrink-0 custom-scrollbar"></div>
+            <div id="geometry-disp-list" class="flex flex-col gap-1.5 overflow-y-auto max-h-[150px] shrink-0 custom-scrollbar"></div>
 
             <!-- Burden Section -->
             <div class="flex flex-col gap-1.5 border-b border-slate-700/50 pb-1.5 mt-2 shrink-0">
@@ -1943,7 +1768,7 @@ window.initGeometryPitListUI = function() {
                     <i class="fa-solid fa-layer-group"></i> Burden
                 </h4>
             </div>
-            <div id="pit-geometry-burden-list" class="flex flex-col gap-1.5 shrink-0"></div>
+            <div id="geometry-disp-burden-list" class="flex flex-col gap-1.5 shrink-0"></div>
 
             <!-- Subset Section -->
             <div class="flex flex-col gap-1.5 border-b border-slate-700/50 pb-1.5 mt-2 shrink-0">
@@ -1951,31 +1776,30 @@ window.initGeometryPitListUI = function() {
                     <i class="fa-solid fa-palette"></i> Subset
                 </h4>
             </div>
-            <div id="pit-geometry-subset-list" class="flex flex-col gap-1.5 overflow-y-auto max-h-[150px] custom-scrollbar shrink-0"></div>
+            <div id="geometry-disp-subset-list" class="flex flex-col gap-1.5 overflow-y-auto max-h-[150px] custom-scrollbar shrink-0"></div>
             
             <!-- Apply Color Button -->
             <div class="mt-2 shrink-0 pb-3">
-                <button id="pit-btn-apply-colors" class="w-full bg-slate-700 text-slate-400 py-1.5 rounded text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-not-allowed" disabled>
+                <button id="disp-btn-apply-colors" class="w-full bg-slate-700 text-slate-400 py-1.5 rounded text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-not-allowed" disabled>
                     <i class="fa-solid fa-check-double"></i> Apply Color
                 </button>
             </div>
         `;
         leftPanel.appendChild(container);
         
-        document.getElementById('pit-btn-apply-colors').addEventListener('click', function() {
-            if (!window.hasUnsavedColorChanges) return;
+        document.getElementById('disp-btn-apply-colors').addEventListener('click', function() {
+            if (!window.hasUnsavedDisposalColorChanges) return;
 
-            localStorage.setItem('rizpec_burden_palette', JSON.stringify(window.burdenPalette));
-            localStorage.setItem('rizpec_subset_palette', JSON.stringify(window.subsetPalette));
+            localStorage.setItem('rizpec_disp_burden_palette', JSON.stringify(window.dispBurdenPalette));
+            localStorage.setItem('rizpec_disp_subset_palette', JSON.stringify(window.dispSubsetPalette));
             
-            window.hasUnsavedColorChanges = false;
-            window.updatePitApplyColorButton();
+            window.hasUnsavedDisposalColorChanges = false;
+            window.updateDisposalApplyColorButton();
 
-            if (window.loadedPits && window.loadedPits.size > 0) {
-                window.loadedPits.forEach(pit => {
-                    // FIX BUGS: Menambahkan spesifik tipe 'pit'
-                    if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
-                    if (window.renderedPits) window.renderedPits.delete(pit);
+            if (window.loadedDisposals && window.loadedDisposals.size > 0) {
+                window.loadedDisposals.forEach(disp => {
+                    if (typeof window.unloadDisposalGeometry === 'function') window.unloadDisposalGeometry(disp);
+                    if (window.renderedDisposals) window.renderedDisposals.delete(disp);
                 });
                 
                 const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
@@ -1987,36 +1811,36 @@ window.initGeometryPitListUI = function() {
         });
     }
     
-    window.hasUnsavedColorChanges = false; 
-    window.updateGeometryPitListUI();
+    window.hasUnsavedDisposalColorChanges = false; 
+    window.updateGeometryDisposalListUI();
 };
 
-window.updateGeometryPitListUI = async function() {
-    window.pitColorModes = JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {};
+window.updateGeometryDisposalListUI = async function() {
+    window.dispColorModes = JSON.parse(localStorage.getItem('rizpec_disp_color_modes')) || {};
 
-    const listEl = document.getElementById('geometry-pit-list');
+    const listEl = document.getElementById('geometry-disp-list');
     if(!listEl) return;
     
-    const pits = [];
+    const disposals = [];
     let allSubsets = new Set(); 
     
-    const pitContainer = document.getElementById('subfolders-folder-pit');
-    if (pitContainer) {
-        const pitElements = pitContainer.querySelectorAll('.folder-name-text');
+    const dispContainer = document.getElementById('subfolders-folder-disp');
+    if (dispContainer) {
+        const dispElements = dispContainer.querySelectorAll('.folder-name-text');
         
-        for (let el of Array.from(pitElements)) {
-            const exactPitName = el.textContent.trim();
-            const safeId = exactPitName.replace(/\s+/g, '_');
+        for (let el of Array.from(dispElements)) {
+            const exactDispName = el.textContent.trim();
+            const safeId = exactDispName.replace(/\s+/g, '_');
             
             try {
                 if (typeof RizpecDB !== 'undefined') {
-                    const meta = await RizpecDB.get(`rizpec_pit_entity_${safeId}_meta`);
+                    const meta = await RizpecDB.get(`rizpec_disp_entity_${safeId}_meta`);
                     
                     const isGeometryReady = meta && meta.neStats && meta.neStats.text && !meta.neStats.text.includes('(0 Block');
 
                     if (isGeometryReady) {
-                        let hasSubset = (meta.cols && meta.cols['pit-col-subset'] && meta.cols['pit-col-subset'] !== "");
-                        if (!pits.find(p => p.name === exactPitName)) pits.push({ name: exactPitName, hasSubset: hasSubset });
+                        let hasSubset = (meta.cols && meta.cols['disp-col-subset'] && meta.cols['disp-col-subset'] !== "");
+                        if (!disposals.find(p => p.name === exactDispName)) disposals.push({ name: exactDispName, hasSubset: hasSubset });
                         
                         if (meta.summaryObj && meta.summaryObj.subsets) {
                             meta.summaryObj.subsets.forEach(s => allSubsets.add(s));
@@ -2024,14 +1848,14 @@ window.updateGeometryPitListUI = async function() {
                     }
                 }
             } catch(e) {
-                console.error("Gagal meload pit meta:", e);
+                console.error("Gagal meload disposal meta:", e);
             }
         }
     }
 
     listEl.innerHTML = '';
     
-    const isEmpty = pits.length === 0;
+    const isEmpty = disposals.length === 0;
 
     if (isEmpty) {
         listEl.innerHTML = `
@@ -2040,20 +1864,27 @@ window.updateGeometryPitListUI = async function() {
             </div>
         `;
     } else {
-        pits.forEach(pitObj => {
-            const pit = pitObj.name;
-            const isLoaded = window.loadedPits.has(pit);
+        disposals.forEach(dispObj => {
+            const disp = dispObj.name;
+            const isLoaded = window.loadedDisposals.has(disp);
             
-            let currentMode = window.pitColorModes[pit];
+            let currentMode = window.dispColorModes[disp];
 
             if (!currentMode || !['Burden', 'Subset'].includes(currentMode)) {
-                currentMode = pitObj.hasSubset ? 'Subset' : 'Burden';
-                window.pitColorModes[pit] = currentMode;
-                localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
+                currentMode = dispObj.hasSubset ? 'Subset' : 'Burden';
+                window.dispColorModes[disp] = currentMode;
+                localStorage.setItem('rizpec_disp_color_modes', JSON.stringify(window.dispColorModes));
+            }
+            
+            // Memaksa kembalikan ke Burden jika tidak ada subset yang valid
+            if (!dispObj.hasSubset && currentMode === 'Subset') {
+                currentMode = 'Burden';
+                window.dispColorModes[disp] = currentMode;
+                localStorage.setItem('rizpec_disp_color_modes', JSON.stringify(window.dispColorModes));
             }
 
             let optionsHtml = `<option value="Burden" ${currentMode === 'Burden' ? 'selected' : ''}>Burden</option>`;
-            if (pitObj.hasSubset) {
+            if (dispObj.hasSubset) {
                 optionsHtml += `<option value="Subset" ${currentMode === 'Subset' ? 'selected' : ''}>Subset</option>`;
             }
 
@@ -2063,20 +1894,20 @@ window.updateGeometryPitListUI = async function() {
             
             div.innerHTML = `
                 <label class="relative flex items-center justify-center w-5 h-5 cursor-pointer m-0 shrink-0" title="Check/Uncheck untuk menampilkan Geometri">
-                    <input type="checkbox" class="pit-checkbox peer absolute opacity-0 w-full h-full cursor-pointer" data-pit="${pit}" ${isLoaded ? 'checked' : ''}>
+                    <input type="checkbox" class="disp-checkbox peer absolute opacity-0 w-full h-full cursor-pointer" data-disp="${disp}" ${isLoaded ? 'checked' : ''}>
                     <div class="checkbox-box w-5 h-5 rounded-sm border ${isLoaded ? 'bg-blue-500 border-blue-500' : 'bg-slate-800 border-slate-600 group-hover:border-blue-400'} flex items-center justify-center transition-colors">
                         <i class="fa-solid fa-check text-white text-[10px] ${isLoaded ? 'opacity-100' : 'opacity-0'} transition-opacity"></i>
                     </div>
                 </label>
                 <div class="flex flex-col truncate flex-1 pr-1">
-                    <span class="${isLoaded ? 'text-blue-400' : 'text-slate-300'} transition-colors font-bold text-[11px] truncate">${pit}</span>
+                    <span class="${isLoaded ? 'text-blue-400' : 'text-slate-300'} transition-colors font-bold text-[11px] truncate">${disp}</span>
                 </div>
-                <select class="pit-color-mode-select bg-slate-800 text-slate-300 text-[10px] font-semibold border border-slate-600 rounded px-1.5 py-0.5 outline-none cursor-pointer shrink-0 hover:border-slate-400 transition-colors" data-pit="${pit}" title="Pilih Mode Visualisasi">
+                <select class="disp-color-mode-select bg-slate-800 text-slate-300 text-[10px] font-semibold border border-slate-600 rounded px-1.5 py-0.5 outline-none cursor-pointer shrink-0 hover:border-slate-400 transition-colors" data-disp="${disp}" title="Pilih Mode Visualisasi">
                     ${optionsHtml}
                 </select>
             `;
             
-            const cb = div.querySelector('.pit-checkbox');
+            const cb = div.querySelector('.disp-checkbox');
             cb.addEventListener('change', async (e) => {
                 const containerDiv = e.target.closest('.group');
                 const textSpan = containerDiv.querySelector('span.font-bold');
@@ -2089,7 +1920,7 @@ window.updateGeometryPitListUI = async function() {
                     textSpan.className = "text-blue-400 transition-colors font-bold text-[11px] truncate";
                     containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-blue-500/50 shadow-sm p-2 rounded-md transition-all hover:bg-slate-800 group";
                     
-                    window.loadedPits.add(pit);
+                    window.loadedDisposals.add(disp);
                     
                     const geoTab = document.getElementById('panel-geometry');
                     const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
@@ -2109,24 +1940,22 @@ window.updateGeometryPitListUI = async function() {
                     textSpan.className = "text-slate-300 transition-colors font-bold text-[11px] truncate";
                     containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-slate-700/80 p-2 rounded-md transition-all hover:bg-slate-800 group";
                     
-                    window.loadedPits.delete(pit);
-                    window.renderedPits.delete(pit);
-                    // FIX BUGS: Menambahkan spesifik tipe 'pit'
-                    if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
+                    window.loadedDisposals.delete(disp);
+                    window.renderedDisposals.delete(disp);
+                    if (typeof window.unloadDisposalGeometry === 'function') window.unloadDisposalGeometry(disp);
                 }
             });
 
-            const modeSelect = div.querySelector('.pit-color-mode-select');
+            const modeSelect = div.querySelector('.disp-color-mode-select');
             modeSelect.addEventListener('change', async (e) => {
                 const newMode = e.target.value;
-                if (window.pitColorModes[pit] !== newMode) {
-                    window.pitColorModes[pit] = newMode;
-                    localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
+                if (window.dispColorModes[disp] !== newMode) {
+                    window.dispColorModes[disp] = newMode;
+                    localStorage.setItem('rizpec_disp_color_modes', JSON.stringify(window.dispColorModes));
                     
-                    if (window.loadedPits.has(pit)) {
-                        // FIX BUGS: Menambahkan spesifik tipe 'pit'
-                        if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
-                        if (window.renderedPits) window.renderedPits.delete(pit);
+                    if (window.loadedDisposals.has(disp)) {
+                        if (typeof window.unloadDisposalGeometry === 'function') window.unloadDisposalGeometry(disp);
+                        if (window.renderedDisposals) window.renderedDisposals.delete(disp);
                         
                         const geoTab = document.getElementById('panel-geometry');
                         const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
@@ -2148,27 +1977,24 @@ window.updateGeometryPitListUI = async function() {
         });
     }
 
-    let burdenPalette = JSON.parse(localStorage.getItem('rizpec_burden_palette')) || 
+    let dispBurdenPalette = JSON.parse(localStorage.getItem('rizpec_disp_burden_palette')) || 
                         JSON.parse(localStorage.getItem('rizpec_basic_palette')) || [
-        { name: 'Waste', desc: '', color: '#808080' },
-        { name: 'Resource', desc: '', color: '#323232' } 
+        { name: 'Waste', desc: '', color: '#808000' } 
     ];
     
-    if (burdenPalette.length !== 2 || burdenPalette[0].name !== 'Waste') {
-        const wasteCache = burdenPalette.find(b => b.name === 'Waste');
-        const resCache = burdenPalette.find(b => b.name === 'Resource');
-        burdenPalette = [
-            { name: 'Waste', desc: wasteCache?.desc || '', color: wasteCache?.color || '#808080' },
-            { name: 'Resource', desc: resCache?.desc || '', color: resCache?.color || '#323232' }
-        ];
+    // Memaksa update default ke 'Waste' (Olive) jika sebelumnya tersimpan sebagai 'Loose'
+    if (dispBurdenPalette.length > 0 && dispBurdenPalette[0].name === 'Loose') {
+        dispBurdenPalette[0].name = 'Waste';
+        dispBurdenPalette[0].color = '#808000';
+        localStorage.setItem('rizpec_disp_burden_palette', JSON.stringify(dispBurdenPalette));
     }
     
-    if (!localStorage.getItem('rizpec_burden_palette')) {
-        localStorage.setItem('rizpec_burden_palette', JSON.stringify(burdenPalette));
+    if (!localStorage.getItem('rizpec_disp_burden_palette')) {
+        localStorage.setItem('rizpec_disp_burden_palette', JSON.stringify(dispBurdenPalette));
     }
-    window.burdenPalette = burdenPalette;
+    window.dispBurdenPalette = dispBurdenPalette;
 
-    let currentPalette = JSON.parse(localStorage.getItem('rizpec_subset_palette')) || [];
+    let currentPalette = JSON.parse(localStorage.getItem('rizpec_disp_subset_palette')) || [];
     let existingNames = currentPalette.map(p => p.name);
     const defaultColors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 
@@ -2176,8 +2002,7 @@ window.updateGeometryPitListUI = async function() {
 
     const getSubsetWeight = (name) => {
         const upperName = name.toUpperCase();
-        if (upperName === 'RESOURCE') return 999; 
-        if (upperName === 'WASTE') return 998; 
+        if (upperName === 'WASTE') return 0;
         if (upperName.startsWith('R')) return 1;
         if (upperName.startsWith('S')) return 2;
         if (upperName.startsWith('T')) return 3;
@@ -2187,8 +2012,7 @@ window.updateGeometryPitListUI = async function() {
 
     const getSubsetColor = (name, defIndex) => {
         const upperName = name.toUpperCase();
-        if (upperName === 'RESOURCE') return '#323232'; 
-        if (upperName === 'WASTE') return '#808080';
+        if (upperName === 'WASTE') return '#808000'; 
         if (upperName.startsWith('RE')) return '#eab308'; 
         if (upperName.startsWith('T')) return '#ea580c';  
         if (upperName.startsWith('O')) return '#808080';  
@@ -2202,7 +2026,7 @@ window.updateGeometryPitListUI = async function() {
         sortedSubsets.forEach((s, index) => {
             currentPalette.push({ name: s, desc: '', color: getSubsetColor(s, index) });
         });
-        localStorage.setItem('rizpec_subset_palette', JSON.stringify(currentPalette));
+        localStorage.setItem('rizpec_disp_subset_palette', JSON.stringify(currentPalette));
     } else {
         currentPalette = currentPalette.filter(p => allSubsets.has(p.name));
         let needSaveDefault = false;
@@ -2211,45 +2035,29 @@ window.updateGeometryPitListUI = async function() {
             if (!existingNames.includes(s)) {
                 needSaveDefault = true;
                 const newItem = { name: s, desc: '', color: getSubsetColor(s, index) };
-                if (newItem.name.toUpperCase() === 'RESOURCE') {
-                    currentPalette.push(newItem);
-                } else {
-                    const resIndex = currentPalette.findIndex(p => p.name.toUpperCase() === 'RESOURCE');
-                    if (resIndex !== -1) {
-                        currentPalette.splice(resIndex, 0, newItem);
-                    } else {
-                        currentPalette.push(newItem);
-                    }
-                }
+                currentPalette.push(newItem);
             }
         });
-        
-        const resIdx = currentPalette.findIndex(p => p.name.toUpperCase() === 'RESOURCE');
-        if (resIdx !== -1 && resIdx !== currentPalette.length - 1) {
-            const resItem = currentPalette.splice(resIdx, 1)[0];
-            currentPalette.push(resItem);
-            needSaveDefault = true;
-        }
 
         if (needSaveDefault) {
-             localStorage.setItem('rizpec_subset_palette', JSON.stringify(currentPalette));
+             localStorage.setItem('rizpec_disp_subset_palette', JSON.stringify(currentPalette));
         }
     }
 
     currentPalette.forEach(p => { if (typeof p.desc === 'undefined') p.desc = ''; });
     
-    window.subsetPalette = currentPalette;
+    window.dispSubsetPalette = currentPalette;
     
-    if (typeof window.renderPitPaletteUI === 'function') {
-        window.renderPitPaletteUI(isEmpty);
+    if (typeof window.renderDisposalPaletteUI === 'function') {
+        window.renderDisposalPaletteUI(isEmpty);
     }
     
-    window.updatePitApplyColorButton();
+    window.updateDisposalApplyColorButton();
 };
 
-window.renderPitPaletteUI = function(isEmpty = false) {
-    const burdenListEl = document.getElementById('pit-geometry-burden-list');
-    const subsetListEl = document.getElementById('pit-geometry-subset-list');
+window.renderDisposalPaletteUI = function(isEmpty = false) {
+    const burdenListEl = document.getElementById('geometry-disp-burden-list');
+    const subsetListEl = document.getElementById('geometry-disp-subset-list');
     
     const emptyHTML = `
         <div class="flex flex-col items-center justify-center h-16 text-center opacity-60">
@@ -2263,9 +2071,9 @@ window.renderPitPaletteUI = function(isEmpty = false) {
         return;
     }
 
-    if (burdenListEl && window.burdenPalette) {
+    if (burdenListEl && window.dispBurdenPalette) {
         burdenListEl.innerHTML = '';
-        window.burdenPalette.forEach((item, index) => {
+        window.dispBurdenPalette.forEach((item, index) => {
             const div = document.createElement('div');
             div.className = "grid grid-cols-[24px_1fr] gap-2 items-center bg-slate-900/80 border border-slate-700/80 p-2 rounded-md hover:bg-slate-800 transition-colors";
             
@@ -2279,11 +2087,11 @@ window.renderPitPaletteUI = function(isEmpty = false) {
             `;
             
             div.querySelector('.color-input').addEventListener('change', (e) => {
-                const oldColor = window.burdenPalette[index].color;
+                const oldColor = window.dispBurdenPalette[index].color;
                 if (oldColor !== e.target.value) {
-                    window.burdenPalette[index].color = e.target.value;
-                    window.hasUnsavedColorChanges = true;
-                    if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
+                    window.dispBurdenPalette[index].color = e.target.value;
+                    window.hasUnsavedDisposalColorChanges = true;
+                    if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
                 }
             });
 
@@ -2293,7 +2101,7 @@ window.renderPitPaletteUI = function(isEmpty = false) {
 
     if (subsetListEl) {
         subsetListEl.innerHTML = '';
-        let palette = window.subsetPalette || [];
+        let palette = window.dispSubsetPalette || [];
         
         if (palette.length === 0) {
             subsetListEl.innerHTML = emptyHTML;
@@ -2318,33 +2126,33 @@ window.renderPitPaletteUI = function(isEmpty = false) {
             `;
             
             div.querySelector('.color-input').addEventListener('change', (e) => {
-                const oldColor = window.subsetPalette[index].color;
+                const oldColor = window.dispSubsetPalette[index].color;
                 if (oldColor !== e.target.value) {
-                    window.subsetPalette[index].color = e.target.value;
-                    window.hasUnsavedColorChanges = true;
-                    if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
+                    window.dispSubsetPalette[index].color = e.target.value;
+                    window.hasUnsavedDisposalColorChanges = true;
+                    if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
                 }
             });
 
             div.querySelector('.btn-up').addEventListener('click', () => {
                 if (index > 0) {
-                    const temp = window.subsetPalette[index];
-                    window.subsetPalette[index] = window.subsetPalette[index - 1];
-                    window.subsetPalette[index - 1] = temp;
-                    window.hasUnsavedColorChanges = true;
-                    if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
-                    window.renderPitPaletteUI();
+                    const temp = window.dispSubsetPalette[index];
+                    window.dispSubsetPalette[index] = window.dispSubsetPalette[index - 1];
+                    window.dispSubsetPalette[index - 1] = temp;
+                    window.hasUnsavedDisposalColorChanges = true;
+                    if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
+                    window.renderDisposalPaletteUI();
                 }
             });
 
             div.querySelector('.btn-down').addEventListener('click', () => {
-                if (index < window.subsetPalette.length - 1) {
-                    const temp = window.subsetPalette[index];
-                    window.subsetPalette[index] = window.subsetPalette[index + 1];
-                    window.subsetPalette[index + 1] = temp;
-                    window.hasUnsavedColorChanges = true;
-                    if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
-                    window.renderPitPaletteUI();
+                if (index < window.dispSubsetPalette.length - 1) {
+                    const temp = window.dispSubsetPalette[index];
+                    window.dispSubsetPalette[index] = window.dispSubsetPalette[index + 1];
+                    window.dispSubsetPalette[index + 1] = temp;
+                    window.hasUnsavedDisposalColorChanges = true;
+                    if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
+                    window.renderDisposalPaletteUI();
                 }
             });
 
@@ -2355,26 +2163,7 @@ window.renderPitPaletteUI = function(isEmpty = false) {
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
-        const seamEl = document.getElementById('pit-col-seam');
-        const subsetEl = document.getElementById('pit-col-subset');
-        if (seamEl && subsetEl) {
-            const seamContainer = seamEl.parentElement;
-            const subsetContainer = subsetEl.parentElement;
-            if (subsetContainer && subsetContainer.parentElement) {
-                subsetContainer.parentElement.insertBefore(seamContainer, subsetContainer);
-            }
-        }
-
-        const wasteEl = document.getElementById('pit-col-waste');
-        if (wasteEl) {
-            const wasteContainer = wasteEl.parentElement;
-            const spacer = document.querySelector('.border-t.border-slate-700\\/50.my-1');
-            if (spacer && wasteContainer && wasteContainer.parentElement) {
-                wasteContainer.parentElement.insertBefore(spacer, wasteContainer);
-            }
-        }
-
-        const mandatoryIds = ['pit-col-blockname', 'pit-col-bench', 'pit-delim-block', 'pit-delim-strip', 'pit-delim-bench'];
+        const mandatoryIds = ['disp-col-blockname', 'disp-col-bench', 'disp-delim-block', 'disp-delim-strip', 'disp-delim-bench'];
         mandatoryIds.forEach(id => {
             const el = document.getElementById(id);
             if (el && el.previousElementSibling && !el.previousElementSibling.innerHTML.includes('text-red-500')) {
@@ -2383,31 +2172,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const allSettingIds = [
-            'pit-col-blockname', 'pit-col-bench', 'pit-col-subset', 'pit-col-seam', 'pit-col-waste', 'pit-col-resource', 
-            'pit-col-waste-thickness', 'pit-col-resource-thickness', 'pit-col-quality-from', 'pit-col-quality-to',
-            'pit-col-recon-waste', 'pit-col-recon-resource', 'pit-delim-block', 'pit-delim-strip', 'pit-delim-bench'
+            'disp-col-blockname', 'disp-col-bench', 'disp-col-subset', 'disp-col-waste', 'disp-col-bank',
+            'disp-col-recon-waste', 'disp-delim-block', 'disp-delim-strip', 'disp-delim-bench'
         ];
         
         allSettingIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
                 el.addEventListener('change', async () => { 
-                    if (!window.activePitId) return;
-                    window.hasUnsavedPitConfigChanges = true;
-                    await window.saveCurrentPitUIState(); 
-                    window.updatePitBuildGeometryButtonState(); 
+                    if (!window.activeDisposalId) return;
+                    window.hasUnsavedDisposalConfigChanges = true;
+                    await window.saveCurrentDisposalUIState(); 
+                    window.updateDisposalBuildGeometryButtonState(); 
                 });
                 if (el.tagName === 'INPUT') el.addEventListener('input', async () => { 
-                    if (!window.activePitId) return;
-                    window.hasUnsavedPitConfigChanges = true;
-                    await window.saveCurrentPitUIState(); 
-                    window.updatePitBuildGeometryButtonState(); 
+                    if (!window.activeDisposalId) return;
+                    window.hasUnsavedDisposalConfigChanges = true;
+                    await window.saveCurrentDisposalUIState(); 
+                    window.updateDisposalBuildGeometryButtonState(); 
                 });
             }
         });
 
-        if (typeof window.initGeometryPitListUI === 'function') {
-            window.initGeometryPitListUI();
+        if (typeof window.initGeometryDisposalListUI === 'function') {
+            window.initGeometryDisposalListUI();
         }
 
         const navTabs = document.querySelectorAll('.nav-tab');
@@ -2415,12 +2203,12 @@ document.addEventListener('DOMContentLoaded', () => {
             tab.addEventListener('click', async (e) => {
                 const target = tab.getAttribute('data-target');
                 
-                if (typeof window.resetUnsavedPitColorChanges === 'function') {
-                    window.resetUnsavedPitColorChanges();
+                if (typeof window.resetUnsavedDisposalColorChanges === 'function') {
+                    window.resetUnsavedDisposalColorChanges();
                 }
 
-                if (typeof window.discardUnsavedPitConfigChanges === 'function') {
-                    await window.discardUnsavedPitConfigChanges();
+                if (typeof window.discardUnsavedDisposalConfigChanges === 'function') {
+                    await window.discardUnsavedDisposalConfigChanges();
                 }
 
                 if (target === 'panel-geometry') {

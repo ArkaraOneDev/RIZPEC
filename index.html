@@ -36,12 +36,15 @@
             .tool-btn { width: 28px; height: 28px; border-radius: 4px; font-size: 12px; }
             .action-btn { height: 28px; border-radius: 4px; font-size: 12px; }
         }
+        
+        .col-select { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 6px; font-size: 11px; color: #cbd5e1; outline: none; flex: 1; max-width: 160px; height: 30px; }
+        @media(min-width: 1024px) { .col-select { font-size: 10px; padding: 4px; height: auto; max-width: 150px; } }
     </style>
 </head>
 <body class="flex flex-col h-screen w-full bg-slate-900 text-slate-200 font-sans overflow-hidden">
 
     <!-- TOP TOOLBAR & HEADER -->
-    <div class="h-12 lg:h-10 border-b border-slate-700 bg-slate-800 flex items-center shrink-0 shadow-sm z-30 relative transition-all">
+    <div class="h-12 lg:h-10 border-b border-slate-700 bg-slate-800 flex items-center shrink-0 shadow-sm z-50 relative transition-all">
         <div class="w-64 lg:w-80 h-full border-r border-slate-700 bg-slate-800/50 flex items-center shrink-0 overflow-hidden transition-all">
             <!-- App Title -->
             <div class="px-3 lg:px-3 px-4 flex items-center gap-3 shrink-0 h-full">
@@ -68,16 +71,14 @@
             <button class="nav-tab px-3 py-1.5 lg:px-2.5 lg:py-1 hover:bg-slate-700 rounded cursor-pointer text-slate-400 hover:text-slate-200 transition-colors" data-target="panel-link">Link</button>
             <button class="nav-tab px-3 py-1.5 lg:px-2.5 lg:py-1 hover:bg-slate-700 rounded cursor-pointer text-slate-400 hover:text-slate-200 transition-colors" data-target="panel-scheduling">Scheduling</button>
             <button class="nav-tab px-3 py-1.5 lg:px-2.5 lg:py-1 hover:bg-slate-700 rounded cursor-pointer text-slate-400 hover:text-slate-200 transition-colors" data-target="panel-report">Report</button>
+        </div>
             
-            <!-- Layout Dropdown -->
-            <div id="layout-dropdown" class="relative inline-block text-left menu-dropdown ml-auto mr-2 hidden">
-                <button class="px-3 py-1.5 lg:px-2.5 lg:py-1 hover:bg-slate-700 rounded cursor-pointer flex items-center gap-1.5 menu-btn text-slate-300 hover:text-white transition-colors">
+        <div class="px-2 shrink-0 h-full flex items-center border-l border-slate-700 text-[12px] lg:text-[11px] font-medium">
+            <div id="layout-dropdown" class="relative inline-block text-left menu-dropdown hidden">
+                <button class="px-3 py-1.5 lg:px-2.5 lg:py-1 hover:bg-slate-700 rounded cursor-pointer flex items-center gap-1.5 menu-btn text-slate-400 hover:text-slate-200 transition-colors">
                     Layout <i class="fa-solid fa-chevron-down text-[10px] lg:text-[8px] text-slate-500 pointer-events-none"></i>
                 </button>
-                <div class="absolute right-0 mt-1 w-48 lg:w-44 bg-slate-800 border border-slate-600 rounded shadow-xl hidden z-50 dropdown-content py-1">
-                    <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
-                        <input type="checkbox" id="cb-layout-vis" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Visualization
-                    </label>
+                <div class="absolute right-0 mt-1 w-48 lg:w-44 bg-slate-800 border border-slate-600 rounded shadow-xl hidden z-50 dropdown-content py-1 font-normal">
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
                         <input type="checkbox" id="cb-layout-geo" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Geometry
                     </label>
@@ -85,18 +86,17 @@
                         <input type="checkbox" id="cb-layout-layer" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Layer List
                     </label>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
-                        <input type="checkbox" id="cb-layout-info" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Block Info
-                    </label>
-                    <div class="border-t border-slate-600 my-1"></div>
-                    <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
                         <input type="checkbox" id="cb-layout-helper" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Control
                     </label>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
                         <input type="checkbox" id="cb-layout-orbit" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Orbit
                     </label>
+                    <div class="border-t border-slate-600 my-1"></div>
+                    <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
+                        <input type="checkbox" id="cb-layout-info" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Block Info
+                    </label>
                 </div>
             </div>
-
         </div>
     </div>
 
@@ -113,7 +113,6 @@
                     <button id="btn-sidebar-new" class="w-full bg-slate-700 hover:bg-slate-600 text-white text-[13px] lg:text-[12px] py-3 lg:py-2.5 rounded transition-colors shadow-sm font-semibold flex items-center justify-center gap-2">
                         <i class="fa-solid fa-file"></i> New Project
                     </button>
-                    <!-- PERUBAHAN DI SINI: accept="*/*" untuk Android -->
                     <label class="w-full bg-slate-700 hover:bg-slate-600 text-white text-[13px] lg:text-[12px] py-3 lg:py-2.5 rounded transition-colors shadow-sm font-semibold flex items-center justify-center gap-2 cursor-pointer m-0">
                         <i class="fa-solid fa-folder-tree"></i> Open Project (.riz)
                         <input type="file" id="file-input-riz" accept="*/*" class="hidden" />
@@ -155,45 +154,31 @@
                         <div id="subfolders-folder-disp" class="pl-6 lg:pl-5 pr-1 py-1 flex flex-col gap-1.5 lg:gap-1 mt-1"></div>
                     </div>
 
-                    <!-- Haulage Data -->
-                    <div class="flex flex-col">
-                        <div class="flex items-center justify-between p-3 lg:p-2.5 bg-slate-700/40 hover:bg-slate-700/80 border border-transparent hover:border-slate-600 rounded cursor-pointer group transition-all" onclick="selectFolder('Haulage Data', 'Root Folder', 'Haulage Data')">
-                            <div class="flex items-center gap-3 lg:gap-2.5 text-slate-200 text-[14px] lg:text-[13px] font-semibold tracking-wide">
-                                <i class="fa-solid fa-folder text-amber-400"></i> Haulage Data
-                            </div>
-                            <button class="w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white rounded lg:opacity-0 group-hover:opacity-100 transition-all shadow" onclick="event.stopPropagation(); window.addSubfolder('folder-haul', 'Haulage Data')" title="Add Subfolder">
-                                <i class="fa-solid fa-plus text-[12px] lg:text-[10px]"></i>
-                            </button>
-                        </div>
-                        <div id="subfolders-folder-haul" class="pl-6 lg:pl-5 pr-1 py-1 flex flex-col gap-1.5 lg:gap-1 mt-1"></div>
-                    </div>
-
-                    <!-- Production Data -->
-                    <div class="flex flex-col">
-                        <div class="flex items-center justify-between p-3 lg:p-2.5 bg-slate-700/40 hover:bg-slate-700/80 border border-transparent hover:border-slate-600 rounded cursor-pointer group transition-all" onclick="selectFolder('Production Data', 'Root Folder', 'Production Data')">
-                            <div class="flex items-center gap-3 lg:gap-2.5 text-slate-200 text-[14px] lg:text-[13px] font-semibold tracking-wide">
-                                <i class="fa-solid fa-folder text-purple-400"></i> Production Data
-                            </div>
-                            <button class="w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center bg-purple-500/20 text-purple-400 hover:bg-purple-500 hover:text-white rounded lg:opacity-0 group-hover:opacity-100 transition-all shadow" onclick="event.stopPropagation(); window.addSubfolder('folder-prod', 'Production Data')" title="Add Subfolder">
-                                <i class="fa-solid fa-plus text-[12px] lg:text-[10px]"></i>
-                            </button>
-                        </div>
-                        <div id="subfolders-folder-prod" class="pl-6 lg:pl-5 pr-1 py-1 flex flex-col gap-1.5 lg:gap-1 mt-1"></div>
-                    </div>
-
                     <!-- DXF Data -->
                     <div class="flex flex-col">
                         <div class="flex items-center justify-between p-3 lg:p-2.5 bg-slate-700/40 hover:bg-slate-700/80 border border-transparent hover:border-slate-600 rounded cursor-pointer group transition-all" onclick="selectFolder('DXF Data', 'Root Folder', 'DXF Data')">
                             <div class="flex items-center gap-3 lg:gap-2.5 text-slate-200 text-[14px] lg:text-[13px] font-semibold tracking-wide">
                                 <i class="fa-solid fa-folder text-rose-400"></i> DXF Data
                             </div>
-                            <!-- DXF File tetap dibatasi .dxf karena file browser HP biasanya kenal DXF text -->
                             <label class="w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded lg:opacity-0 group-hover:opacity-100 transition-all shadow cursor-pointer m-0" onclick="event.stopPropagation();" title="Import DXF">
                                 <i class="fa-solid fa-plus text-[12px] lg:text-[10px]"></i>
                                 <input type="file" id="file-input-dxf" accept=".dxf" class="hidden" />
                             </label>
                         </div>
                         <div id="subfolders-folder-dxf" class="pl-6 lg:pl-5 pr-1 py-1 flex flex-col gap-1.5 lg:gap-1 mt-1"></div>
+                    </div>
+
+                    <!-- Scheduling Data -->
+                    <div class="flex flex-col">
+                        <div class="flex items-center justify-between p-3 lg:p-2.5 bg-slate-700/40 hover:bg-slate-700/80 border border-transparent hover:border-slate-600 rounded cursor-pointer group transition-all" onclick="selectFolder('Scheduling Data', 'Root Folder', 'Scheduling Data')">
+                            <div class="flex items-center gap-3 lg:gap-2.5 text-slate-200 text-[14px] lg:text-[13px] font-semibold tracking-wide">
+                                <i class="fa-solid fa-folder text-purple-400"></i> Scheduling Data
+                            </div>
+                            <button class="w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center bg-purple-500/20 text-purple-400 hover:bg-purple-500 hover:text-white rounded lg:opacity-0 group-hover:opacity-100 transition-all shadow" onclick="event.stopPropagation(); window.addSubfolder('folder-sched', 'Scheduling Data')" title="Add Subfolder">
+                                <i class="fa-solid fa-plus text-[12px] lg:text-[10px]"></i>
+                            </button>
+                        </div>
+                        <div id="subfolders-folder-sched" class="pl-6 lg:pl-5 pr-1 py-1 flex flex-col gap-1.5 lg:gap-1 mt-1"></div>
                     </div>
                 </div>
             </div>
@@ -203,45 +188,108 @@
             <!-- ===================================== -->
             <div id="panel-geometry" class="sidebar-panel hidden flex-col w-full h-full">
                 
-                <!-- Sequence Record Panel -->
-                <div id="sequence-panel" class="flex-1 px-4 lg:px-3 pb-4 lg:pb-3 pt-4 lg:pt-3 flex flex-col min-h-0 gap-3 lg:gap-2">
-                    <div class="flex-1 flex flex-col w-full rounded border border-slate-700 bg-slate-900/50 overflow-hidden relative">
-                        <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-b border-slate-700 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] text-slate-400 font-semibold shadow z-10">
-                            <div>Selection Name</div>
-                            <div class="text-right">OB</div>
-                            <div class="text-right">Coal</div>
-                            <div class="text-right">SR</div>
-                        </div>
-                        
-                        <div id="sequence-scroll-container" class="flex-1 overflow-y-auto relative">
-                            <div id="sequence-tbody" class="flex flex-col divide-y divide-slate-700/50 w-full min-h-max text-[10px] lg:text-[9px]">
-                            </div>
-                            <div id="sequence-placeholder" class="absolute inset-0 flex items-center justify-center text-slate-500 text-[11px] lg:text-[10px] italic pointer-events-none">
-                                No Records
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-t border-slate-600 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-10">
-                            <div class="font-bold text-white uppercase">Total</div>
-                            <div class="font-bold text-blue-400 text-right font-mono truncate" id="sequence-ob-total">0</div>
-                            <div class="font-bold text-orange-400 text-right font-mono truncate" id="sequence-coal-total">0</div>
-                            <div class="font-bold text-green-400 text-right font-mono truncate" id="sequence-sr-total">0</div>
+                <!-- Pit Group (50% Height) -->
+                <div id="pit-group" class="flex-1 flex flex-col min-h-0 border-b border-slate-700">
+                    <!-- Header Pit Record with Toggle -->
+                    <div class="px-4 lg:px-3 pt-4 lg:pt-3 pb-1 shrink-0">
+                        <div class="flex items-center justify-between border-b border-slate-700/50 pb-2">
+                            <h3 class="text-[12px] lg:text-[11px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fa-solid fa-list-check"></i> Pit Record
+                            </h3>
+                            <label class="flex items-center gap-1.5 cursor-pointer text-[10px] lg:text-[9px] text-slate-400 hover:text-slate-200 transition-colors" title="Tampilkan/Sembunyikan block record di viewport">
+                                <input type="checkbox" id="cb-show-pit-record" class="rounded bg-slate-900 border-slate-600 w-3.5 h-3.5 lg:w-3 lg:h-3 cursor-pointer">
+                                <span>Show</span>
+                            </label>
                         </div>
                     </div>
 
-                    <div class="flex flex-col lg:flex-row gap-2 shrink-0">
-                        <button class="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] lg:text-[9px] font-bold py-2 lg:py-1.5 rounded transition-colors shadow" title="Save as Period Range">
-                            <i class="fa-solid fa-calendar-days mr-1"></i> Save Period
-                        </button>
-                        <button class="flex-1 bg-teal-600 hover:bg-teal-500 text-white text-[11px] lg:text-[9px] font-bold py-2 lg:py-1.5 rounded transition-colors shadow" title="Save as Spatial Range">
-                            <i class="fa-solid fa-map-location-dot mr-1"></i> Save Spatial
-                        </button>
+                    <!-- Sequence Record Panel -->
+                    <div id="sequence-panel" class="flex-1 px-4 lg:px-3 pb-3 lg:pb-2.5 flex flex-col min-h-0 gap-3 lg:gap-2">
+                        <div class="flex-1 flex flex-col w-full rounded border border-slate-700 bg-slate-900/50 overflow-hidden relative">
+                            <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-b border-slate-700 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] text-slate-400 font-semibold shadow z-10">
+                                <div>Selection Name</div>
+                                <div class="text-right">Waste</div>
+                                <div class="text-right">Resource</div>
+                                <div class="text-right">SR</div>
+                            </div>
+                            
+                            <div id="sequence-scroll-container" class="flex-1 overflow-y-auto relative">
+                                <div id="sequence-tbody" class="flex flex-col divide-y divide-slate-700/50 w-full min-h-max text-[10px] lg:text-[9px]">
+                                </div>
+                                <div id="sequence-placeholder" class="absolute inset-0 flex items-center justify-center text-slate-500 text-[11px] lg:text-[10px] italic pointer-events-none">
+                                    No Records
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-t border-slate-600 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-10">
+                                <div class="font-bold text-white uppercase">Total</div>
+                                <div class="font-bold text-blue-400 text-right font-mono truncate" id="sequence-waste-total">0</div>
+                                <div class="font-bold text-orange-400 text-right font-mono truncate" id="sequence-resource-total">0</div>
+                                <div class="font-bold text-green-400 text-right font-mono truncate" id="sequence-sr-total">0</div>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col gap-2 shrink-0">
+                            <button class="w-full bg-blue-600 hover:bg-blue-500 text-white text-[11px] lg:text-[9px] font-bold py-2 lg:py-1.5 rounded transition-colors shadow" title="Save as Pit Range">
+                                <i class="fa-solid fa-calendar-days mr-1"></i> Save Pit Range
+                            </button>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Disposal Group (50% Height) -->
+                <div id="disp-record-group" class="flex-1 flex flex-col min-h-0">
+                    <!-- Header Disposal Record with Toggle -->
+                    <div class="px-4 lg:px-3 pt-3 lg:pt-2.5 pb-1 shrink-0">
+                        <div class="flex items-center justify-between border-b border-slate-700/50 pb-2">
+                            <h3 class="text-[12px] lg:text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fa-solid fa-list-check"></i> Disposal Record
+                            </h3>
+                            <label class="flex items-center gap-1.5 cursor-pointer text-[10px] lg:text-[9px] text-slate-400 hover:text-slate-200 transition-colors" title="Tampilkan/Sembunyikan block record di viewport">
+                                <input type="checkbox" id="cb-show-disp-record" class="rounded bg-slate-900 border-slate-600 w-3.5 h-3.5 lg:w-3 lg:h-3 cursor-pointer">
+                                <span>Show</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Disposal Sequence Record Panel -->
+                    <div id="disp-sequence-panel" class="flex-1 px-4 lg:px-3 pb-4 lg:pb-3 flex flex-col min-h-0 gap-3 lg:gap-2">
+                        <div class="flex-1 flex flex-col w-full rounded border border-slate-700 bg-slate-900/50 overflow-hidden relative">
+                            <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-b border-slate-700 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] text-slate-400 font-semibold shadow z-10">
+                                <div>Selection Name</div>
+                                <div class="text-right">Waste</div>
+                                <div class="text-right">Resource</div>
+                                <div class="text-right">SR</div>
+                            </div>
+                            
+                            <div id="disp-sequence-scroll-container" class="flex-1 overflow-y-auto relative">
+                                <div id="disp-sequence-tbody" class="flex flex-col divide-y divide-slate-700/50 w-full min-h-max text-[10px] lg:text-[9px]">
+                                </div>
+                                <div id="disp-sequence-placeholder" class="absolute inset-0 flex items-center justify-center text-slate-500 text-[11px] lg:text-[10px] italic pointer-events-none">
+                                    No Records
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-t border-slate-600 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-10">
+                                <div class="font-bold text-white uppercase">Total</div>
+                                <div class="font-bold text-emerald-400 text-right font-mono truncate" id="disp-sequence-waste-total">0</div>
+                                <div class="font-bold text-orange-400 text-right font-mono truncate" id="disp-sequence-resource-total">0</div>
+                                <div class="font-bold text-green-400 text-right font-mono truncate" id="disp-sequence-sr-total">0</div>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col gap-2 shrink-0">
+                            <button class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] lg:text-[9px] font-bold py-2 lg:py-1.5 rounded transition-colors shadow" title="Save as Disposal Range">
+                                <i class="fa-solid fa-calendar-days mr-1"></i> Save Disposal Range
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
             <!-- ===================================== -->
-            <!-- TAB 4-7: Range, Link, dll (Sama)      -->
+            <!-- TAB 4-7: Range, Link, dll             -->
             <!-- ===================================== -->
             <div id="panel-range" class="sidebar-panel hidden flex-col w-full h-full p-4">
                 <div class="flex-1 flex items-center justify-center text-[11px] lg:text-[10px] text-slate-500 italic text-center p-4">
@@ -284,7 +332,6 @@
                             <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 lg:px-5 py-3 lg:py-2 rounded text-[14px] lg:text-[13px] font-bold transition-colors shadow w-full sm:w-auto">Continue</button>
                         </form>
                     </div>
-
                 </div>
             </div>
 
@@ -303,10 +350,10 @@
                 <div id="file-summary-content" class="hidden flex-1 overflow-hidden flex-col md:flex-row">
                     
                     <!-- LEFT PANEL: Settings & Actions -->
-                    <div class="w-full md:w-64 lg:w-[320px] xl:w-[380px] shrink-0 border-b md:border-b-0 md:border-r border-slate-700 bg-slate-800/40 p-4 lg:p-5 overflow-y-auto flex flex-col max-h-[50vh] md:max-h-full">
+                    <div class="w-full md:w-64 lg:w-[320px] xl:w-[380px] shrink-0 border-b md:border-b-0 md:border-r border-slate-700 bg-slate-800/40 p-4 lg:p-5 overflow-y-auto flex flex-col max-h-[50vh] md:max-h-full relative">
                         
-                        <!-- Settings CSV (Subfolder Data) -->
-                        <div id="settings-csv" class="hidden flex-col gap-5 lg:gap-4 pt-2">
+                        <!-- Settings CSV (Pit Data) -->
+                        <div id="settings-pit" class="hidden flex-col gap-5 lg:gap-4 pt-2">
                             <!-- Geometry Header -->
                             <div class="flex flex-col gap-2">
                                 <h4 class="text-[12px] lg:text-[11px] font-bold text-blue-400">Non-Centeroid Table</h4>
@@ -319,76 +366,72 @@
                                     <div class="flex items-center gap-2 lg:gap-1.5">
                                         <label class="cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 lg:px-2.5 lg:py-1 rounded text-[11px] lg:text-[10px] font-semibold transition-all border border-slate-600 flex items-center gap-1.5 m-0 shadow-sm">
                                             <i class="fa-solid fa-upload text-blue-400"></i> Choose File
-                                            <input type="file" id="mining-reserve-file" accept=".csv" class="hidden">
+                                            <input type="file" id="pit-mr-file" accept=".csv" class="hidden">
                                         </label>
-                                        <button id="clear-mining-reserve" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear File">
+                                        <button id="pit-clear-mr" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear File">
                                             <i class="fa-solid fa-trash-can text-[11px] lg:text-[10px]"></i>
                                         </button>
                                     </div>
                                 </div>
-                                <div id="mining-reserve-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
+                                <div id="pit-mr-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
                             </div>
                             
                             <!-- Subset Selection & Substrings (Columns) -->
                             <div class="flex flex-col gap-2 lg:gap-1.5 mt-1">
-                                <style>
-                                    .col-select { background: #0f172a; border: 1px solid #334155; border-radius: 4px; padding: 6px; font-size: 11px; color: #cbd5e1; outline: none; flex: 1; max-width: 160px; height: 30px; }
-                                    @media(min-width: 1024px) { .col-select { font-size: 10px; padding: 4px; height: auto; max-width: 150px; } }
-                                </style>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Blockname</span>
-                                    <select id="col-blockname" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-blockname" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Bench</span>
-                                    <select id="col-bench" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-bench" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap" title="Mengacu pada kolom Blockname">Block Substring</span>
-                                    <input type="text" id="delim-block" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
+                                    <input type="text" id="pit-delim-block" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap" title="Mengacu pada kolom Blockname">Strip Substring</span>
-                                    <input type="text" id="delim-strip" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
+                                    <input type="text" id="pit-delim-strip" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap" title="Mengacu pada kolom Bench">Bench Substring</span>
-                                    <input type="text" id="delim-bench" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
+                                    <input type="text" id="pit-delim-bench" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
                                 </div>
                                 
                                 <div class="w-full border-t border-slate-700/50 my-1"></div>
 
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Subset</span>
-                                    <select id="col-subset" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-subset" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Seam</span>
-                                    <select id="col-seam" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-seam" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Waste</span>
-                                    <select id="col-waste" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-waste" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Resource</span>
-                                    <select id="col-resource" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-resource" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Waste Thick</span>
-                                    <select id="col-waste-thickness" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-waste-thickness" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Res. Thick</span>
-                                    <select id="col-resource-thickness" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-resource-thickness" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Quality From</span>
-                                    <select id="col-quality-from" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-quality-from" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Quality To</span>
-                                    <select id="col-quality-to" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-quality-to" class="col-select"><option value="">None</option></select>
                                 </div>
                             </div>
                             
@@ -400,64 +443,215 @@
                                     <div class="flex items-center gap-2 lg:gap-1.5">
                                         <label class="cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 lg:px-2.5 lg:py-1 rounded text-[11px] lg:text-[10px] font-semibold transition-all border border-slate-600 flex items-center gap-1.5 m-0 shadow-sm">
                                             <i class="fa-solid fa-upload text-blue-400"></i> Choose File
-                                            <input type="file" id="reformat-file-input" accept=".csv" class="hidden">
+                                            <input type="file" id="pit-ref-file" accept=".csv" class="hidden">
                                         </label>
-                                        <button id="clear-reformat-file" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear File">
+                                        <button id="pit-clear-ref" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear File">
                                             <i class="fa-solid fa-trash-can text-[11px] lg:text-[10px]"></i>
                                         </button>
                                     </div>
                                 </div>
-                                <div id="reformat-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
+                                <div id="pit-ref-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
                                 
                                 <div class="flex items-center justify-between mt-1">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Waste</span>
-                                    <select id="col-recon-waste" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-recon-waste" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Resource</span>
-                                    <select id="col-recon-resource" class="col-select"><option value="">None</option></select>
+                                    <select id="pit-col-recon-resource" class="col-select"><option value="">None</option></select>
                                 </div>
                             </div>
                             
                             <!-- Geometry & New Entity Section -->
                             <div class="flex flex-col gap-2 mt-2">
-                                <span id="new-entity-filename" class="hidden">Build Geometry terlebih dahulu</span>
-                                <button id="btn-build-geometry" disabled class="mt-1 w-full bg-slate-700 text-slate-400 py-3 lg:py-2 rounded text-[12px] lg:text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-not-allowed">
+                                <span id="pit-ne-filename" class="hidden">Build Geometry terlebih dahulu</span>
+                                <button id="pit-btn-build-geometry" disabled class="mt-1 w-full bg-slate-700 text-slate-400 py-3 lg:py-2 rounded text-[12px] lg:text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-not-allowed">
+                                    <i class="fa-solid fa-play"></i> Build Geometry
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Settings Disposal (Disposal Data) -->
+                        <div id="settings-disp" class="hidden flex-col gap-5 lg:gap-4 pt-2">
+                            <!-- Geometry Header -->
+                            <div class="flex flex-col gap-2">
+                                <h4 class="text-[12px] lg:text-[11px] font-bold text-blue-400">Non-Centeroid Table (Disposal)</h4>
+                            </div>
+                            
+                            <!-- Upload Input Mining Reserve -->
+                            <div class="flex flex-col gap-2 lg:gap-1.5">
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Mining Reserve</span>
+                                    <div class="flex items-center gap-2 lg:gap-1.5">
+                                        <label class="cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 lg:px-2.5 lg:py-1 rounded text-[11px] lg:text-[10px] font-semibold transition-all border border-slate-600 flex items-center gap-1.5 m-0 shadow-sm">
+                                            <i class="fa-solid fa-upload text-blue-400"></i> Choose File
+                                            <input type="file" id="disp-mr-file" accept=".csv" class="hidden">
+                                        </label>
+                                        <button id="disp-clear-mr" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear File">
+                                            <i class="fa-solid fa-trash-can text-[11px] lg:text-[10px]"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="disp-mr-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
+                            </div>
+                            
+                            <!-- Subset Selection & Substrings (Columns) -->
+                            <div class="flex flex-col gap-2 lg:gap-1.5 mt-1">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Blockname</span>
+                                    <select id="disp-col-blockname" class="col-select"><option value="">None</option></select>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Bench</span>
+                                    <select id="disp-col-bench" class="col-select"><option value="">None</option></select>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap" title="Mengacu pada kolom Blockname">Block Substring</span>
+                                    <input type="text" id="disp-delim-block" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap" title="Mengacu pada kolom Blockname">Strip Substring</span>
+                                    <input type="text" id="disp-delim-strip" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap" title="Mengacu pada kolom Bench">Bench Substring</span>
+                                    <input type="text" id="disp-delim-bench" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
+                                </div>
+
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Subset</span>
+                                    <select id="disp-col-subset" class="col-select"><option value="">None</option></select>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Loose Capacity</span>
+                                    <select id="disp-col-waste" class="col-select"><option value="">None</option></select>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Bank Condition</span>
+                                    <input type="number" id="disp-col-bank" class="col-select" value="1.0" min="0" max="1" step="0.01" placeholder="Max 1">
+                                </div>
+                            </div>
+                            
+                            <!-- Reconciliation Section -->
+                            <div class="flex flex-col gap-2 lg:gap-1.5 mt-2 pt-3 border-t border-slate-700/50">
+                                <h4 class="text-[12px] lg:text-[11px] font-bold text-blue-400 mb-1">Centeroid Table</h4>
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Accumulate</span>
+                                    <div class="flex items-center gap-2 lg:gap-1.5">
+                                        <label class="cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 lg:px-2.5 lg:py-1 rounded text-[11px] lg:text-[10px] font-semibold transition-all border border-slate-600 flex items-center gap-1.5 m-0 shadow-sm">
+                                            <i class="fa-solid fa-upload text-blue-400"></i> Choose File
+                                            <input type="file" id="disp-ref-file" accept=".csv" class="hidden">
+                                        </label>
+                                        <button id="disp-clear-ref" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear File">
+                                            <i class="fa-solid fa-trash-can text-[11px] lg:text-[10px]"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="disp-ref-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
+                                
+                                <div class="flex items-center justify-between mt-1">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Loose Capacity</span>
+                                    <select id="disp-col-recon-waste" class="col-select"><option value="">None</option></select>
+                                </div>
+                            </div>
+                            
+                            <!-- Geometry & New Entity Section -->
+                            <div class="flex flex-col gap-2 mt-2">
+                                <span id="disp-ne-filename" class="hidden">Build Geometry terlebih dahulu</span>
+                                <button id="disp-btn-build-geometry" disabled class="mt-1 w-full bg-slate-700 text-slate-400 py-3 lg:py-2 rounded text-[12px] lg:text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-not-allowed">
                                     <i class="fa-solid fa-play"></i> Build Geometry
                                 </button>
                             </div>
                         </div>
 
                         <!-- Settings DXF -->
-                        <div id="settings-dxf" class="hidden flex-col gap-5 pt-2">
+                        <div id="settings-dxf" class="hidden flex-col gap-5 lg:gap-4 pt-2">
+                            <!-- Metadata Header -->
+                            <div class="flex flex-col gap-2">
+                                <h4 class="text-[12px] lg:text-[11px] font-bold text-rose-400">Metadata</h4>
+                            </div>
                             <div class="flex flex-col gap-3 lg:gap-3 text-[12px] lg:text-[11px]">
                                 <div class="flex justify-between items-center">
-                                    <span class="text-slate-400 font-semibold">Nama File</span>
+                                    <span class="text-slate-400 font-semibold">File Name</span>
                                     <span class="text-slate-200 font-bold truncate max-w-[150px] text-right" id="dxf-info-name">-</span>
                                 </div>
                                 <div class="flex justify-between items-center">
-                                    <span class="text-slate-400 font-semibold">Ukuran File</span>
-                                    <span class="text-blue-400 font-mono font-bold" id="dxf-info-size">-</span>
+                                    <span class="text-slate-400 font-semibold">Last Modified</span>
+                                    <span class="text-slate-200 font-mono font-bold" id="dxf-info-modified">-</span>
                                 </div>
                                 <div class="flex justify-between items-center">
-                                    <span class="text-slate-400 font-semibold">Tipe Geometri</span>
-                                    <span class="text-emerald-400 font-semibold" id="dxf-info-type">-</span>
+                                    <span class="text-slate-400 font-semibold">DXF Type</span>
+                                    <span class="text-emerald-400 font-semibold text-[10px] text-right" id="dxf-info-type">-</span>
                                 </div>
+                            </div>
+
+                            <!-- Visual Header -->
+                            <div class="flex flex-col gap-2 lg:gap-1.5 mt-2 pt-3 border-t border-slate-700/50">
+                                <h4 class="text-[12px] lg:text-[11px] font-bold text-rose-400 mb-1">Visual</h4>
                                 
-                                <div class="flex flex-col gap-2 mt-2 lg:mt-1">
-                                    <span class="text-slate-400 font-bold bg-slate-800 p-2 lg:p-1.5 rounded text-center">Tekstur (Texture)</span>
-                                    <div class="flex items-center justify-between mt-1 bg-slate-900/50 p-2.5 lg:p-2 rounded border border-slate-700">
-                                        <span class="text-rose-300 font-mono truncate max-w-[120px] lg:max-w-[140px] text-[11px] lg:text-[10px]" id="dxf-info-texture">None</span>
-                                        <label class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 lg:py-1 rounded cursor-pointer text-[11px] lg:text-[10px] font-bold transition-colors shadow">
-                                            Pilih <input type="file" accept="image/*" class="hidden">
-                                        </label>
+                                <div class="flex items-center justify-between mt-1">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Color Override</span>
+                                    <select id="dxf-col-color" class="col-select">
+                                        <option value="Default">Default</option>
+                                        <option value="Pallete">Pallete</option>
+                                        <option value="Rainbow">Rainbow</option>
+                                    </select>
+                                </div>
+
+                                <div id="dxf-recolor-row" class="hidden items-center justify-between mt-1">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Recolor</span>
+                                    <input type="color" id="dxf-recolor-input" class="w-8 h-8 rounded cursor-pointer border-0 outline-none bg-transparent p-0">
+                                </div>
+                            </div>
+
+                            <!-- Masking Header -->
+                            <div class="flex flex-col gap-2 lg:gap-1.5 mt-2 pt-3 border-t border-slate-700/50">
+                                <h4 class="text-[12px] lg:text-[11px] font-bold text-rose-400 mb-1">Masking</h4>
+                                
+                                <div class="flex items-center justify-between mt-1">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Enable Clip</span>
+                                    <select id="dxf-col-clipping" class="col-select disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                        <option value="No">No</option>
+                                        <option value="Yes">Yes</option>
+                                    </select>
+                                </div>
+
+                                <div id="dxf-footprints-row" class="hidden items-center justify-between mt-1">
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Footprints</span>
+                                    <select id="dxf-col-footprints" class="col-select">
+                                        <option value="Pit Data">Pit Data</option>
+                                        <option value="Disposal Data">Disposal Data</option>
+                                        <option value="All Data">All Data</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Texture Header -->
+                            <div class="flex flex-col gap-2 lg:gap-1.5 mt-2 pt-3 border-t border-slate-700/50">
+                                <h4 class="text-[12px] lg:text-[11px] font-bold text-rose-400 mb-1">Texture</h4>
+
+                                <div class="flex flex-col gap-2 lg:gap-1.5 mt-2">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Texture Image</span>
+                                        <div class="flex items-center gap-2 lg:gap-1.5">
+                                            <label id="dxf-btn-texture-label" class="cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 lg:px-2.5 lg:py-1 rounded text-[11px] lg:text-[10px] font-semibold transition-all border border-slate-600 flex items-center gap-1.5 m-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                                                <i class="fa-solid fa-upload text-rose-400"></i> Choose File
+                                                <input type="file" id="dxf-texture-file" accept="image/*" class="hidden" disabled>
+                                            </label>
+                                            <button id="dxf-clear-texture" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear Texture">
+                                                <i class="fa-solid fa-trash-can text-[11px] lg:text-[10px]"></i>
+                                            </button>
+                                        </div>
                                     </div>
+                                    <div id="dxf-texture-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
                                 </div>
-                                
-                                <div class="flex flex-col gap-3 lg:gap-2 mt-3 lg:mt-2">
-                                    <button class="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 lg:py-2 rounded text-[12px] lg:text-[11px] font-bold shadow transition-colors flex items-center justify-center gap-2"><i class="fa-solid fa-eye-slash"></i> Sembunyikan Layer</button>
-                                    <button class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 lg:py-2 rounded text-[12px] lg:text-[11px] font-bold shadow transition-colors flex items-center justify-center gap-2"><i class="fa-solid fa-crosshairs"></i> Center View</button>
-                                </div>
+                            </div>
+                            
+                            <!-- Apply Button Container -->
+                            <div class="flex flex-col gap-2 mt-2">
+                                <button id="dxf-btn-apply" disabled class="mt-1 w-full disabled:bg-slate-700 disabled:text-slate-400 bg-blue-600 hover:bg-blue-500 text-white py-3 lg:py-2 rounded text-[12px] lg:text-[11px] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 disabled:cursor-not-allowed">
+                                    <i class="fa-solid fa-check"></i> Apply
+                                </button>
                             </div>
                         </div>
 
@@ -481,37 +675,116 @@
                                 <h2 class="text-xl lg:text-xl font-bold text-white tracking-tight truncate max-w-full" id="summary-name">Folder Name</h2>
                             </div>
 
-                            <!-- Stats Info in neat rows -->
-                            <div class="flex flex-col bg-slate-800/50 border border-slate-700 rounded shadow-sm text-[12px] lg:text-[11px] shrink-0 overflow-hidden">
-                                <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                                    <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-file-csv w-5 text-center mr-1.5 text-blue-400"></i> Mining Reserve</div>
-                                    <div class="p-3 lg:p-2.5 text-white font-bold flex items-center break-all" id="stat-mining-reserve">0.00 MB (0 Row, 0 Column)</div>
-                                </div>
-                                <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                                    <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-file-csv w-5 text-center mr-1.5 text-blue-400"></i> Reformat Interval</div>
-                                    <div class="p-3 lg:p-2.5 text-white font-bold flex items-center break-all" id="stat-reformat-interval">0.00 MB (0 Row, 0 Column)</div>
-                                </div>
-                                <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                                    <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-cube w-5 text-center mr-1.5 text-blue-400"></i> Geometry</div>
-                                    <div class="p-3 lg:p-2.5 text-white font-bold flex items-center" id="stat-new-entity">0 Block</div>
-                                </div>
-                            </div>
-                            
-                            <!-- Area kosong untuk preview data -->
-                            <div id="preview-container" class="flex-1 bg-slate-900 border border-slate-700/50 rounded flex relative overflow-hidden min-h-[250px] lg:min-h-[150px] shadow-inner">
-                                <!-- 3D Canvas Area -->
-                                <div id="preview-3d-canvas" class="flex-1 w-full h-full relative cursor-move">
-                                    <div id="preview-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 opacity-70 pointer-events-none">
-                                        <i class="fa-solid fa-magnifying-glass-chart text-4xl lg:text-3xl mb-3 lg:mb-2"></i>
-                                        <span class="text-[12px] lg:text-[11px] italic">Data Preview Area</span>
+                            <!-- PIT WRAPPER -->
+                            <div id="pit-summary-wrapper" class="hidden flex-col gap-4 w-full h-full flex-1">
+                                <!-- Stats Info in neat rows -->
+                                <div class="flex flex-col bg-slate-800/50 border border-slate-700 rounded shadow-sm text-[12px] lg:text-[11px] shrink-0 overflow-hidden">
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-file-csv w-5 text-center mr-1.5 text-blue-400"></i> Mining Reserve</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center break-all" id="pit-stat-mr">0.00 MB (0 Row, 0 Column)</div>
+                                    </div>
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-file-csv w-5 text-center mr-1.5 text-blue-400"></i> Reformat Interval</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center break-all" id="pit-stat-ref">0.00 MB (0 Row, 0 Column)</div>
+                                    </div>
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-cube w-5 text-center mr-1.5 text-blue-400"></i> Geometry</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center" id="pit-stat-ne">0 Block</div>
                                     </div>
                                 </div>
                                 
-                                <!-- Floating Summary Table -->
-                                <div id="preview-summary-table" class="hidden w-56 lg:w-56 border-l border-slate-700/50 bg-slate-800/90 backdrop-blur flex flex-col p-4 lg:p-3 overflow-y-auto shrink-0 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.3)] z-10">
-                                    <h3 class="text-white text-[12px] lg:text-[11px] font-bold border-b border-slate-700 pb-2 lg:pb-1.5 mb-3 lg:mb-2 flex items-center"><i class="fa-solid fa-chart-simple mr-1.5 text-blue-400"></i> Entity Summary</h3>
-                                    <div id="preview-summary-content" class="flex flex-col gap-2 lg:gap-1.5 text-[11px] lg:text-[10px]">
-                                        <!-- Dihasilkan melalui JS -->
+                                <!-- Area kosong untuk preview data -->
+                                <div id="pit-preview-container" class="flex-1 bg-slate-900 border border-slate-700/50 rounded flex relative overflow-hidden min-h-[250px] lg:min-h-[150px] shadow-inner">
+                                    <!-- 3D Canvas Area -->
+                                    <div id="pit-preview-3d-canvas" class="flex-1 w-full h-full relative cursor-move">
+                                        <div id="pit-preview-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 opacity-70 pointer-events-none">
+                                            <i class="fa-solid fa-magnifying-glass-chart text-4xl lg:text-3xl mb-3 lg:mb-2"></i>
+                                            <span class="text-[12px] lg:text-[11px] italic">Data Preview Area</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Floating Summary Table -->
+                                    <div id="pit-preview-summary-table" class="hidden w-56 lg:w-56 border-l border-slate-700/50 bg-slate-800/90 backdrop-blur flex flex-col p-4 lg:p-3 overflow-y-auto shrink-0 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.3)] z-10">
+                                        <h3 class="text-white text-[12px] lg:text-[11px] font-bold border-b border-slate-700 pb-2 lg:pb-1.5 mb-3 lg:mb-2 flex items-center"><i class="fa-solid fa-chart-simple mr-1.5 text-blue-400"></i> Entity Summary</h3>
+                                        <div id="pit-preview-summary-content" class="flex flex-col gap-2 lg:gap-1.5 text-[11px] lg:text-[10px]">
+                                            <!-- Dihasilkan melalui JS -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- DISPOSAL WRAPPER -->
+                            <div id="disp-summary-wrapper" class="hidden flex-col gap-4 w-full h-full flex-1">
+                                <!-- Stats Info in neat rows -->
+                                <div class="flex flex-col bg-slate-800/50 border border-slate-700 rounded shadow-sm text-[12px] lg:text-[11px] shrink-0 overflow-hidden">
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-file-csv w-5 text-center mr-1.5 text-blue-400"></i> Mining Reserve</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center break-all" id="disp-stat-mr">0.00 MB (0 Row, 0 Column)</div>
+                                    </div>
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-file-csv w-5 text-center mr-1.5 text-blue-400"></i> Accumulate</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center break-all" id="disp-stat-ref">0.00 MB (0 Row, 0 Column)</div>
+                                    </div>
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-cube w-5 text-center mr-1.5 text-blue-400"></i> Geometry</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center" id="disp-stat-ne">0 Block</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Area kosong untuk preview data -->
+                                <div id="disp-preview-container" class="flex-1 bg-slate-900 border border-slate-700/50 rounded flex relative overflow-hidden min-h-[250px] lg:min-h-[150px] shadow-inner">
+                                    <!-- 3D Canvas Area -->
+                                    <div id="disp-preview-3d-canvas" class="flex-1 w-full h-full relative cursor-move">
+                                        <div id="disp-preview-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 opacity-70 pointer-events-none">
+                                            <i class="fa-solid fa-magnifying-glass-chart text-4xl lg:text-3xl mb-3 lg:mb-2"></i>
+                                            <span class="text-[12px] lg:text-[11px] italic">Data Preview Area</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Floating Summary Table -->
+                                    <div id="disp-preview-summary-table" class="hidden w-56 lg:w-56 border-l border-slate-700/50 bg-slate-800/90 backdrop-blur flex flex-col p-4 lg:p-3 overflow-y-auto shrink-0 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.3)] z-10">
+                                        <h3 class="text-white text-[12px] lg:text-[11px] font-bold border-b border-slate-700 pb-2 lg:pb-1.5 mb-3 lg:mb-2 flex items-center"><i class="fa-solid fa-chart-simple mr-1.5 text-blue-400"></i> Entity Summary</h3>
+                                        <div id="disp-preview-summary-content" class="flex flex-col gap-2 lg:gap-1.5 text-[11px] lg:text-[10px]">
+                                            <!-- Dihasilkan melalui JS -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- DXF WRAPPER -->
+                            <div id="dxf-summary-wrapper" class="hidden flex-col gap-4 w-full h-full flex-1">
+                                <!-- Stats Info in neat rows -->
+                                <div class="flex flex-col bg-slate-800/50 border border-slate-700 rounded shadow-sm text-[12px] lg:text-[11px] shrink-0 overflow-hidden">
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-file-code w-5 text-center mr-1.5 text-rose-400"></i> Metadata</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center break-all" id="dxf-stat-meta">0.00 MB (0 elements)</div>
+                                    </div>
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-image w-5 text-center mr-1.5 text-rose-400"></i> Texture</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center break-all" id="dxf-stat-texture">0.00 MB (0 x 0)</div>
+                                    </div>
+                                    <div class="grid grid-cols-[160px_1fr] lg:grid-cols-[150px_1fr] border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                                        <div class="p-3 lg:p-2.5 border-r border-slate-700/50 text-slate-400 font-semibold flex items-center"><i class="fa-solid fa-cubes-stacked w-5 text-center mr-1.5 text-rose-400"></i> Total</div>
+                                        <div class="p-3 lg:p-2.5 text-white font-bold flex items-center" id="dxf-stat-total">0.00 MB</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Area kosong untuk preview data -->
+                                <div id="dxf-preview-container" class="flex-1 bg-slate-900 border border-slate-700/50 rounded flex relative overflow-hidden min-h-[250px] lg:min-h-[150px] shadow-inner">
+                                    <!-- 2D Canvas Area -->
+                                    <div id="dxf-preview-3d-canvas" class="flex-1 w-full h-full relative cursor-move">
+                                        <div id="dxf-preview-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 opacity-70 pointer-events-none">
+                                            <i class="fa-solid fa-map text-4xl lg:text-3xl mb-3 lg:mb-2"></i>
+                                            <span class="text-[12px] lg:text-[11px] italic">2D Top View Preview Area</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Floating Summary Table -->
+                                    <div id="dxf-preview-summary-table" class="hidden w-56 lg:w-56 border-l border-slate-700/50 bg-slate-800/90 backdrop-blur flex flex-col p-4 lg:p-3 overflow-y-auto shrink-0 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.3)] z-10">
+                                        <h3 class="text-white text-[12px] lg:text-[11px] font-bold border-b border-slate-700 pb-2 lg:pb-1.5 mb-3 lg:mb-2 flex items-center"><i class="fa-solid fa-chart-simple mr-1.5 text-rose-400"></i> Entity Summary</h3>
+                                        <div id="dxf-preview-summary-content" class="flex flex-col gap-2 lg:gap-1.5 text-[11px] lg:text-[10px]">
+                                            <!-- Dihasilkan melalui JS -->
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -541,7 +814,7 @@
                 <div class="absolute bottom-4 left-4 z-20 flex flex-col items-start pointer-events-none gap-2">
                     
                     <!-- Unified Block Info Container -->
-                    <div id="container-info" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col w-56 lg:w-64 h-[260px] lg:h-[240px] transition-all">
+                    <div id="container-info" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col w-56 lg:w-64 transition-all">
                         
                         <!-- Header -->
                         <div class="p-2 lg:p-2 border-b border-slate-700 flex items-center justify-between rounded-t bg-slate-800/30 shrink-0">
@@ -562,56 +835,24 @@
                         </div>
                         
                         <!-- Detail Info Area -->
-                        <div class="flex-1 relative overflow-hidden">
-                            <div id="info-empty" class="absolute inset-0 flex items-center justify-center text-[10px] lg:text-[9px] text-slate-500 italic p-4 text-center">
+                        <div class="flex flex-col w-full">
+                            <div id="info-empty" class="flex items-center justify-center text-[10px] lg:text-[9px] text-slate-500 italic p-4 text-center hidden">
                                 Belum ada block yang dipilih (Klik)
                             </div>
 
-                            <div id="info-panel" class="absolute inset-0 p-3 flex flex-col gap-2 lg:gap-1.5 hidden overflow-y-auto">
-                                <h2 class="text-[12px] lg:text-[11px] font-bold text-white mb-1 flex items-center justify-between border-b border-slate-700 pb-2 lg:pb-1.5 shrink-0">
-                                    <div class="flex items-center gap-2 overflow-hidden">
-                                        <i class="fa-solid fa-cube text-green-400"></i>
-                                        <span id="info-block-text" class="truncate">BLOCKNAME</span>
-                                    </div>
-                                    <span id="info-selection-count" class="text-[10px] lg:text-[9px] font-normal bg-slate-700 px-2 lg:px-1.5 py-1 lg:py-0.5 rounded text-slate-300 shrink-0 whitespace-nowrap">1 Item</span>
-                                </h2>
-                                
-                                <div class="flex flex-col gap-2 lg:gap-1.5 text-[11px] lg:text-[10px] flex-1">
-                                    <div class="flex justify-between border-b border-slate-700/50 pb-1 lg:pb-0.5">
-                                        <span class="text-slate-400 font-medium flex items-center gap-2 lg:gap-1.5"><i class="fa-solid fa-stairs w-[12px] lg:w-[10px] text-center"></i> Bench</span>
-                                        <span id="info-bench" class="font-semibold text-white truncate max-w-[120px] lg:max-w-[140px] text-right">-</span>
-                                    </div>
-                                    <div class="flex justify-between border-b border-slate-700/50 pb-1 lg:pb-0.5">
-                                        <span class="text-slate-400 font-medium flex items-center gap-2 lg:gap-1.5"><i class="fa-solid fa-layer-group w-[12px] lg:w-[10px] text-center"></i> Burden</span>
-                                        <span id="info-burden" class="font-semibold text-white truncate">-</span>
-                                    </div>
-                                    <div class="flex justify-between border-b border-slate-700/50 pb-1 lg:pb-0.5">
-                                        <span class="text-slate-400 font-medium flex items-center gap-2 lg:gap-1.5"><i class="fa-solid fa-bars-staggered w-[12px] lg:w-[10px] text-center"></i> Seam</span>
-                                        <span id="info-seam" class="font-semibold text-white truncate max-w-[120px] lg:max-w-[140px] text-right">-</span>
-                                    </div>
-                                    <div class="flex justify-between border-b border-slate-700/50 pb-1 lg:pb-0.5">
-                                        <span class="text-slate-400 font-medium flex items-center gap-2 lg:gap-1.5"><i class="fa-solid fa-truck-moving w-[12px] lg:w-[10px] text-center"></i> OB (bcm)</span>
-                                        <span id="info-ob" class="font-semibold text-blue-400 truncate">-</span>
-                                    </div>
-                                    <div class="flex justify-between border-b border-slate-700/50 pb-1 lg:pb-0.5">
-                                        <span class="text-slate-400 font-medium flex items-center gap-2 lg:gap-1.5"><i class="fa-solid fa-weight-hanging w-[12px] lg:w-[10px] text-center"></i> Coal (t)</span>
-                                        <span id="info-coal" class="font-semibold text-orange-400 truncate">-</span>
-                                    </div>
-                                    <div class="flex justify-between pb-1 lg:pb-0.5">
-                                        <span class="text-slate-400 font-medium flex items-center gap-2 lg:gap-1.5"><i class="fa-solid fa-divide w-[12px] lg:w-[10px] text-center"></i> SR</span>
-                                        <span id="info-sr" class="font-bold text-green-400 truncate">-</span>
-                                    </div>
-                                </div>
+                            <div id="info-panel" class="p-2 flex flex-col hidden">
+                                <!-- Konten dari JS akan masuk ke sini secara otomatis -->
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- FLOATING LAYER PANEL -->
-                <div class="absolute top-4 right-4 z-20 flex flex-col items-end gap-2 pointer-events-none">
-                    <div id="layer-container" class="w-56 lg:w-64 flex flex-col gap-2 transition-all">
+                <!-- FLOATING LAYER PANEL (MODIFIED STRUCTURE) -->
+                <div class="absolute top-4 bottom-4 right-4 z-20 flex flex-col items-end pointer-events-none">
+                    <div id="layer-container" class="w-56 lg:w-64 h-full flex flex-col gap-2 transition-all">
                         
-                        <div id="container-visualization" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm p-3 lg:p-2 flex flex-col gap-2 hidden">
+                        <!-- Visualization (Fixed height) -->
+                        <div id="container-visualization" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm p-3 lg:p-2 flex flex-col gap-2 shrink-0 hidden">
                             <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-1">
                                 <i class="fa-solid fa-display text-blue-400"></i> Visualization
                             </h3>
@@ -636,101 +877,99 @@
                             </div>
                         </div>
 
-                        <div id="container-geometry" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col hidden">
-                            <div class="p-2.5 lg:p-2 border-b border-slate-700 flex items-center justify-between bg-slate-800/30 rounded-t">
-                                <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                                    <i class="fa-solid fa-cube text-green-400"></i> Geometry
-                                </h3>
-                            </div>
-                            <div class="p-2.5 lg:p-2 flex flex-col gap-2 lg:gap-1.5">
-                                <div id="geometry-list" class="flex flex-col gap-1.5 lg:gap-1 max-h-[180px] overflow-y-auto pr-1">
-                                    <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada Geometri</div>
+                        <!-- MIDDLE SECTION: FLEX CONTAINER UNTUK MEMENUHI TINGGI -->
+                        <div class="flex-1 flex flex-col gap-2 min-h-0 w-full">
+                            <!-- Panel Geometry (Expandable) -->
+                            <div id="container-geometry" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0 hidden">
+                                <div class="p-2.5 lg:p-2 border-b border-slate-700 flex items-center justify-between bg-slate-800/30 rounded-t shrink-0">
+                                    <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                        <i class="fa-solid fa-cube text-green-400"></i> Geometry
+                                    </h3>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div id="container-layerlist" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col hidden">
-                            <div class="p-2.5 lg:p-2 border-b border-slate-700 flex items-center justify-between rounded-t bg-slate-800/30">
-                                <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                                    <i class="fa-solid fa-layer-group text-blue-400"></i> Layer List
-                                </h3>
-                                <span class="text-[10px] lg:text-[9px] font-mono text-slate-400"><span id="layer-count">0</span>/5</span>
-                            </div>
-                            
-                            <div class="p-2.5 lg:p-2 flex flex-col gap-2 lg:gap-1.5">
-                                <div id="layer-list" class="flex flex-col gap-1.5 lg:gap-1 max-h-[150px] overflow-y-auto pr-1">
-                                    <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada DXF Layer</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Panel Control -->
-                        <div id="container-control" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col p-3 lg:p-2 gap-1.5 lg:gap-1 hidden">
-                            <div class="text-[11px] lg:text-[10px] font-bold text-slate-300 border-b border-slate-700 pb-1.5 lg:pb-1 mb-1 flex justify-between items-center px-1">
-                                <span><i class="fa-solid fa-mouse-pointer mr-1.5"></i> Control</span>
-                            </div>
-                            
-                            <div class="flex flex-col gap-2 lg:gap-1.5">
-                                <!-- Selection Row -->
-                                <div class="flex items-center px-1">
-                                    <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Selection</span>
-                                    <div class="flex gap-1.5 lg:gap-1 flex-wrap">
-                                        <button class="tool-btn active-tool" data-mode="select_bench" title="Seleksi 1 Bench (Klik)"><i class="fa-solid fa-layer-group"></i></button>
-                                        <button class="tool-btn" data-mode="select_block" title="Seleksi 1 Block Utuh (Shift+Klik)"><i class="fa-solid fa-cube"></i></button>
-                                        <button class="tool-btn" data-mode="box_select" title="Seleksi Kotak (Shift+Drag)"><i class="fa-solid fa-vector-square"></i></button>
-                                        <button class="tool-btn" data-mode="poly_select" title="Seleksi Poligon (Alt+Klik) -> Enter"><i class="fa-solid fa-draw-polygon"></i></button>
+                                <div class="p-2.5 lg:p-2 flex-1 flex flex-col gap-2 lg:gap-1.5 min-h-0">
+                                    <div id="geometry-list" class="flex flex-col gap-1.5 lg:gap-1 flex-1 overflow-y-auto pr-1 h-full">
+                                        <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada Geometri</div>
                                     </div>
                                 </div>
+                            </div>
 
-                                <!-- Record Row -->
-                                <div class="flex items-center px-1">
-                                    <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Record</span>
-                                    <div class="flex gap-1.5 lg:gap-1 flex-wrap">
-                                        <button class="tool-btn text-emerald-400 hover:text-emerald-300" onclick="window.recordSelectedMeshes()" title="Record by Selection"><i class="fa-solid fa-check-double"></i></button>
-                                        <button class="tool-btn text-green-400 hover:text-green-300" data-mode="record_bench" title="Record 1 Bench (Ctrl+Klik)"><i class="fa-solid fa-plus"></i></button>
-                                        <button class="tool-btn text-green-400 hover:text-green-300" data-mode="record_block" title="Record 1 Block Utuh (Ctrl+Shift+Klik)"><i class="fa-solid fa-plus-square"></i></button>
-                                    </div>
+                            <!-- Panel Layer List (Expandable) -->
+                            <div id="container-layerlist" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0 hidden">
+                                <div class="p-2.5 lg:p-2 border-b border-slate-700 flex items-center justify-between rounded-t bg-slate-800/30 shrink-0">
+                                    <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                        <i class="fa-solid fa-layer-group text-blue-400"></i> Layer List
+                                    </h3>
+                                    <span class="text-[10px] lg:text-[9px] font-mono text-slate-400"><span id="layer-count">0</span>/5</span>
                                 </div>
-
-                                <!-- Draw Row -->
-                                <div class="flex items-center px-1">
-                                    <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Draw</span>
-                                    <div class="flex gap-1.5 lg:gap-1 flex-wrap">
-                                        <button class="tool-btn" data-mode="draw_line" title="Draw Line (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-pen"></i></button>
-                                        <button class="tool-btn" data-mode="draw_area" title="Draw Area (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-draw-polygon"></i></button>
-                                    </div>
-                                </div>
-
-                                <!-- Action Row -->
-                                <div class="flex items-center px-1">
-                                    <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Action</span>
-                                    <div class="flex gap-1.5 lg:gap-1 flex-wrap">
-                                        <button class="tool-btn" onclick="window.undoLastRecord()" title="Undo Record (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
-                                        <button class="tool-btn" onclick="window.redoLastUndo()" title="Redo Record (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
-                                        <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.resetSequenceAndView()" title="Reset & Unhide (X / Esc)"><i class="fa-solid fa-xmark"></i></button>
+                                <div class="p-2.5 lg:p-2 flex-1 flex flex-col gap-2 lg:gap-1.5 min-h-0">
+                                    <div id="layer-list" class="flex flex-col gap-1.5 lg:gap-1 flex-1 overflow-y-auto pr-1 h-full">
+                                        <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada DXF Layer</div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Panel Orbit -->
-                        <div id="container-orbit" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col p-3 lg:p-2 gap-1.5 lg:gap-1 hidden">
-                            <div class="text-[11px] lg:text-[10px] font-bold text-slate-300 border-b border-slate-700 pb-1.5 lg:pb-1 mb-1 flex justify-between items-center px-1">
-                                <span><i class="fa-solid fa-compass mr-1.5"></i> Orbit</span>
-                            </div>
-                            <div class="flex gap-2 lg:gap-1.5 mt-1 lg:mt-0.5">
-                                <!-- 3D Box Orbit Trackpad -->
-                                <div id="orbit-trackpad" class="flex-1 h-44 lg:h-40 bg-slate-900/80 rounded border border-slate-700 flex items-center justify-center cursor-move shadow-inner relative overflow-hidden select-none group touch-none">
+                        <!-- BOTTOM SECTION: MEMASUKAN CONTROL & ORBIT DI BAGIAN BAWAH -->
+                        <div class="shrink-0 flex flex-col gap-2 w-full mt-auto">
+                            <!-- Panel Control -->
+                            <div id="container-control" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col p-3 lg:p-2 gap-1.5 lg:gap-1 hidden">
+                                <div class="text-[11px] lg:text-[10px] font-bold text-slate-300 border-b border-slate-700 pb-1.5 lg:pb-1 mb-1 flex justify-between items-center px-1">
+                                    <span><i class="fa-solid fa-mouse-pointer mr-1.5"></i> CONTROLS</span>
                                 </div>
                                 
-                                <!-- Orbit Tools (Vertical) -->
-                                <div class="flex flex-col gap-1.5 lg:gap-1 shrink-0">
-                                    <button class="tool-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 shadow backdrop-blur-sm text-blue-400 hover:text-blue-300 transition-colors" data-mode="center_pivot" title="Set Center Pivot (C)">
-                                        <i class="fa-solid fa-crosshairs"></i>
-                                    </button>
-                                    <button class="tool-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 shadow backdrop-blur-sm text-slate-400 hover:text-slate-300 transition-colors" data-mode="pan_camera" title="Pan Camera">
-                                        <i class="fa-solid fa-hand"></i>
-                                    </button>
+                                <div class="flex flex-col gap-2 lg:gap-1.5">
+                                    <!-- Selection Row -->
+                                    <div class="flex items-center px-1">
+                                        <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Selection</span>
+                                        <div class="flex gap-1.5 lg:gap-1 flex-wrap">
+                                            <button class="tool-btn active-tool" data-mode="select_bench" title="Seleksi 1 Bench (Klik)"><i class="fa-solid fa-layer-group"></i></button>
+                                            <button class="tool-btn" data-mode="select_block" title="Seleksi 1 Block Utuh (Shift+Klik)"><i class="fa-solid fa-cube"></i></button>
+                                            <button class="tool-btn" data-mode="box_select" title="Seleksi Kotak (Shift+Drag)"><i class="fa-solid fa-vector-square"></i></button>
+                                            <button class="tool-btn" data-mode="poly_select" title="Seleksi Poligon (Alt+Klik) -> Enter"><i class="fa-solid fa-draw-polygon"></i></button>
+                                            <button class="tool-btn text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20" onclick="window.recordSelectedMeshes()" title="Record by Selection"><i class="fa-solid fa-check-double"></i></button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Draw Row -->
+                                    <div class="flex items-center px-1">
+                                        <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Draw</span>
+                                        <div class="flex gap-1.5 lg:gap-1 flex-wrap">
+                                            <button class="tool-btn" data-mode="draw_line" title="Draw Line (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-pen"></i></button>
+                                            <button class="tool-btn" data-mode="draw_area" title="Draw Area (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-draw-polygon"></i></button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Action Row -->
+                                    <div class="flex items-center px-1">
+                                        <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Action</span>
+                                        <div class="flex gap-1.5 lg:gap-1 flex-wrap">
+                                            <button class="tool-btn" onclick="window.undoLastRecord()" title="Undo Record (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
+                                            <button class="tool-btn" onclick="window.redoLastUndo()" title="Redo Record (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
+                                            <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.resetSequenceAndView()" title="Reset & Unhide (X / Esc)"><i class="fa-solid fa-xmark"></i></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Panel Orbit -->
+                            <div id="container-orbit" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col p-3 lg:p-2 gap-1.5 lg:gap-1 hidden">
+                                <div class="text-[11px] lg:text-[10px] font-bold text-slate-300 border-b border-slate-700 pb-1.5 lg:pb-1 mb-1 flex justify-between items-center px-1">
+                                    <span><i class="fa-solid fa-compass mr-1.5"></i> ORBIT</span>
+                                </div>
+                                <div class="flex gap-2 lg:gap-1.5 mt-1 lg:mt-0.5">
+                                    <!-- 3D Box Orbit Trackpad -->
+                                    <div id="orbit-trackpad" class="flex-1 h-44 lg:h-40 bg-slate-900/80 rounded border border-slate-700 flex items-center justify-center cursor-move shadow-inner relative overflow-hidden select-none group touch-none">
+                                    </div>
+                                    
+                                    <!-- Orbit Tools (Vertical) -->
+                                    <div class="flex flex-col gap-1.5 lg:gap-1 shrink-0">
+                                        <button class="tool-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 shadow backdrop-blur-sm text-blue-400 hover:text-blue-300 transition-colors" data-mode="center_pivot" title="Set Center Pivot (C)">
+                                            <i class="fa-solid fa-crosshairs"></i>
+                                        </button>
+                                        <button class="tool-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 shadow backdrop-blur-sm text-slate-400 hover:text-slate-300 transition-colors" data-mode="pan_camera" title="Pan Camera">
+                                            <i class="fa-solid fa-hand"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -794,10 +1033,11 @@
     <script src="assets/js/utils.js"></script>
     <script src="assets/js/main.js"></script>
     <script src="assets/js/layout.js"></script>
-    <script src="assets/js/autocad.js"></script>
     <script src="assets/js/geometry.js"></script>
     <script src="assets/js/file.js"></script>
     <script src="assets/js/file-pit.js"></script>
+    <script src="assets/js/file-disposal.js"></script>
+    <script src="assets/js/file-dxf.js"></script>
     <script src="assets/js/project.js"></script>
     
     <!-- Tambahan Skrip Interaksi & Alat (Dipisahkan) -->

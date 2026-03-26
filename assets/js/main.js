@@ -19,23 +19,21 @@ let lastMousePos = { x: 0, y: 0 };
 
 var globalParsedData = null;
 var csvHeaders = []; 
-var isStupaMode = false; 
-var currentExtrusion = 5; 
 
 var worldOrigin = { x: 0, y: 0, z: 0, isSet: false };
 var appLayers = []; 
 
-var isOBVisible = true;
-var isCoalVisible = true;
+var isWasteVisible = true;
+var isResourceVisible = true;
 var isLabelLayerVisible = true;
 var isGeometryExpanded = false; 
 
-var obOpacity = 1;
-var coalOpacity = 1;
+var wasteOpacity = 1;
+var resourceOpacity = 1;
 var labelOpacity = 1;
 
-var basicColorOB = localStorage.getItem('basicColorOB') || '#a0a0a0';
-var basicColorCoal = localStorage.getItem('basicColorCoal') || '#333333';
+var basicColorWaste = localStorage.getItem('basicColorWaste') || '#a0a0a0';
+var basicColorResource = localStorage.getItem('basicColorResource') || '#333333';
 
 var activeLabels = [];
 
@@ -96,7 +94,6 @@ const COLOR_SELECTED = 0x2b5b84;
 // ==========================================
 function init3D() {
     const container = document.getElementById('canvas-container');
-    const modeToggle = document.getElementById('mode-toggle');
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color('#1e293b');
@@ -104,7 +101,7 @@ function init3D() {
     camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100000);
     camera.position.set(0, 500, 500);
 
-    // --- OPTIMASI GPU KHUSUS TABLET & MOBILE (ULTRA LOW-LEVEL TWEAKS) ---
+    // --- OPTIMASI GPU KHUSUS TABLET & MOBILE (SWEET SPOT) ---
     // Deteksi apakah perangkat adalah Tablet/Mobile (berdasarkan User Agent & Touch points)
     const isMobileOrTablet = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
@@ -112,21 +109,17 @@ function init3D() {
         // 1. Matikan antialias di perangkat mobile untuk mencegah FPS drop drastis pada model CAD berat.
         antialias: !isMobileOrTablet, 
         
-        // 2. [TWEAK EKSTREM] Matikan log depth buffer di tablet!
-        // Fitur ini merusak performa GPU Mobile karena men-disable Early-Z Culling (menyebabkan Overdraw parah).
-        logarithmicDepthBuffer: !isMobileOrTablet, 
+        // 2. [KEMBALI KE TRUE] Wajib TRUE untuk data koordinat tambang (UTM) yang angkanya raksasa.
+        // Jika false, akan terjadi Z-Fighting (Mesh berkelap-kelip saling tumpang tindih) yang merusak FPS.
+        logarithmicDepthBuffer: true, 
         
         // 3. Gunakan high-performance agar OS Tablet memberikan daya prioritas GPU penuh.
-        powerPreference: "high-performance",
-        
-        // 4. [TWEAK EKSTREM] Turunkan Presisi Shader!
-        // PC sanggup hitung 32-bit (highp), di Tablet 16-bit (mediump) sudah sangat cukup dan hemat baterai / cegah overheat.
-        precision: isMobileOrTablet ? 'mediump' : 'highp'
+        powerPreference: "high-performance"
     });
     
     renderer.setSize(container.clientWidth, container.clientHeight);
     
-    // 5. Batasi Pixel Ratio. Layar tablet modern sangat tajam (Resolusi 2K / 120Hz). 
+    // 4. Batasi Pixel Ratio. Layar tablet modern sangat tajam (Resolusi 2K / 120Hz). 
     // Merender geometri berat di resolusi natifnya akan membuat VRAM GPU jebol.
     // Cap ke maksimal 1.25 untuk tablet, biarkan 2.0 untuk Laptop/PC.
     const maxPixelRatio = isMobileOrTablet ? 1.25 : 2;
@@ -423,11 +416,9 @@ function init3D() {
         padCamera = new THREE.PerspectiveCamera(50, padW / padH, 0.1, 100);
         padCamera.position.z = 3;
 
-        // Sama halnya dengan Renderer utama, Renderer Trackpad juga kita optimasi Presisinya
         padRenderer = new THREE.WebGLRenderer({ 
             antialias: !isMobileOrTablet, 
-            alpha: true,
-            precision: isMobileOrTablet ? 'mediump' : 'highp'
+            alpha: true
         });
         padRenderer.setSize(padW, padH);
         padRenderer.setPixelRatio(window.devicePixelRatio);
@@ -561,25 +552,6 @@ function init3D() {
         }
     });
 
-    modeToggle.addEventListener('change', (e) => {
-        isStupaMode = e.target.checked;
-        localStorage.setItem('rk_isStupaMode', isStupaMode);
-        document.getElementById('mode-label-text').textContent = isStupaMode ? "Solid Generation" : "Triangulation";
-        const extSet = document.getElementById('extrusion-settings');
-        isStupaMode ? extSet.classList.replace('hidden', 'flex') : extSet.classList.replace('flex', 'hidden');
-        
-        if (globalParsedData) reprocessDataWithStateRetention();
-    });
-
-    document.getElementById('apply-extrusion-btn').addEventListener('click', () => {
-        if (globalParsedData && isStupaMode) {
-            currentExtrusion = parseFloat(document.getElementById('extrusion-input').value) || 5;
-            localStorage.setItem('rk_currentExtrusion', currentExtrusion);
-            
-            reprocessDataWithStateRetention();
-        }
-    });
-
     // --- OBSERVER UNTUK PAUSE/RESUME 3D SECARA OTOMATIS (INTERSECTION OBSERVER) ---
     const canvasContainerDOM = document.getElementById('canvas-container');
     if (canvasContainerDOM) {
@@ -597,68 +569,6 @@ function init3D() {
     } else {
         window.resume3D(); 
     }
-}
-
-// Fungsi pembantu untuk mem-reprocess data Geometri namun mem-backup state Record Sequence sebelumnya
-function reprocessDataWithStateRetention() {
-    if (!globalParsedData) return;
-
-    const oldRecords = window.sequenceRecords ? JSON.parse(JSON.stringify(window.sequenceRecords)) : [];
-    const oldTotalOB = window.sequenceTotalOB || 0;
-    const oldTotalCoal = window.sequenceTotalCoal || 0;
-    const oldCounter = window.sequenceCounter || 1;
-    
-    const oldCamPos = camera.position.clone();
-    const oldCamQuat = camera.quaternion.clone();
-    const oldTarget = controls.target.clone();
-
-    const recordedKeys = [];
-    Object.values(meshes).forEach(m => {
-        if (m.userData && m.userData.isRecorded) {
-            recordedKeys.push(`${m.userData.blockName}_${m.userData.bench}`);
-        }
-    });
-
-    const originalReset = window.resetSequenceAndView;
-    window.resetSequenceAndView = function() {
-        if (typeof originalReset === 'function') originalReset();
-        
-        window.sequenceRecords = JSON.parse(JSON.stringify(oldRecords));
-        window.sequenceTotalOB = oldTotalOB;
-        window.sequenceTotalCoal = oldTotalCoal;
-        window.sequenceCounter = oldCounter;
-        
-        window.undoStack = [];
-        window.redoStack = [];
-        if (typeof window.updateSequenceUI === 'function') window.updateSequenceUI();
-    };
-
-    if (typeof processData === 'function') processData(globalParsedData);
-
-    const checkInterval = setInterval(() => {
-        if (!isProcessing) {
-            clearInterval(checkInterval);
-            
-            window.resetSequenceAndView = originalReset;
-
-            camera.position.copy(oldCamPos);
-            camera.quaternion.copy(oldCamQuat);
-            controls.target.copy(oldTarget);
-            controls.update();
-
-            Object.values(meshes).forEach(m => {
-                const key = `${m.userData.blockName}_${m.userData.bench}`;
-                if (recordedKeys.includes(key)) {
-                    m.userData.isRecorded = true;
-                    m.visible = false;
-                    if (m.material) m.material.emissive.setHex(0x000000);
-                }
-            });
-            
-            if (typeof window.updateSequenceUI === 'function') window.updateSequenceUI();
-            if (typeof window.clearSelection === 'function') window.clearSelection();
-        }
-    }, 100);
 }
 
 function animate() {
