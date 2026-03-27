@@ -110,6 +110,7 @@ function processDXF(dxfText, fileName) {
     });
 
     let hasFaces = Object.keys(colorFaceGroups).length > 0;
+    let dxfType = hasFaces ? 'Polymesh' : 'Polyline';
     
     // Default Color Logic khusus untuk Polymesh berdasarkan nama file
     let filenameColorOverride = null;
@@ -123,7 +124,6 @@ function processDXF(dxfText, fileName) {
             filenameColorOverride = 0xD2B48C; // Tan
         }
 
-        // Update UI color indicator jika override diterapkan
         if (filenameColorOverride !== null) {
             uiColorHex = '#' + filenameColorOverride.toString(16).padStart(6, '0');
         }
@@ -135,7 +135,6 @@ function processDXF(dxfText, fileName) {
             const geo = new THREE.BufferGeometry().setFromPoints(points);
             geo.computeVertexNormals(); 
 
-            // Terapkan override warna jika ada, jika tidak gunakan warna asli dari DXF
             const finalColor = filenameColorOverride !== null ? filenameColorOverride : parseInt(hexKey);
 
             const mat = new THREE.MeshStandardMaterial({
@@ -150,6 +149,7 @@ function processDXF(dxfText, fileName) {
             
             const mesh = new THREE.Mesh(geo, mat);
             mesh.userData.originalColor = finalColor;
+            mesh.userData.originalMaterial = mat; // Simpan material dasar untuk rujukan masking
             group.add(mesh);
         }
     });
@@ -168,7 +168,6 @@ function processDXF(dxfText, fileName) {
     if (typeof scene !== 'undefined') scene.add(group);
     const layerId = 'layer_' + Date.now();
 
-    // Mengambil metadata jika tersimpan melalui interceptor input file
     let fileMeta = window.pendingDxfMeta || { size: dxfText.length, lastModified: new Date().toLocaleDateString('id-ID') };
     window.pendingDxfMeta = null;
 
@@ -182,6 +181,7 @@ function processDXF(dxfText, fileName) {
             defaultColorHex: uiColorHex,
             type: 'dxf',
             hasFaces: hasFaces,
+            dxfType: dxfType,
             clippingEnabled: false,
             clipFootprints: 'Pit Data',
             colorMode: 'Default',
@@ -192,7 +192,10 @@ function processDXF(dxfText, fileName) {
         });
     }
 
-    // --- BUAT SUBFOLDER DI SIDEBAR ---
+    if (typeof RizpecDB !== 'undefined') {
+        RizpecDB.set(`rizpec_dxf_entity_${fileName.replace(/\s+/g, '_')}_meta`, { dxfType: dxfType }).catch(() => {});
+    }
+
     const rootName = 'DXF Data';
     const parentId = 'folder-dxf';
     const container = document.getElementById(`subfolders-${parentId}`);
@@ -207,19 +210,16 @@ function processDXF(dxfText, fileName) {
             window.makeSubfolderInteractive(subEl, fileName, rootName);
         }
     }
-    // ---------------------------------
     
     if (typeof updateLayerUI === 'function') updateLayerUI();
     setTimeout(() => {
         if(typeof window.zoomToLayer === 'function') window.zoomToLayer(layerId);
         if(typeof updateFileMenuState === 'function') updateFileMenuState();
         
-        // Otomatis pilih subfolder yang baru saja dibuat agar ringkasannya muncul
         if (typeof window.selectFolder === 'function') {
             window.selectFolder(fileName, 'Subfolder', rootName);
         }
         
-        // Update summary dan list jika DXF Tab sedang terbuka
         const summaryName = document.getElementById('summary-name');
         if (summaryName && (summaryName.textContent === 'DXF Data' || summaryName.textContent === fileName)) {
             if (typeof window.updateDxfListUI === 'function') window.updateDxfListUI();
@@ -242,12 +242,61 @@ window.activeDxfId = null;
 window._lastSelectedDxfFolderName = null; 
 window.dxfTempState = null;
 
-// Mengaktifkan render 2D (Top View) menggunakan Mini WebGL Renderer
+window.getDxfFolderBadgeHTML = function(name, rootName) {
+    if (rootName === 'DXF Data') {
+        const safeId = name.replace(/\s+/g, '_');
+        
+        if (typeof RizpecDB !== 'undefined') {
+            RizpecDB.get(`rizpec_dxf_entity_${safeId}_meta`).then(meta => {
+                if (meta && meta.dxfType) {
+                    window.updateDxfFolderBadge(name, meta.dxfType);
+                }
+            }).catch(() => {});
+        } 
+        
+        if (typeof appLayers !== 'undefined') {
+            const layer = appLayers.find(l => l.name === name && l.type === 'dxf');
+            if (layer && layer.dxfType) {
+                setTimeout(() => window.updateDxfFolderBadge(name, layer.dxfType), 50);
+            }
+        }
+        
+        return '';
+    }
+    return '';
+};
+
+window.updateDxfFolderBadge = function(dxfId, type) {
+    const container = document.getElementById('subfolders-folder-dxf');
+    if (!container) return;
+    
+    const folders = container.querySelectorAll('.folder-name-text');
+    for (let span of folders) {
+        if (span.textContent === dxfId) {
+            const subEl = span.closest('.group');
+            if (subEl) {
+                const badgeContainer = subEl.querySelector('.geometry-badge-container');
+                if (badgeContainer) {
+                    if (type === 'Polyline') {
+                        badgeContainer.innerHTML = '<span class="bg-blue-600/20 text-blue-400 border border-blue-500/30 text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">Polyline</span>';
+                    } else if (type === 'Polymesh') {
+                        badgeContainer.innerHTML = '<span class="bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">Polymesh</span>';
+                    } else if (type === 'Textured') {
+                        badgeContainer.innerHTML = '<span class="bg-amber-600/20 text-amber-400 border border-amber-500/30 text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm shadow-amber-500/20">Textured</span>';
+                    } else {
+                        badgeContainer.innerHTML = '';
+                    }
+                }
+            }
+            break;
+        }
+    }
+};
+
 window.render2DDxfPreview = function(layers) {
     const container = document.getElementById('dxf-preview-3d-canvas');
     if (!container) return;
     
-    // Clear container (Hapus placeholder / renderer lama)
     container.innerHTML = '';
 
     if (!layers || layers.length === 0) {
@@ -262,12 +311,11 @@ window.render2DDxfPreview = function(layers) {
     const width = container.clientWidth;
     const height = container.clientHeight;
     
-    // Set minimal renderer jika container tidak terlihat
     if (width === 0 || height === 0) return;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
-    renderer.setClearColor(0x0f172a, 1); // Background slate-900
+    renderer.setClearColor(0x0f172a, 1);
     renderer.domElement.style.position = 'absolute';
     renderer.domElement.style.top = '0';
     renderer.domElement.style.left = '0';
@@ -279,7 +327,7 @@ window.render2DDxfPreview = function(layers) {
     layers.forEach(l => {
         if(l.threeObject) {
             const clone = l.threeObject.clone();
-            clone.visible = true; // Paksa selalu terlihat di preview
+            clone.visible = true;
             previewGroup.add(clone);
         }
     });
@@ -297,7 +345,6 @@ window.render2DDxfPreview = function(layers) {
     const aspect = width / height;
     const maxDim = Math.max(size.x, size.z);
     
-    // Menghitung frustum Orthographic agar fit to bound dengan padding 15%
     const frustumHeight = size.z > size.x / aspect ? size.z * 1.15 : (size.x / aspect) * 1.15;
     const frustumWidth = frustumHeight * aspect;
 
@@ -307,7 +354,6 @@ window.render2DDxfPreview = function(layers) {
         -maxDim * 5, maxDim * 5
     );
 
-    // Posisi top-down (Tampak Atas)
     camera.position.set(center.x, box.max.y + maxDim, center.z);
     camera.lookAt(center.x, center.y, center.z);
     camera.up.set(0, 0, -1); 
@@ -320,7 +366,6 @@ window.render2DDxfPreview = function(layers) {
 
     renderer.render(scene, camera);
     
-    // Optional Resize Observer untuk menyesuaikan kamera saat panel berubah ukuran
     if (window._dxfResizeObserver) window._dxfResizeObserver.disconnect();
     window._dxfResizeObserver = new ResizeObserver(() => {
         const newW = container.clientWidth;
@@ -360,7 +405,6 @@ window.initDxfManagerUI = function() {
         }
 
         container.innerHTML = `
-            <!-- List Section -->
             <div class="flex flex-col gap-1.5 border-b border-slate-700/50 pb-1.5 shrink-0 mt-1">
                 <h4 class="text-[11px] font-bold text-rose-400 flex items-center gap-1.5 tracking-wide uppercase">
                     <i class="fa-solid fa-list-ul"></i> Layer List
@@ -463,6 +507,47 @@ window.onDxfFolderSelected = async function(name, type, rootName) {
     }
 };
 
+window.onDxfFolderRenamed = async function(oldName, newName, rootName) {
+    if (rootName === 'DXF Data') {
+        if (window._lastSelectedDxfFolderName === oldName) window._lastSelectedDxfFolderName = newName;
+
+        if (window.dxfStates[oldName]) {
+            window.dxfStates[newName] = window.dxfStates[oldName];
+            window.dxfStates[newName].name = newName;
+            delete window.dxfStates[oldName];
+        }
+        
+        const oldKey = `rizpec_dxf_entity_${oldName.replace(/\s+/g, '_')}_meta`;
+        const newKey = `rizpec_dxf_entity_${newName.replace(/\s+/g, '_')}_meta`;
+
+        try {
+            if (typeof RizpecDB !== 'undefined') {
+                const metaData = await RizpecDB.get(oldKey);
+                if (metaData) {
+                    await RizpecDB.set(newKey, metaData);
+                    await RizpecDB.remove(oldKey);
+                }
+            }
+        } catch(e) {}
+
+        if (window.activeDxfId === oldName) {
+            window.activeDxfId = newName;
+            updateDxfSummaryUI(newName);
+        }
+
+        if (typeof appLayers !== 'undefined') {
+            const layer = appLayers.find(l => l.name === oldName && l.type === 'dxf');
+            if (layer) layer.name = newName;
+        }
+        
+        if (typeof window.renameDxfGeometry === 'function') {
+            window.renameDxfGeometry(oldName, newName);
+        }
+
+        if (typeof window.updateDxfListUI === 'function') window.updateDxfListUI();
+    }
+};
+
 window.onDxfFolderDeleted = async function(name, rootName) {
     if (rootName === 'DXF Data') {
         if (window._lastSelectedDxfFolderName === name) window._lastSelectedDxfFolderName = null;
@@ -471,6 +556,12 @@ window.onDxfFolderDeleted = async function(name, rootName) {
             const index = appLayers.findIndex(l => l.name === name && l.type === 'dxf');
             if (index !== -1) {
                 const layer = appLayers[index];
+                if (layer.maskRenderTarget) { // Cleanup Texture Mask Memory
+                    layer.maskRenderTarget.dispose();
+                }
+                if (layer.clipInterval) { // Cleanup Realtime Updater Loop
+                    clearInterval(layer.clipInterval);
+                }
                 if (layer.threeObject && typeof scene !== 'undefined') {
                     scene.remove(layer.threeObject);
                 }
@@ -483,6 +574,13 @@ window.onDxfFolderDeleted = async function(name, rootName) {
             window.activeDxfId = null;
             window.dxfTempState = null;
         }
+
+        const safeName = name.replace(/\s+/g, '_');
+        try {
+            if (typeof RizpecDB !== 'undefined') {
+                await RizpecDB.remove(`rizpec_dxf_entity_${safeName}_meta`);
+            }
+        } catch(e) {}
         
         const summaryName = document.getElementById('summary-name');
         if (summaryName && summaryName.textContent === 'DXF Data') {
@@ -504,10 +602,11 @@ function updateDxfSummaryUI(name) {
     const texEl = document.getElementById('dxf-stat-texture');
     const totEl = document.getElementById('dxf-stat-total');
 
-    // UI Inputs
     const colorSelect = document.getElementById('dxf-col-color');
     const recolorRow = document.getElementById('dxf-recolor-row');
     const recolorInput = document.getElementById('dxf-recolor-input');
+    const optTexture = document.getElementById('dxf-opt-texture');
+    const texRow = document.getElementById('dxf-texture-row');
     
     const clipSelect = document.getElementById('dxf-col-clipping');
     const footprintsRow = document.getElementById('dxf-footprints-row');
@@ -521,7 +620,6 @@ function updateDxfSummaryUI(name) {
     const applyBtn = document.getElementById('dxf-btn-apply');
 
     if (layer) {
-        // Reset Temporary State untuk file ini
         window.dxfTempState = {
             colorMode: layer.colorMode || 'Default',
             visualColor: layer.visualColor || layer.colorHex,
@@ -537,19 +635,30 @@ function updateDxfSummaryUI(name) {
             if (c.isLineSegments && c.geometry.attributes.position) elements += (c.geometry.attributes.position.count / 2);
         });
 
-        // Mapping Panel Setting (Metadata)
         if (nameEl) nameEl.textContent = layer.name;
         if (modEl) modEl.textContent = layer.lastModified || '-';
         if (typeEl) typeEl.textContent = layer.hasFaces ? 'Polymesh (3D Face)' : 'Polyline (Line/Wire)';
         
-        // Populate Visual State
+        if (optTexture) {
+            if (layer.hasFaces) {
+                optTexture.disabled = false;
+                optTexture.hidden = false;
+            } else {
+                optTexture.disabled = true;
+                optTexture.hidden = true;
+                if (window.dxfTempState.colorMode === 'Texture') {
+                    window.dxfTempState.colorMode = 'Default';
+                }
+            }
+        }
+        
         if (colorSelect) {
             colorSelect.value = window.dxfTempState.colorMode;
             if (recolorRow) recolorRow.style.display = window.dxfTempState.colorMode === 'Pallete' ? 'flex' : 'none';
+            if (texRow) texRow.style.display = window.dxfTempState.colorMode === 'Texture' ? 'flex' : 'none';
         }
         if (recolorInput) recolorInput.value = window.dxfTempState.visualColor;
 
-        // Populate Masking & Texture State (Tergantung Geometri)
         if (layer.hasFaces) {
             if (clipSelect) {
                 clipSelect.disabled = false;
@@ -571,10 +680,8 @@ function updateDxfSummaryUI(name) {
             if (texLabel) texLabel.classList.add('opacity-50', 'cursor-not-allowed');
         }
 
-        // Disable Apply Button initially
         if (applyBtn) applyBtn.disabled = true;
 
-        // Mapping Panel Summary
         const sizeMB = (layer.fileSize / (1024 * 1024)).toFixed(2);
         if (metaEl) metaEl.textContent = `${sizeMB} MB (${Math.floor(elements)} Elements)`;
         
@@ -606,6 +713,7 @@ function updateDxfSummaryUI(name) {
 
         if (colorSelect) colorSelect.value = "Default";
         if (recolorRow) recolorRow.style.display = 'none';
+        if (texRow) texRow.style.display = 'none';
         
         if (clipSelect) { clipSelect.disabled = true; clipSelect.value = "No"; }
         if (footprintsRow) footprintsRow.style.display = 'none';
@@ -621,7 +729,6 @@ function updateDxfSummaryUI(name) {
     }
 }
 
-// Fungsi untuk mengecek apakah ada perubahan yang belum disimpan (Dirty State)
 function checkDxfChanges() {
     if (!window.activeDxfId || !window.dxfTempState) return false;
     const layer = appLayers.find(l => l.type === 'dxf' && l.name === window.activeDxfId);
@@ -679,7 +786,7 @@ function renderDxfPreview(singleLayer, allLayers = []) {
     if (layersToRender.length === 0) {
         if (placeholder) placeholder.classList.remove('hidden');
         if (summaryTable) summaryTable.classList.add('hidden');
-        window.render2DDxfPreview([]); // Clear canvas
+        window.render2DDxfPreview([]); 
         return;
     }
     
@@ -728,14 +835,264 @@ function renderDxfPreview(singleLayer, allLayers = []) {
     
     if (summaryContent) summaryContent.innerHTML = html;
     
-    // Trigger the actual 3D to 2D Top View Rendering
     window.render2DDxfPreview(layersToRender);
 }
 
-// Ensure init is called after DOM loads
+// ==========================================
+// DXF FOOTPRINT CLIPPING LOGIC (SHADER TEXTURE MASKING)
+// ==========================================
+window.executeDxfFootprintClipping = function(layer) {
+    if (!layer.threeObject) return;
+
+    // Bersihkan Interval Update Realtime Lama (jika di-apply berulang)
+    if (layer.clipInterval) {
+        clearInterval(layer.clipInterval);
+        layer.clipInterval = null;
+    }
+
+    // Reset ke kondisi awal material jika sebelumnya di-clip
+    layer.threeObject.traverse((child) => {
+        if (!child.isMesh) return;
+
+        if (child.userData.originalPositions) {
+            child.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(child.userData.originalPositions), 3));
+            child.geometry.clearGroups();
+            child.geometry.computeVertexNormals();
+            delete child.userData.originalPositions; 
+        }
+
+        if (!child.userData.originalMaterial) {
+            child.userData.originalMaterial = Array.isArray(child.material) ? child.material[0] : child.material;
+        }
+    });
+
+    if (!layer.clippingEnabled) return;
+
+    // 1. Kumpulkan SELURUH target meshes yang berpotensi menjadi acuan (Tanpa peduli tampil/tidak saat ini)
+    // Tujuannya agar kita bisa mengunci batas luas Mask (Bounding Box) secara fix untuk Shader Math.
+    let allTargetMeshes = [];
+    if (typeof meshes !== 'undefined') {
+        Object.values(meshes).forEach(m => {
+            if (layer.clipFootprints === 'All Data' ||
+               (layer.clipFootprints === 'Pit Data' && m.userData.type === 'pit') ||
+               (layer.clipFootprints === 'Disposal Data' && m.userData.type === 'disp')) {
+                allTargetMeshes.push(m);
+            }
+        });
+    }
+
+    if (allTargetMeshes.length === 0) return;
+
+    if (typeof renderer === 'undefined') {
+        console.warn("Renderer 3D tidak ditemukan, membatalkan Texture Masking.");
+        return;
+    }
+
+    // 2. Setup 2D Bounding Box FIX agar ukuran Shader Box (Mapping) stabil walau visibility berubah
+    const targetBox2D = new THREE.Box3();
+    allTargetMeshes.forEach(m => {
+        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+        let b = m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld);
+        targetBox2D.expandByPoint(new THREE.Vector3(b.min.x, 0, b.min.z));
+        targetBox2D.expandByPoint(new THREE.Vector3(b.max.x, 0, b.max.z));
+    });
+
+    const pad = 10; 
+    const minX = targetBox2D.min.x - pad;
+    const maxX = targetBox2D.max.x + pad;
+    const minZ = targetBox2D.min.z - pad;
+    const maxZ = targetBox2D.max.z + pad;
+
+    const cx = (minX + maxX) / 2;
+    const cz = (minZ + maxZ) / 2;
+    const w = maxX - minX;
+    const h = maxZ - minZ;
+
+    const cam = new THREE.OrthographicCamera(-w/2, w/2, h/2, -h/2, -10000, 10000);
+    cam.position.set(cx, 1000, cz);
+    cam.up.set(0, 0, -1);
+    cam.lookAt(cx, 0, cz);
+    cam.updateProjectionMatrix();
+
+    // 3. Persiapkan Scene Masking & RenderTarget (TIdak dirender disini, tapi di dalam updater realtime)
+    const maskScene = new THREE.Scene();
+    maskScene.background = new THREE.Color(0x000000); // Luar area pit = Hitam (0.0)
+    const maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }); // Dalam pit = Putih (1.0)
+
+    if (layer.maskRenderTarget) {
+        layer.maskRenderTarget.dispose(); 
+    }
+
+    const rtRes = 2048;
+    const rt = new THREE.WebGLRenderTarget(rtRes, rtRes, {
+        format: THREE.RedFormat,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        generateMipmaps: false
+    });
+    layer.maskRenderTarget = rt;
+
+    // 4. Injeksi Shader Discard Pixel ke dalam Material DXF
+    layer.threeObject.traverse((child) => {
+        if (!child.isMesh) return;
+
+        const baseMat = child.material;
+        const newMat = baseMat.clone();
+
+        newMat.customProgramCacheKey = function() {
+            return 'dxf_mask_' + layer.id;
+        };
+
+        newMat.onBeforeCompile = (shader) => {
+            shader.uniforms.maskTexture = { value: rt.texture };
+            shader.uniforms.maskBounds = { value: new THREE.Vector4(minX, w, maxZ, -h) };
+
+            shader.vertexShader = `
+                varying vec3 vMaskWorldPos;
+            ` + shader.vertexShader;
+
+            shader.vertexShader = shader.vertexShader.replace(
+                `#include <worldpos_vertex>`,
+                `#include <worldpos_vertex>
+                 vMaskWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+            );
+
+            shader.fragmentShader = `
+                uniform sampler2D maskTexture;
+                uniform vec4 maskBounds;
+                varying vec3 vMaskWorldPos;
+            ` + shader.fragmentShader;
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                `#include <dithering_fragment>`,
+                `#include <dithering_fragment>
+
+                // Mapping kordinat Dunia ke 0.0 - 1.0 (UV Texture Mask)
+                float u = (vMaskWorldPos.x - maskBounds.x) / maskBounds.y;
+                float v = (vMaskWorldPos.z - maskBounds.z) / maskBounds.w;
+
+                // Pastikan fragment berada dalam range masking Box2D
+                if (u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0) {
+                    float maskVal = texture2D(maskTexture, vec2(u, v)).r;
+                    
+                    // Cek Warna Pixel, Jika putih (ada pit) maka Discard!
+                    if (maskVal > 0.05) {
+                        discard;
+                    }
+                }
+                `
+            );
+        };
+
+        child.material = newMat;
+    });
+
+    // 5. Fungsi Update Realtime (Akan mengupdate RenderTarget HANYA ketika visibilitas Pit berubah)
+    layer.lastMaskHash = "";
+
+    layer.updateClippingMask = function() {
+        let hash = "";
+        let currentVisibleMeshes = [];
+
+        // Cek target mana saja yang Parent-nya aktif di scene (Abaikan status hide individual block hasil Record)
+        allTargetMeshes.forEach(m => {
+            let isParentVisible = true;
+            let obj = m.parent; // MULAI CEK DARI PARENT. Abaikan m.visible milik block itu sendiri.
+            
+            // Traverse ke atas untuk memastikan layer induknya (Folder UI) tidak di-hide
+            while(obj) {
+                if (obj.visible === false) {
+                    isParentVisible = false;
+                    break;
+                }
+                obj = obj.parent;
+            }
+
+            if (isParentVisible) {
+                currentVisibleMeshes.push(m);
+                hash += m.uuid + ",";
+            }
+        });
+
+        // Jika kombinasi mesh yang aktif masih sama seperti iterasi sebelumnya, batalkan update (Hemat Performa)
+        if (hash === layer.lastMaskHash) return;
+        layer.lastMaskHash = hash;
+
+        // Bersihkan objek masker dari tangkapan rendering sebelumnya
+        while(maskScene.children.length > 0){ 
+            maskScene.remove(maskScene.children[0]); 
+        }
+
+        // Tambahkan geometri acuan clipping terbaru ke dalam frame RenderTarget
+        currentVisibleMeshes.forEach(m => {
+            const clone = m.clone();
+            clone.material = maskMat;
+            clone.matrixAutoUpdate = false;
+            clone.matrix.copy(m.matrixWorld); 
+            clone.visible = true; // PAKSA TAMPIL di dalam dunia Masking, walaupun di dunia asli di-hide karena Record!
+            maskScene.add(clone);
+        });
+
+        // Tembak Orthographic Kamera untuk mengupdate Mask Texture!
+        const oldRT = renderer.getRenderTarget();
+        const oldClearColor = renderer.getClearColor(new THREE.Color());
+        const oldClearAlpha = renderer.getClearAlpha();
+
+        renderer.setRenderTarget(rt);
+        renderer.setClearColor(0x000000, 1);
+        renderer.clear();
+        renderer.render(maskScene, cam);
+
+        renderer.setRenderTarget(oldRT);
+        renderer.setClearColor(oldClearColor, oldClearAlpha);
+    };
+
+    // Eksekusi pemotongan perdana saat fungsi ini dipanggil
+    layer.updateClippingMask();
+
+    // Jadwalkan pengecekan pembaruan visibilitas pit secara rutin (Interval Loop Ringan)
+    layer.clipInterval = setInterval(() => {
+        if (layer && layer.threeObject && layer.clippingEnabled) {
+            layer.updateClippingMask();
+        } else {
+            clearInterval(layer.clipInterval);
+        }
+    }, 300); // 300ms delay dirasa paling pas antara real-time & penghematan resources
+};
+
+// ==========================================
+// [UPDATE]: AUTO-REFRESH CLIPPING GLOBAL
+// Dipanggil oleh geometry.js saat Pit/Disposal baru dibuild atau dihapus
+// ==========================================
+window.refreshAllDxfClipping = function() {
+    if (typeof appLayers === 'undefined') return;
+    
+    // Cari semua layer DXF yang memang sedang mengaktifkan fitur Clipping
+    const activeClippingLayers = appLayers.filter(l => l.type === 'dxf' && l.hasFaces && l.clippingEnabled);
+    
+    activeClippingLayers.forEach(layer => {
+        // 1. Reset material ke kondisi original (warna murni atau tekstur)
+        // PENTING: Mencegah 'double-injection' shader pada material yang sama
+        if (layer.threeObject) {
+            layer.threeObject.traverse((child) => {
+                if (child.isMesh && child.userData) {
+                    const baseMat = (layer.colorMode === 'Texture' && layer.textureMeta && child.userData.originalMaterialTex) 
+                                    ? child.userData.originalMaterialTex 
+                                    : child.userData.originalMaterial;
+                    if (baseMat) {
+                        child.material = baseMat;
+                    }
+                }
+            });
+        }
+        
+        // 2. Eksekusi ulang kalkulasi Bounding Box dan Apply Shader Masking
+        window.executeDxfFootprintClipping(layer);
+    });
+};
+
 document.addEventListener('DOMContentLoaded', () => {
 
-    // --- INTERCEPTOR UKURAN & TANGGAL FILE ---
     const dxfInput = document.getElementById('file-input-dxf');
     if (dxfInput) {
         dxfInput.addEventListener('change', (e) => {
@@ -750,16 +1107,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- SETUP DXF SETTINGS LISTENERS ---
     const colorSelect = document.getElementById('dxf-col-color');
     const recolorRow = document.getElementById('dxf-recolor-row');
     const recolorInput = document.getElementById('dxf-recolor-input');
+    const texRow = document.getElementById('dxf-texture-row');
     
     const clipSelect = document.getElementById('dxf-col-clipping');
     const footprintsRow = document.getElementById('dxf-footprints-row');
     const footprintsSelect = document.getElementById('dxf-col-footprints');
 
     const texInput = document.getElementById('dxf-texture-file');
+    const texLabel = document.getElementById('dxf-btn-texture-label');
     const texClear = document.getElementById('dxf-clear-texture');
     const texName = document.getElementById('dxf-texture-filename');
 
@@ -768,6 +1126,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (colorSelect) {
         colorSelect.addEventListener('change', (e) => {
             if (recolorRow) recolorRow.style.display = e.target.value === "Pallete" ? 'flex' : 'none';
+            if (texRow) texRow.style.display = e.target.value === "Texture" ? 'flex' : 'none';
             if (window.dxfTempState) window.dxfTempState.colorMode = e.target.value;
             checkDxfChanges();
         });
@@ -795,24 +1154,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- INTERCEPTOR TEXTURE UPLOAD (TEMPORARY STATE) ---
+    // --- GCP MODAL TRIGGER (Texture Input Change) ---
     if (texInput) {
         texInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0 && window.activeDxfId && window.dxfTempState) {
                 const file = e.target.files[0];
+                const layer = appLayers.find(l => l.type === 'dxf' && l.name === window.activeDxfId);
+                
+                if (!layer || !layer.hasFaces) {
+                    alert("Geometri ini bukan Polymesh. Texture hanya bisa diaplikasikan ke Geometri 3DFace / Polymesh.");
+                    texInput.value = '';
+                    return;
+                }
+                
                 const img = new Image();
                 img.onload = () => {
-                    window.dxfTempState.pendingTextureMeta = {
-                        name: file.name,
-                        size: file.size,
-                        width: img.width,
-                        height: img.height,
-                        file: file 
-                    };
-                    window.dxfTempState.textureChanged = true;
-                    if(texName) texName.textContent = file.name;
-                    if(texClear) texClear.disabled = false;
-                    checkDxfChanges();
+                    window.initGcpModal(img, file, layer);
                 };
                 img.src = URL.createObjectURL(file);
             }
@@ -827,6 +1184,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 if(texInput) texInput.value = '';
                 if(texName) texName.textContent = 'Tidak ada file...';
                 if(texClear) texClear.disabled = true;
+                
+                const layer = appLayers.find(l => l.type === 'dxf' && l.name === window.activeDxfId);
+                if (layer && layer.threeObject) {
+                    layer.threeObject.traverse((child) => {
+                        if (child.isMesh && child.userData.originalMaterial) {
+                            child.material = child.userData.originalMaterial;
+                            child.userData.originalMaterialTex = null;
+                        }
+                    });
+                }
+                
                 checkDxfChanges();
             }
         });
@@ -839,7 +1207,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const layer = appLayers.find(l => l.type === 'dxf' && l.name === window.activeDxfId);
             
             if (layer) {
-                // Save properties
                 layer.colorMode = window.dxfTempState.colorMode;
                 layer.visualColor = window.dxfTempState.visualColor;
                 layer.clippingEnabled = window.dxfTempState.clippingEnabled;
@@ -847,80 +1214,129 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 if (window.dxfTempState.textureChanged) {
                     layer.textureMeta = window.dxfTempState.pendingTextureMeta;
+                    
+                    if (layer.colorMode === 'Texture' && layer.textureMeta) {
+                        layer.dxfType = 'Textured';
+                        if (typeof RizpecDB !== 'undefined') {
+                            RizpecDB.set(`rizpec_dxf_entity_${window.activeDxfId.replace(/\s+/g, '_')}_meta`, { dxfType: 'Textured' }).catch(()=>{});
+                        }
+                        if (typeof window.updateDxfFolderBadge === 'function') {
+                            window.updateDxfFolderBadge(window.activeDxfId, 'Textured');
+                        }
+                    } else if (layer.hasFaces) {
+                        layer.dxfType = 'Polymesh';
+                        if (typeof RizpecDB !== 'undefined') {
+                            RizpecDB.set(`rizpec_dxf_entity_${window.activeDxfId.replace(/\s+/g, '_')}_meta`, { dxfType: 'Polymesh' }).catch(()=>{});
+                        }
+                        if (typeof window.updateDxfFolderBadge === 'function') {
+                            window.updateDxfFolderBadge(window.activeDxfId, 'Polymesh');
+                        }
+                    } else {
+                        layer.dxfType = 'Polyline';
+                        if (typeof RizpecDB !== 'undefined') {
+                            RizpecDB.set(`rizpec_dxf_entity_${window.activeDxfId.replace(/\s+/g, '_')}_meta`, { dxfType: 'Polyline' }).catch(()=>{});
+                        }
+                        if (typeof window.updateDxfFolderBadge === 'function') {
+                            window.updateDxfFolderBadge(window.activeDxfId, 'Polyline');
+                        }
+                    }
                     window.dxfTempState.textureChanged = false;
                 }
-                
-                // Terapan perubahan secara visual di Kanvas 3D
-                if (layer.threeObject) {
-                    if (layer.colorMode === 'Default') {
-                        // Kembali ke warna awal saat import DXF
-                        layer.threeObject.traverse((child) => {
-                            if (child.material) {
-                                child.material.vertexColors = false;
-                                child.material.needsUpdate = true;
-                                if (child.userData.originalColor !== undefined) {
-                                    child.material.color.setHex(child.userData.originalColor);
-                                }
-                            }
-                        });
-                    } else if (layer.colorMode === 'Pallete') {
-                        // Gunakan warna pallete seragam (menimpa warna asli)
-                        const colorHex = parseInt(layer.visualColor.replace('#', '0x'), 16);
-                        layer.threeObject.traverse((child) => {
-                            if ((child.isMesh || child.isLineSegments) && child.material) {
-                                child.material.vertexColors = false;
-                                child.material.needsUpdate = true;
-                                child.material.color.setHex(colorHex);
-                            }
-                        });
-                    } else if (layer.colorMode === 'Rainbow') {
-                        // Kalkulasi gradasi warna elevasi (Merah=Tertinggi -> Ungu=Terendah)
-                        const box = new THREE.Box3().setFromObject(layer.threeObject);
-                        const minY = box.min.y;
-                        const maxY = box.max.y;
-                        const rangeY = maxY - minY || 1; // Mencegah pembagian 0 jika flat
-                        
-                        const tempColor = new THREE.Color();
-                        
-                        layer.threeObject.traverse((child) => {
-                            if ((child.isMesh || child.isLineSegments) && child.geometry && child.geometry.attributes.position) {
-                                const posAttr = child.geometry.attributes.position;
-                                const count = posAttr.count;
-                                
-                                // Inisialisasi attribute vertex color jika belum ada
-                                if (!child.geometry.attributes.color) {
-                                    child.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
-                                }
-                                const colAttr = child.geometry.attributes.color;
-                                
-                                // Update vertex colors berdasarkan ketinggian vertex (Y Axis)
-                                for (let i = 0; i < count; i++) {
-                                    const y = posAttr.getY(i);
-                                    // Normalisasi ketinggian (0 hingga 1)
-                                    const t = Math.max(0, Math.min(1, (y - minY) / rangeY));
-                                    
-                                    // Rentang HSL: 0.75 (Ungu di paling bawah) turun ke 0.0 (Merah di atas)
-                                    const hue = 0.75 * (1 - t);
-                                    tempColor.setHSL(hue, 1.0, 0.5);
-                                    
-                                    colAttr.setXYZ(i, tempColor.r, tempColor.g, tempColor.b);
-                                }
-                                colAttr.needsUpdate = true;
-                                
-                                // Reset material properties agar mewarisi warna dari vertex
-                                if (child.material) {
-                                    child.material.vertexColors = true;
-                                    child.material.color.setHex(0xffffff); // Reset layer ke putih agar murni menampilkan vertexColor
-                                    child.material.needsUpdate = true;
-                                }
-                            }
-                        });
-                    }
-                }
 
-                // Update UI Summary dan disable kembali tombol Apply
-                applyBtn.disabled = true;
-                updateDxfSummaryUI(window.activeDxfId); 
+                // Fungsi Pengeksekusi Masking & Pewarnaan
+                const processChanges = () => {
+                    // Helper untuk update vertex color di Array atau Material Tunggal (Mendukung shader mod)
+                    const setMatColors = (mesh, state, defaultHex) => {
+                        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+                        mats.forEach(m => {
+                            if (m) {
+                                m.vertexColors = state;
+                                m.needsUpdate = true;
+                                if (defaultHex !== undefined && (!m.transparent || state === true)) { 
+                                    m.color.setHex(defaultHex); 
+                                }
+                            }
+                        });
+                    };
+
+                    // 1. Eksekusi Pewarnaan Visual & Reset Material TERLEBIH DAHULU
+                    if (layer.threeObject) {
+                        if (layer.colorMode === 'Default') {
+                            layer.threeObject.traverse((child) => {
+                                if (child.material) {
+                                    if(child.isMesh) child.material = child.userData.originalMaterial; // revert to original, no texture
+                                    setMatColors(child, false, child.userData.originalColor);
+                                }
+                            });
+                        } else if (layer.colorMode === 'Pallete') {
+                            const colorHex = parseInt(layer.visualColor.replace('#', '0x'), 16);
+                            layer.threeObject.traverse((child) => {
+                                if ((child.isMesh || child.isLineSegments) && child.material) {
+                                    if(child.isMesh) child.material = child.userData.originalMaterial; // Lepas tekstur jika mode pallete
+                                    setMatColors(child, false, colorHex);
+                                }
+                            });
+                        } else if (layer.colorMode === 'Rainbow') {
+                            const box = new THREE.Box3().setFromObject(layer.threeObject);
+                            const minY = box.min.y;
+                            const maxY = box.max.y;
+                            const rangeY = maxY - minY || 1; 
+                            
+                            const tempColor = new THREE.Color();
+                            
+                            layer.threeObject.traverse((child) => {
+                                if ((child.isMesh || child.isLineSegments) && child.geometry && child.geometry.attributes.position) {
+                                    const posAttr = child.geometry.attributes.position;
+                                    const count = posAttr.count;
+                                    
+                                    if (!child.geometry.attributes.color) {
+                                        child.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+                                    }
+                                    const colAttr = child.geometry.attributes.color;
+                                    
+                                    for (let i = 0; i < count; i++) {
+                                        const y = posAttr.getY(i);
+                                        const t = Math.max(0, Math.min(1, (y - minY) / rangeY));
+                                        const hue = 0.75 * (1 - t);
+                                        tempColor.setHSL(hue, 1.0, 0.5);
+                                        colAttr.setXYZ(i, tempColor.r, tempColor.g, tempColor.b);
+                                    }
+                                    colAttr.needsUpdate = true;
+                                    
+                                    if(child.isMesh) child.material = child.userData.originalMaterial; // Lepas tekstur
+                                    setMatColors(child, true, 0xffffff); // Set putih untuk meneruskan pure vertex colors
+                                }
+                            });
+                        } else if (layer.colorMode === 'Texture') {
+                            layer.threeObject.traverse((child) => {
+                                if (child.material) {
+                                    let matToUse = layer.textureMeta && child.userData.originalMaterialTex ? child.userData.originalMaterialTex : child.userData.originalMaterial;
+                                    if(child.isMesh) child.material = matToUse;
+                                    setMatColors(child, false, child.userData.originalColor);
+                                    if(matToUse.map && child.isMesh) matToUse.color.setHex(0xffffff); // Override to white for texture
+                                }
+                            });
+                        }
+                    }
+
+                    // 2. Eksekusi Shader Masking (Clipping) SETELAH pewarnaan
+                    if (layer.hasFaces) {
+                        window.executeDxfFootprintClipping(layer);
+                    }
+
+                    applyBtn.disabled = true;
+                    updateDxfSummaryUI(window.activeDxfId); 
+
+                    if (typeof hideFullscreenLoading === 'function') hideFullscreenLoading();
+                };
+
+                // Berikan jeda untuk loading screen jika komputasinya berpotensi berat
+                if (layer.hasFaces && typeof showFullscreenLoading === 'function') {
+                    showFullscreenLoading("Menerapkan Shader Masking & Perubahan...");
+                    setTimeout(processChanges, 100);
+                } else {
+                    processChanges();
+                }
             }
         });
     }
@@ -930,4 +1346,603 @@ document.addEventListener('DOMContentLoaded', () => {
             window.initDxfManagerUI();
         }
     }, 1500);
+
+    // =========================================
+    // GCP MODAL BUTTON EVENTS
+    // =========================================
+    const addGcpBtn = document.getElementById('btn-add-gcp');
+    const saveGcpBtn = document.getElementById('btn-save-gcp');
+    const applyTexBtn = document.getElementById('btn-apply-texture');
+    
+    if (addGcpBtn) {
+        addGcpBtn.addEventListener('click', () => {
+            if(!window.gcpState) return;
+            window.gcpState.mode = 'left';
+            window.updateGcpUI();
+        });
+    }
+    
+    if (saveGcpBtn) {
+        saveGcpBtn.addEventListener('click', () => {
+            if(!window.gcpState || window.gcpState.mode !== 'save') return;
+            
+            window.gcpState.points.push({...window.gcpState.currentPair});
+            window.gcpState.currentPair = {};
+            window.gcpState.mode = 'idle';
+            
+            window.renderLeftCanvas();
+            if(window.renderRightCanvasMarkers) window.renderRightCanvasMarkers();
+            window.updateGcpUI();
+        });
+    }
+    
+    if (applyTexBtn) {
+        applyTexBtn.addEventListener('click', () => {
+            if (!window.gcpState || window.gcpState.points.length < 3) return;
+            
+            const pts = window.gcpState.points;
+            let sxx=0, szz=0, sxz=0, sx=0, sz=0, su=0, sv=0, sxu=0, szu=0, sxv=0, szv=0;
+            let N = pts.length;
+            
+            pts.forEach(p => {
+                let x = p.worldX, z = p.worldZ, u = p.u, v = p.v;
+                sx += x; sz += z; su += u; sv += v;
+                sxx += x*x; szz += z*z; sxz += x*z;
+                sxu += x*u; szu += z*u; sxv += x*v; szv += z*v;
+            });
+            
+            // Affine Transform Least Square Matrix
+            const A = [[sxx, sxz, sx], [sxz, szz, sz], [sx, sz, N]];
+            const invA = window.invert3x3(A);
+            
+            if(!invA) {
+                alert("Gagal menghitung matriks transformasi (titik yang anda pilih mungkin kolinear/sejajar). Harap atur ulang sebaran titik GCP Anda.");
+                return;
+            }
+            
+            const Bu = [sxu, szu, su], Bv = [sxv, szv, sv];
+            const Pu = [
+                invA[0][0]*Bu[0] + invA[0][1]*Bu[1] + invA[0][2]*Bu[2],
+                invA[1][0]*Bu[0] + invA[1][1]*Bu[1] + invA[1][2]*Bu[2],
+                invA[2][0]*Bu[0] + invA[2][1]*Bu[1] + invA[2][2]*Bu[2]
+            ];
+            const Pv = [
+                invA[0][0]*Bv[0] + invA[0][1]*Bv[1] + invA[0][2]*Bv[2],
+                invA[1][0]*Bv[0] + invA[1][1]*Bv[1] + invA[1][2]*Bv[2],
+                invA[2][0]*Bv[0] + invA[2][1]*Bv[1] + invA[2][2]*Bv[2]
+            ];
+            
+            const layer = window.gcpState.layer;
+            
+            // Generate UV Mapping for Each Faces di Polymesh Terkait
+            layer.threeObject.traverse(child => {
+                if(child.isMesh) {
+                    const pos = child.geometry.attributes.position;
+                    const uvs = new Float32Array(pos.count * 2);
+                    const vertex = new THREE.Vector3();
+                    for(let i=0; i<pos.count; i++) {
+                        vertex.fromBufferAttribute(pos, i);
+                        vertex.applyMatrix4(child.matrixWorld); 
+                        uvs[i*2] = Pu[0]*vertex.x + Pu[1]*vertex.z + Pu[2];
+                        uvs[i*2+1] = Pv[0]*vertex.x + Pv[1]*vertex.z + Pv[2];
+                    }
+                    child.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+                    child.geometry.uvsNeedUpdate = true;
+                }
+            });
+
+            // Simpan State Tekstur ke Memori Window
+            window.dxfTempState.pendingTextureMeta = {
+                name: window.gcpState.file.name,
+                size: window.gcpState.file.size,
+                width: window.gcpState.img.width,
+                height: window.gcpState.img.height,
+                file: window.gcpState.file,
+                gcpPoints: pts,
+                transform: { Pu, Pv }
+            };
+            window.dxfTempState.textureChanged = true;
+
+            // Load Tekstur Langsung di Memori
+            const texLoader = new THREE.TextureLoader();
+            texLoader.load(URL.createObjectURL(window.gcpState.file), (texture) => {
+                texture.wrapS = THREE.ClampToEdgeWrapping;
+                texture.wrapT = THREE.ClampToEdgeWrapping;
+                texture.minFilter = THREE.LinearFilter;
+                
+                layer.threeObject.traverse(child => {
+                    if(child.isMesh) {
+                        if(!child.userData.originalMaterialTex) {
+                            child.userData.originalMaterialTex = child.userData.originalMaterial.clone();
+                        }
+                        child.userData.originalMaterialTex.map = texture;
+                        child.userData.originalMaterialTex.color.setHex(0xffffff); // Hapus base color bawaan
+                        child.userData.originalMaterialTex.needsUpdate = true;
+                        
+                        // LANGSUNG TERAPKAN KE MATERIAL AKTIF
+                        child.material = child.userData.originalMaterialTex;
+                    }
+                });
+
+                // Eksekusi Pemasangan (Auto Apply) di panel UI sidebar
+                const applySidebarBtn = document.getElementById('dxf-btn-apply');
+                if (applySidebarBtn) {
+                    applySidebarBtn.disabled = false;
+                    applySidebarBtn.click();
+                }
+            });
+            
+            // Update UI Sidebar Input
+            const texName = document.getElementById('dxf-texture-filename');
+            const texClear = document.getElementById('dxf-clear-texture');
+            if(texName) texName.textContent = window.gcpState.file.name;
+            if(texClear) texClear.disabled = false;
+            
+            window.closeGcpModal();
+        });
+    }
+});
+
+
+// ==========================================
+// GCP HELPER & LOGIC FUNCTIONS
+// ==========================================
+
+// Inverse Matrix 3x3 untuk perhitungan Least Square UV Transformation
+window.invert3x3 = function(m) {
+    let det = m[0][0]*(m[1][1]*m[2][2] - m[2][1]*m[1][2]) -
+              m[0][1]*(m[1][0]*m[2][2] - m[1][2]*m[2][0]) +
+              m[0][2]*(m[1][0]*m[2][1] - m[1][1]*m[2][0]);
+    if (Math.abs(det) < 1e-8) return null; // Jika matrix tidak bisa di inverts
+    return [
+        [(m[1][1]*m[2][2] - m[2][1]*m[1][2])/det, (m[0][2]*m[2][1] - m[0][1]*m[2][2])/det, (m[0][1]*m[1][2] - m[0][2]*m[1][1])/det],
+        [(m[1][2]*m[2][0] - m[1][0]*m[2][2])/det, (m[0][0]*m[2][2] - m[0][2]*m[2][0])/det, (m[1][0]*m[0][2] - m[0][0]*m[1][2])/det],
+        [(m[1][0]*m[2][1] - m[2][0]*m[1][1])/det, (m[2][0]*m[0][1] - m[0][0]*m[2][1])/det, (m[0][0]*m[1][1] - m[1][0]*m[0][1])/det]
+    ];
+};
+
+// --- Fungsi Render Marker 3D Identik dengan Panel Kiri ---
+window.renderRightCanvasMarkers = function() {
+    if(!window.gcpState || !window.gcpState.markersGroup) return;
+    
+    // Hapus Marker Lama sebelum merender ulang
+    while(window.gcpState.markersGroup.children.length > 0) {
+        const child = window.gcpState.markersGroup.children[0];
+        window.gcpState.markersGroup.remove(child);
+        if(child.material.map) child.material.map.dispose();
+        child.material.dispose();
+    }
+
+    const create3DMarker = (label, colorStr, x, z) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const cx = 64;
+        const cy = 64;
+
+        ctx.imageSmoothingEnabled = false;
+
+        // Render bentuk Silang/Cross sama persis
+        ctx.strokeStyle = colorStr;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(cx - 24, cy); ctx.lineTo(cx + 24, cy);
+        ctx.moveTo(cx, cy - 24); ctx.lineTo(cx, cy + 24);
+        ctx.stroke();
+
+        // Render Text Label sama persis
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 32px sans-serif';
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.shadowBlur = 8;
+        ctx.fillText('P' + label, cx + 12, cy - 12);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+        const sprite = new THREE.Sprite(mat);
+        
+        // Setup initial scale, nantinya akan dinamis menyesuaikan Zoom via animate()
+        sprite.scale.set(window.gcpState.maxDim * 0.05, window.gcpState.maxDim * 0.05, 1);
+        sprite.position.set(x, window.gcpState.camera.position.y - 10, z); // Agar tidak bertabrakan dengan scene
+        sprite.renderOrder = 999;
+        sprite.userData.isMarker = true;
+
+        window.gcpState.markersGroup.add(sprite);
+    };
+
+    // Render ulang semua poin tersimpan (Hijau)
+    window.gcpState.points.forEach((pt, i) => {
+        if(pt.worldX !== undefined && pt.worldZ !== undefined) {
+            create3DMarker(i + 1, '#10b981', pt.worldX, pt.worldZ); 
+        }
+    });
+
+    // Render ulang poin yang baru saja di klik namun belum disave (Merah)
+    if (window.gcpState.currentPair.worldX !== undefined && window.gcpState.currentPair.worldZ !== undefined) {
+        create3DMarker(window.gcpState.points.length + 1, '#ef4444', window.gcpState.currentPair.worldX, window.gcpState.currentPair.worldZ); 
+    }
+};
+
+window.initGcpModal = function(img, file, layerTarget) {
+    const modal = document.getElementById('gcp-modal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    
+    window.gcpState = {
+        img: img, file: file, layer: layerTarget,
+        points: [], currentPair: {}, mode: 'idle',
+        scale: 1, dx: 0, dy: 0,
+        isDraggingLeft: false, dragMovedLeft: false, lastXLeft: 0, lastYLeft: 0,
+        raycaster: new THREE.Raycaster(),
+        mouse: new THREE.Vector2()
+    };
+    
+    // ==========================================
+    // SETUP LEFT CANVAS (IMAGE 2D)
+    // ==========================================
+    const leftCanvas = document.getElementById('gcp-left-canvas');
+    const leftWrapper = document.getElementById('gcp-left-wrapper');
+    leftCanvas.width = leftWrapper.clientWidth;
+    leftCanvas.height = leftWrapper.clientHeight;
+    
+    // Fit to viewport
+    window.gcpState.scale = Math.min(leftCanvas.width / img.width, leftCanvas.height / img.height) * 0.90;
+    window.gcpState.dx = (leftCanvas.width - img.width * window.gcpState.scale) / 2;
+    window.gcpState.dy = (leftCanvas.height - img.height * window.gcpState.scale) / 2;
+    
+    window.renderLeftCanvas();
+
+    // INTERAKSI LEFT CANVAS (Pan, Zoom, Klik Add GCP)
+    leftCanvas.onwheel = (e) => {
+        e.preventDefault();
+        const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+        const rect = leftCanvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Zoom mengarah ke posisi pointer mouse
+        window.gcpState.dx = mouseX - (mouseX - window.gcpState.dx) * zoomFactor;
+        window.gcpState.dy = mouseY - (mouseY - window.gcpState.dy) * zoomFactor;
+        window.gcpState.scale *= zoomFactor;
+        window.renderLeftCanvas();
+    };
+
+    leftCanvas.onpointerdown = (e) => {
+        window.gcpState.isDraggingLeft = true;
+        window.gcpState.dragMovedLeft = false;
+        window.gcpState.lastXLeft = e.clientX;
+        window.gcpState.lastYLeft = e.clientY;
+        leftCanvas.setPointerCapture(e.pointerId);
+    };
+
+    leftCanvas.onpointermove = (e) => {
+        if (!window.gcpState.isDraggingLeft) return;
+        const dx = e.clientX - window.gcpState.lastXLeft;
+        const dy = e.clientY - window.gcpState.lastYLeft;
+        
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) window.gcpState.dragMovedLeft = true; // Status memastikan ini drag bukan klik
+        
+        window.gcpState.dx += dx;
+        window.gcpState.dy += dy;
+        window.gcpState.lastXLeft = e.clientX;
+        window.gcpState.lastYLeft = e.clientY;
+        window.renderLeftCanvas();
+    };
+
+    leftCanvas.onpointerup = (e) => {
+        window.gcpState.isDraggingLeft = false;
+        leftCanvas.releasePointerCapture(e.pointerId);
+
+        // Jika itu adalah "Drag Pan", abaikan eksekusi pencarian titik GCP
+        if (window.gcpState.dragMovedLeft) return; 
+
+        // Jika sedang mode mencari titik di Panel Kiri
+        if (window.gcpState.mode !== 'left') return;
+
+        // Gunakan e.offsetX dan e.offsetY agar lebih presisi di dalam Container Canvas
+        const cx = e.offsetX;
+        const cy = e.offsetY;
+        
+        let imgX = (cx - window.gcpState.dx) / window.gcpState.scale;
+        let imgY = (cy - window.gcpState.dy) / window.gcpState.scale;
+
+        // ----------------------------------------------------
+        // MAGNETIC EFFECT / SNAP KE SISI GAMBAR
+        // ----------------------------------------------------
+        const snapThreshold = 30 / window.gcpState.scale; // Magnetic di radius 30 pixel layar visual
+        
+        if (imgX > -snapThreshold && imgX < snapThreshold) imgX = 0; // Snap kiri
+        if (imgX > window.gcpState.img.width - snapThreshold && imgX < window.gcpState.img.width + snapThreshold) imgX = window.gcpState.img.width; // Snap kanan
+        if (imgY > -snapThreshold && imgY < snapThreshold) imgY = 0; // Snap atas
+        if (imgY > window.gcpState.img.height - snapThreshold && imgY < window.gcpState.img.height + snapThreshold) imgY = window.gcpState.img.height; // Snap bawah
+
+        // Pastikan tidak klik terlalu jauh di luar gambar kosong (luar toleransi snap)
+        if (imgX < 0 || imgX > window.gcpState.img.width || imgY < 0 || imgY > window.gcpState.img.height) return;
+        
+        const u = imgX / window.gcpState.img.width;
+        const v = 1.0 - (imgY / window.gcpState.img.height); // V di WebGL dibalik (Bottom to Top)
+        
+        window.gcpState.currentPair.u = u;
+        window.gcpState.currentPair.v = v;
+        window.gcpState.currentPair.imgOrigX = imgX;
+        window.gcpState.currentPair.imgOrigY = imgY;
+        
+        window.gcpState.mode = 'right';
+        window.renderLeftCanvas();
+        window.updateGcpUI();
+    };
+    
+    // ==========================================
+    // SETUP RIGHT CANVAS (THREE.JS TOP VIEW - ALL DXF)
+    // ==========================================
+    const rightContainer = document.getElementById('gcp-right-3d');
+    rightContainer.innerHTML = '';
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // Aktifkan transparansi background
+    renderer.setSize(rightContainer.clientWidth, rightContainer.clientHeight);
+    renderer.setClearColor(0x0f172a, 1); // background warna slate-900 pekat
+    rightContainer.appendChild(renderer.domElement);
+    window.gcpState.renderer = renderer;
+    
+    const scene = new THREE.Scene();
+    window.gcpState.scene = scene;
+
+    // Persiapkan Group untuk menampung Sprite Marker 3D
+    window.gcpState.markersGroup = new THREE.Group();
+    scene.add(window.gcpState.markersGroup);
+
+    // Tambahkan pencahayaan agar material terlihat
+    const ambient = new THREE.AmbientLight(0xffffff, 0.85);
+    scene.add(ambient);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    scene.add(dirLight);
+    
+    // Kumpulkan semua Layer DXF yang sedang terlihat (Sama persis dengan DXF Summary View)
+    const visibleDxfs = typeof appLayers !== 'undefined' ? appLayers.filter(l => l.type === 'dxf' && l.visible) : [];
+    const previewGroup = new THREE.Group();
+    
+    visibleDxfs.forEach(l => {
+        if(l.threeObject) {
+            // Cukup Di Clone Sama Persis Seperti Preview Root Folder, Tanpa Override Jaring Material
+            const clone = l.threeObject.clone();
+            clone.visible = true;
+            previewGroup.add(clone);
+        }
+    });
+
+    scene.add(previewGroup);
+    
+    // Autofit Camera Orthographic ke Seluruh Batas DXF Terkait
+    const box = new THREE.Box3().setFromObject(previewGroup);
+    if (box.isEmpty()) { 
+        box.setFromCenterAndSize(new THREE.Vector3(0,0,0), new THREE.Vector3(100,100,100)); // Fallback jika tidak ada geometri
+    }
+
+    const size = new THREE.Vector3(); box.getSize(size);
+    const center = new THREE.Vector3(); box.getCenter(center);
+    
+    const aspect = rightContainer.clientWidth / rightContainer.clientHeight;
+    window.gcpState.maxDim = Math.max(size.x, size.z);
+    
+    // Perbesar threshold raycast click agar lines DXF sangat mudah terklik tanpa bantuan material solid
+    window.gcpState.raycaster.params.Line.threshold = window.gcpState.maxDim * 0.01; 
+
+    const fH = window.gcpState.maxDim * 1.15;
+    const fW = fH * aspect;
+    
+    const camera = new THREE.OrthographicCamera(-fW/2, fW/2, fH/2, -fH/2, -window.gcpState.maxDim*5, window.gcpState.maxDim*5);
+    camera.position.set(center.x, box.max.y + window.gcpState.maxDim, center.z);
+    camera.lookAt(center.x, center.y, center.z);
+    camera.up.set(0, 0, -1);
+    camera.updateProjectionMatrix();
+    window.gcpState.camera = camera;
+
+    dirLight.position.set(center.x, box.max.y + window.gcpState.maxDim, center.z);
+    
+    // Orbit Controls khusus Pan (Left Click) & Zoom (Scroll) -> Mode Top View Mapping
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableRotate = false; // Matikan Rotasi, pastikan selalu lurus top-view
+    controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: null };
+    controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
+    controls.target.set(center.x, center.y, center.z);
+    controls.update();
+    
+    // INTERAKSI RIGHT CANVAS (Pan VS Click Raycast GCP)
+    let isDraggingRight = false;
+    let lastMouseRight = { x: 0, y: 0 };
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+        isDraggingRight = false;
+        lastMouseRight.x = e.clientX;
+        lastMouseRight.y = e.clientY;
+    });
+
+    renderer.domElement.addEventListener('pointermove', (e) => {
+        if (Math.abs(e.clientX - lastMouseRight.x) > 3 || Math.abs(e.clientY - lastMouseRight.y) > 3) {
+            isDraggingRight = true; // Jika user menggeser (Pan), hindari trigger klik raycast
+        }
+    });
+
+    renderer.domElement.addEventListener('pointerup', (e) => {
+        if (isDraggingRight) return; 
+        if (!window.gcpState || window.gcpState.mode !== 'right') return;
+
+        // Hitung persentase murni dari container lokal (bukan full window)
+        window.gcpState.mouse.x = (e.offsetX / rightContainer.clientWidth) * 2 - 1;
+        window.gcpState.mouse.y = -(e.offsetY / rightContainer.clientHeight) * 2 + 1;
+        
+        window.gcpState.raycaster.setFromCamera(window.gcpState.mouse, window.gcpState.camera);
+        // Tembakan panah klik hanya pada Object Grup yg ditampilkan preview
+        const intersects = window.gcpState.raycaster.intersectObject(previewGroup, true);
+        
+        if (intersects.length > 0) {
+            const pt = intersects[0].point;
+            window.gcpState.currentPair.worldX = pt.x;
+            window.gcpState.currentPair.worldZ = pt.z;
+            
+            // Generate Marker Identik untuk 3D Scene
+            window.renderRightCanvasMarkers();
+            
+            window.gcpState.mode = 'save';
+            window.updateGcpUI();
+        }
+    });
+
+    const animate = () => {
+        if(!window.gcpState) return;
+        window.gcpState.reqId = requestAnimationFrame(animate);
+        controls.update();
+        
+        // Jaga ukuran marker agar konstan (tetap pixel-perfect) saat kamera di-zoom (seperti UI 2D biasa)
+        if (window.gcpState.markersGroup && window.gcpState.camera && window.gcpState.renderer) {
+            const frustumWidth = window.gcpState.camera.right - window.gcpState.camera.left;
+            // 96 adalah ukuran base target representasi di layar (dalam pixel)
+            const scale = frustumWidth * (96 / rightContainer.clientWidth); 
+            window.gcpState.markersGroup.children.forEach(child => {
+                if (child.userData.isMarker) {
+                    child.scale.set(scale, scale, 1);
+                }
+            });
+        }
+        
+        renderer.render(scene, camera);
+    };
+    animate();
+    
+    window.updateGcpUI();
+};
+
+window.renderLeftCanvas = function() {
+    if(!window.gcpState) return;
+    const canvas = document.getElementById('gcp-left-canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Matikan pemulusan gambar agar pixel detail mudah dipetakan
+    ctx.imageSmoothingEnabled = false;
+
+    // Render Gambar
+    ctx.drawImage(window.gcpState.img, window.gcpState.dx, window.gcpState.dy, window.gcpState.img.width * window.gcpState.scale, window.gcpState.img.height * window.gcpState.scale);
+    
+    // Fungsi Pembantu Render Titik Plus (Cross/X Shape)
+    const drawCross = (x, y, color, label) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(x - 12, y); ctx.lineTo(x + 12, y);
+        ctx.moveTo(x, y - 12); ctx.lineTo(x, y + 12);
+        ctx.stroke();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.shadowBlur = 5;
+        ctx.fillText('P' + label, x + 8, y - 10);
+        ctx.shadowBlur = 0;
+    };
+
+    // Render Point yang Berhasil
+    window.gcpState.points.forEach((pt, i) => {
+        let cx = window.gcpState.dx + pt.imgOrigX * window.gcpState.scale;
+        let cy = window.gcpState.dy + pt.imgOrigY * window.gcpState.scale;
+        drawCross(cx, cy, '#10b981', i+1); // Emerald Green
+    });
+    
+    // Render Point yang Sedang Diproses (Merah)
+    if (window.gcpState.currentPair.imgOrigX !== undefined) {
+        let cx = window.gcpState.dx + window.gcpState.currentPair.imgOrigX * window.gcpState.scale;
+        let cy = window.gcpState.dy + window.gcpState.currentPair.imgOrigY * window.gcpState.scale;
+        drawCross(cx, cy, '#ef4444', window.gcpState.points.length + 1); // Red
+    }
+};
+
+window.updateGcpUI = function() {
+    if(!window.gcpState) return;
+    const statusEl = document.getElementById('gcp-status-text');
+    const addBtn = document.getElementById('btn-add-gcp');
+    const saveBtn = document.getElementById('btn-save-gcp');
+    const genBtn = document.getElementById('btn-apply-texture');
+    const countBadge = document.getElementById('gcp-count-badge');
+    const leftCanvas = document.getElementById('gcp-left-canvas');
+    const rightContainer = document.getElementById('gcp-right-3d');
+    
+    countBadge.textContent = `Pasangan: ${window.gcpState.points.length}`;
+    
+    if (window.gcpState.mode === 'idle') {
+        statusEl.textContent = "Klik 'Add GCP' untuk menambah pasangan titik.";
+        addBtn.disabled = false; addBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        saveBtn.disabled = true; saveBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        leftCanvas.style.cursor = 'grab';
+        rightContainer.style.cursor = 'grab';
+    } else if (window.gcpState.mode === 'left') {
+        statusEl.textContent = "Klik pada Citra (Panel Kiri) untuk GCP. (Tahan & Geser untuk Pan)";
+        addBtn.disabled = true; addBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        saveBtn.disabled = true; saveBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        leftCanvas.style.cursor = 'crosshair';
+        rightContainer.style.cursor = 'grab';
+    } else if (window.gcpState.mode === 'right') {
+        statusEl.textContent = "Klik pada 3D Model (Panel Kanan) untuk lokasi rujukan GCP. (Tahan & Geser untuk Pan)";
+        leftCanvas.style.cursor = 'grab';
+        rightContainer.style.cursor = 'crosshair';
+    } else if (window.gcpState.mode === 'save') {
+        statusEl.textContent = "Titik ditetapkan. Klik 'Save' untuk menyimpan pasangan GCP.";
+        saveBtn.disabled = false; saveBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        leftCanvas.style.cursor = 'grab';
+        rightContainer.style.cursor = 'grab';
+    }
+    
+    if (window.gcpState.points.length >= 3 && window.gcpState.mode === 'idle') {
+        genBtn.disabled = false; genBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    } else {
+        genBtn.disabled = true; genBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+};
+
+window.closeGcpModal = function() {
+    const modal = document.getElementById('gcp-modal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    
+    if (window.gcpState) {
+        if(window.gcpState.reqId) cancelAnimationFrame(window.gcpState.reqId);
+        if(window.gcpState.renderer) window.gcpState.renderer.dispose();
+    }
+    
+    // Jika modal dibatalkan (bukan karena Apply), reset kembali file input-nya
+    if (window.dxfTempState && !window.dxfTempState.textureChanged && document.getElementById('dxf-texture-file')) {
+         document.getElementById('dxf-texture-file').value = '';
+    }
+    window.gcpState = null;
+};
+
+// ==========================================
+// GLOBAL EVENT LISTENERS (GCP & OTHERS)
+// ==========================================
+
+// Fitur Cancel / Undo Add GCP menggunakan tombol Ctrl + Z (atau Cmd + Z di Mac)
+document.addEventListener('keydown', (e) => {
+    // Deteksi Ctrl + Z atau Cmd + Z
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (window.gcpState) {
+            if (window.gcpState.mode !== 'idle') {
+                // 1. Jika sedang dalam proses memilih titik (belum disave), batalkan titik tersebut
+                e.preventDefault();
+                window.gcpState.currentPair = {};
+                window.gcpState.mode = 'idle';
+                window.gcpState.isDraggingLeft = false; 
+                
+                if (typeof window.renderLeftCanvas === 'function') window.renderLeftCanvas();
+                if (typeof window.renderRightCanvasMarkers === 'function') window.renderRightCanvasMarkers();
+                if (typeof window.updateGcpUI === 'function') window.updateGcpUI();
+            } else if (window.gcpState.points.length > 0) {
+                // 2. Jika di mode idle, HAPUS titik GCP terakhir yang sudah tersimpan (True Undo)
+                e.preventDefault();
+                window.gcpState.points.pop(); // Hapus pasangan elemen terakhir dari array
+                
+                if (typeof window.renderLeftCanvas === 'function') window.renderLeftCanvas();
+                if (typeof window.renderRightCanvasMarkers === 'function') window.renderRightCanvasMarkers();
+                if (typeof window.updateGcpUI === 'function') window.updateGcpUI();
+            }
+        }
+    }
 });

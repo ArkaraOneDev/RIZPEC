@@ -324,7 +324,7 @@
                         <i class="fa-solid fa-layer-group text-blue-400 text-4xl lg:text-5xl"></i>
                     </div>
                     <h1 class="text-4xl lg:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-400 mb-3 tracking-tight">Welcome to RIZPEC</h1>
-                    <h2 class="text-lg lg:text-xl text-slate-300 font-medium tracking-wide">Seam Based Scheduling Solutions</h2>
+                    <h2 class="text-lg lg:text-xl text-slate-300 font-medium tracking-wide">Seam Based Mine Scheduling</h2>
                     
                     <div id="landing-new-project-container" class="mt-8 relative h-12 flex justify-center items-center transition-all duration-300 opacity-0 pointer-events-none transform translate-y-4">
                         <form id="landing-new-project-form" class="flex flex-col sm:flex-row items-center gap-2 bg-slate-800/80 p-2 lg:p-1.5 rounded-lg border border-slate-600 shadow-2xl backdrop-blur-sm">
@@ -593,14 +593,32 @@
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Color Override</span>
                                     <select id="dxf-col-color" class="col-select">
                                         <option value="Default">Default</option>
-                                        <option value="Pallete">Pallete</option>
                                         <option value="Rainbow">Rainbow</option>
+                                        <option value="Pallete">Pallete</option>
+                                        <option id="dxf-opt-texture" value="Texture" hidden disabled>Texture</option>
                                     </select>
                                 </div>
 
                                 <div id="dxf-recolor-row" class="hidden items-center justify-between mt-1">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Recolor</span>
                                     <input type="color" id="dxf-recolor-input" class="w-8 h-8 rounded cursor-pointer border-0 outline-none bg-transparent p-0">
+                                </div>
+                                
+                                <!-- Texture Row -->
+                                <div id="dxf-texture-row" class="hidden flex-col gap-2 lg:gap-1.5 mt-1">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Texture Image</span>
+                                        <div class="flex items-center gap-2 lg:gap-1.5">
+                                            <label id="dxf-btn-texture-label" class="cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 lg:px-2.5 lg:py-1 rounded text-[11px] lg:text-[10px] font-semibold transition-all border border-slate-600 flex items-center gap-1.5 m-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                                                <i class="fa-solid fa-upload text-rose-400"></i> Choose File
+                                                <input type="file" id="dxf-texture-file" accept="image/*" class="hidden" disabled>
+                                            </label>
+                                            <button id="dxf-clear-texture" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear Texture">
+                                                <i class="fa-solid fa-trash-can text-[11px] lg:text-[10px]"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div id="dxf-texture-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
                                 </div>
                             </div>
 
@@ -623,27 +641,6 @@
                                         <option value="Disposal Data">Disposal Data</option>
                                         <option value="All Data">All Data</option>
                                     </select>
-                                </div>
-                            </div>
-
-                            <!-- Texture Header -->
-                            <div class="flex flex-col gap-2 lg:gap-1.5 mt-2 pt-3 border-t border-slate-700/50">
-                                <h4 class="text-[12px] lg:text-[11px] font-bold text-rose-400 mb-1">Texture</h4>
-
-                                <div class="flex flex-col gap-2 lg:gap-1.5 mt-2">
-                                    <div class="flex flex-wrap items-center justify-between gap-2">
-                                        <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Texture Image</span>
-                                        <div class="flex items-center gap-2 lg:gap-1.5">
-                                            <label id="dxf-btn-texture-label" class="cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 lg:px-2.5 lg:py-1 rounded text-[11px] lg:text-[10px] font-semibold transition-all border border-slate-600 flex items-center gap-1.5 m-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
-                                                <i class="fa-solid fa-upload text-rose-400"></i> Choose File
-                                                <input type="file" id="dxf-texture-file" accept="image/*" class="hidden" disabled>
-                                            </label>
-                                            <button id="dxf-clear-texture" class="bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white w-7 h-7 lg:w-6 lg:h-6 flex items-center justify-center rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed m-0" disabled title="Clear Texture">
-                                                <i class="fa-solid fa-trash-can text-[11px] lg:text-[10px]"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div id="dxf-texture-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
                                 </div>
                             </div>
                             
@@ -1024,6 +1021,47 @@
                 </div>
                 <h2 class="text-3xl lg:text-2xl font-bold text-white mb-3 lg:mb-2 tracking-tight">Report Canvas</h2>
                 <p class="text-slate-500 text-base lg:text-sm">Tampilan dashboard & laporan akan berada di sini.</p>
+            </div>
+
+            <!-- GCP Modal -->
+            <div id="gcp-modal" class="fixed inset-0 bg-black/80 z-[200] hidden items-center justify-center backdrop-blur-sm p-4 lg:p-8">
+                <div class="w-full max-w-5xl h-[85vh] bg-slate-900 rounded-xl shadow-2xl border border-slate-600 flex flex-col overflow-hidden relative">
+                    <div class="h-12 border-b border-slate-700 flex items-center justify-between px-4 shrink-0 shadow bg-slate-800">
+                        <h2 class="text-white font-bold text-[13px]"><i class="fa-solid fa-map-pin mr-2 text-blue-400"></i> GCP Mapping Texture</h2>
+                        <button onclick="window.closeGcpModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-times text-lg"></i></button>
+                    </div>
+                    
+                    <div class="flex-1 flex overflow-hidden">
+                        <div class="w-1/2 border-r border-slate-300 flex flex-col relative bg-white" id="gcp-left-wrapper">
+                            <div class="absolute top-2 left-2 z-10 bg-slate-800/80 px-2 py-1 rounded text-[10px] font-mono text-slate-300 pointer-events-none shadow">Citra Satelit</div>
+                            <div id="gcp-left-zoom-rect" class="absolute border-2 border-red-500 bg-red-500/20 pointer-events-none hidden z-50"></div>
+                            <canvas id="gcp-left-canvas" class="w-full h-full cursor-crosshair"></canvas>
+                        </div>
+                        <div class="w-1/2 flex flex-col relative bg-white" id="gcp-right-wrapper">
+                            <div class="absolute top-2 left-2 z-10 bg-slate-800/80 px-2 py-1 rounded text-[10px] font-mono text-slate-300 pointer-events-none shadow">Top View 3D Layer</div>
+                            <div id="gcp-right-zoom-rect" class="absolute border-2 border-red-500 bg-red-500/20 pointer-events-none hidden z-50"></div>
+                            <div id="gcp-right-3d" class="w-full h-full outline-none"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="h-14 border-t border-slate-700 bg-slate-800 flex items-center justify-between px-4 shrink-0">
+                        <div class="flex items-center gap-3">
+                            <button id="btn-add-gcp" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-[11px] font-bold shadow transition-colors">
+                                <i class="fa-solid fa-plus mr-1"></i> Add GCP
+                            </button>
+                            <button id="btn-save-gcp" class="bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 rounded text-[11px] font-bold shadow transition-colors opacity-50 cursor-not-allowed" disabled>
+                                <i class="fa-solid fa-floppy-disk mr-1"></i> Save
+                            </button>
+                            <span id="gcp-status-text" class="text-[11px] font-mono text-slate-400 ml-2">Klik 'Add GCP' untuk mulai.</span>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span id="gcp-count-badge" class="text-[11px] text-slate-300 bg-slate-700 px-2 py-1.5 rounded font-mono shadow-inner border border-slate-600">Pasangan: 0</span>
+                            <button id="btn-apply-texture" class="bg-teal-600 hover:bg-teal-500 text-white px-5 py-1.5 rounded text-[11px] font-bold shadow transition-colors opacity-50 cursor-not-allowed" disabled>
+                                Apply Texture
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
         </div> <!-- End Main Canvas Area -->

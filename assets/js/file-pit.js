@@ -1181,7 +1181,7 @@ async function updatePitFileStats(file, type) {
                                 const mrIdxBench = getIdx(mrHeaders, 'BENCH', mappedBench);
                                 let mrIdxSeam = getIdx(mrHeaders, 'SEAM', 'INTERVAL');
                                 if (mrIdxSeam === -1) mrIdxSeam = getIdx(mrHeaders, mappedSeam, null); 
-                                const mrIdxSubset = getIdx(mrHeaders, 'SUBSET', mappedSubset);
+                                const mrIdxSubset = mappedSubset ? getIdx(mrHeaders, mappedSubset, null) : -1;
                                 const mrIdxWaste = getIdx(mrHeaders, mappedWaste, null);
                                 const mrIdxResource = getIdx(mrHeaders, mappedResource, null);
                                 const mrIdxWasteThick = getIdx(mrHeaders, mappedWasteThick, null);
@@ -1236,30 +1236,36 @@ async function updatePitFileStats(file, type) {
                                     let rawSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
                                     const rawBurden = mrIdxBurden !== -1 ? (mrCols[mrIdxBurden] || '').trim().toUpperCase() : '';
                                     
-                                    if (rawBurden === 'RESOURCE') {
-                                        rawSubset = 'Resource';
-                                    } else if (rawSubset) {
-                                        rawSubset = toProperCase(rawSubset);
+                                    let isResourceTriangle = false;
+                                    if (rawBurden !== '') isResourceTriangle = (rawBurden === 'RESOURCE');
+                                    else if (mrIdxResource !== -1) isResourceTriangle = (cleanNum(mrCols[mrIdxResource]) > 0);
+                                    
+                                    const burdenType = isResourceTriangle ? 'RESOURCE' : 'WASTE';
+                                    
+                                    // Pengecekan Dropdown Subset
+                                    if (mrIdxSubset !== -1) {
+                                        if (isResourceTriangle) {
+                                            rawSubset = 'Resource'; // Timpa jika resource
+                                        } else if (rawSubset) {
+                                            rawSubset = toProperCase(rawSubset); // Pertahankan asli jika waste
+                                        }
+                                        if (rawSubset) subsetsSet.add(rawSubset);
                                     }
-
-                                    if (rawSubset) subsetsSet.add(rawSubset);
 
                                     const idPit = pitId || '';
                                     const idBlock = delimBlock ? getSubstr(rawBlock, delimBlock) : rawBlock;
                                     const idStrip = delimStrip ? getSubstr(rawBlock, delimStrip) : rawBlock;
                                     const idBench = delimBench ? getSubstr(rawBench, delimBench) : rawBench;
-                                    const compositeId = idPit + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + rawSeam + '/' + rawSubset;
+
+                                    // [UPDATE]: Menyesuaikan Composite ID berdasarkan kondisi dropdown Subset dan Burden
+                                    const compositeId = idPit + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + rawSeam + (mrIdxSubset !== -1 ? (rawSubset ? '/' + rawSubset : '') : '/' + burdenType);
 
                                     if (!blocksMap.has(compositeId)) {
                                         blocksMap.set(compositeId, { wasteThickWt: 0, resThickWt: 0, sumWasteWeight: 0, sumResWeight: 0, qualities: {}, count: 0 });
                                     }
 
                                     const b = blocksMap.get(compositeId);
-                                    let isResourceTriangle = false;
                                     
-                                    if (rawBurden !== '') isResourceTriangle = (rawBurden === 'RESOURCE');
-                                    else if (mrIdxResource !== -1) isResourceTriangle = (cleanNum(mrCols[mrIdxResource]) > 0);
-
                                     let wVal = 0, rVal = 0;
                                     
                                     if (!isResourceTriangle) {
@@ -1384,24 +1390,31 @@ async function updatePitFileStats(file, type) {
                                     let rawSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
                                     const rawBurden = mrIdxBurden !== -1 ? (mrCols[mrIdxBurden] || '').trim().toUpperCase() : '';
                                     
-                                    if (rawBurden === 'RESOURCE') {
-                                        rawSubset = 'Resource';
-                                    } else if (rawSubset) {
-                                        rawSubset = toProperCase(rawSubset);
+                                    let isResourceTriangle = false;
+                                    if (rawBurden !== '') isResourceTriangle = (rawBurden === 'RESOURCE');
+                                    else if (mrIdxResource !== -1) isResourceTriangle = (cleanNum(mrCols[mrIdxResource]) > 0);
+                                    
+                                    const burdenType = isResourceTriangle ? 'RESOURCE' : 'WASTE';
+                                    
+                                    // Pengecekan Dropdown Subset
+                                    if (mrIdxSubset !== -1) {
+                                        if (isResourceTriangle) {
+                                            rawSubset = 'Resource'; // Timpa jika resource
+                                        } else if (rawSubset) {
+                                            rawSubset = toProperCase(rawSubset); // Pertahankan asli jika waste
+                                        }
                                     }
 
                                     const idPit = pitId || '';
                                     const idBlock = delimBlock ? getSubstr(rawBlock, delimBlock) : rawBlock;
                                     const idStrip = delimStrip ? getSubstr(rawBlock, delimStrip) : rawBlock;
                                     const idBench = delimBench ? getSubstr(rawBench, delimBench) : rawBench;
-                                    const compositeId = idPit + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + rawSeam + '/' + rawSubset;
+                                    
+                                    // [UPDATE]: Menyesuaikan Composite ID berdasarkan kondisi dropdown Subset dan Burden
+                                    const compositeId = idPit + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + rawSeam + (mrIdxSubset !== -1 ? (rawSubset ? '/' + rawSubset : '') : '/' + burdenType);
                                     
                                     const b = blocksMap.get(compositeId);
                                     const row = [];
-                                    
-                                    let isResourceTriangle = false;
-                                    if (rawBurden !== '') isResourceTriangle = (rawBurden === 'RESOURCE');
-                                    else if (mrIdxResource !== -1) isResourceTriangle = (cleanNum(mrCols[mrIdxResource]) > 0);
 
                                     mrKeepIndices.forEach(idx => row.push(mrCols[idx] !== undefined ? mrCols[idx] : ''));
 

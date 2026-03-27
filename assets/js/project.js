@@ -2,6 +2,26 @@
 // PROJECT SAVE / OPEN LOGIC (.riz)
 // ==========================================
 
+// Helper untuk konversi File (Tekstur) ke Base64 agar bisa disave di JSON
+const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+};
+
+// Helper untuk konversi Base64 kembali ke File object
+const base64ToFile = (dataurl, filename) => {
+    let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+        bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+    while(n--){
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, {type:mime});
+};
+
 // 1. Logika New Project pada Sidebar
 const btnSidebarNew = document.getElementById('btn-sidebar-new');
 if (btnSidebarNew) {
@@ -135,9 +155,14 @@ function getBaseProjectData() {
     if (typeof window.pitStates !== 'undefined') {
         for (const [pitId, state] of Object.entries(window.pitStates)) {
             cleanPitStates[pitId] = {
+                mrFileName: state.mrFileName || (state.mrFile ? state.mrFile.name : null),
+                refFileName: state.refFileName || (state.refFile ? state.refFile.name : null),
+                buildMethod: state.buildMethod || 'NON_CEN',
+                refFileApplied: state.refFileApplied || false,
                 mrFilePlaceholder: state.mrFile ? { name: state.mrFile.name } : null,
                 refFilePlaceholder: state.refFile ? { name: state.refFile.name } : null,
                 summaryObj: state.summaryObj,
+                originalSummaryObj: state.originalSummaryObj, // FIX: Simpan nilai original
                 mrStats: state.mrStats,
                 refStats: state.refStats,
                 neStats: state.neStats,
@@ -154,9 +179,14 @@ function getBaseProjectData() {
     if (typeof window.disposalStates !== 'undefined') {
         for (const [dispId, state] of Object.entries(window.disposalStates)) {
             cleanDisposalStates[dispId] = {
+                mrFileName: state.mrFileName || (state.mrFile ? state.mrFile.name : null),
+                refFileName: state.refFileName || (state.refFile ? state.refFile.name : null),
+                buildMethod: state.buildMethod || 'NON_CEN',
+                refFileApplied: state.refFileApplied || false,
                 mrFilePlaceholder: state.mrFile ? { name: state.mrFile.name } : null,
                 refFilePlaceholder: state.refFile ? { name: state.refFile.name } : null,
                 summaryObj: state.summaryObj,
+                originalSummaryObj: state.originalSummaryObj, // FIX: Simpan nilai original
                 mrStats: state.mrStats,
                 refStats: state.refStats,
                 neStats: state.neStats,
@@ -169,7 +199,7 @@ function getBaseProjectData() {
     }
 
     return {
-        version: "1.7", // Versi baru tanpa legacy OB/Coal
+        version: "1.8", // Versi baru dengan GCP Meta Transform
         csvFileName: currentFileName,
         csvHeaders: typeof csvHeaders !== 'undefined' ? csvHeaders : [], 
         pitStates: cleanPitStates,
@@ -243,12 +273,39 @@ function extractSingleMesh(m) {
     };
 }
 
-function extractSingleDxfLayer(layer) {
+async function extractSingleDxfLayer(layer) {
+    let metaDB = { dxfType: layer.dxfType || (layer.hasFaces ? 'Polymesh' : 'Polyline') };
+    if (typeof RizpecDB !== 'undefined') {
+        try {
+            const dbData = await RizpecDB.get(`rizpec_dxf_entity_${layer.name.replace(/\s+/g, '_')}_meta`);
+            if (dbData) metaDB = dbData;
+        } catch(e) {}
+    }
+
     const dxfData = {
         id: layer.id, name: layer.name, visible: layer.visible,
         colorHex: layer.colorHex, defaultColorHex: layer.defaultColorHex,
         hasFaces: layer.hasFaces, opacity: layer.opacity !== undefined ? layer.opacity : 1,
+        
+        // Simpan Konfigurasi Lengkap DXF & Badges
         clippingEnabled: layer.clippingEnabled || false,
+        colorMode: layer.colorMode || 'Default',
+        visualColor: layer.visualColor || layer.colorHex,
+        clipFootprints: layer.clipFootprints || 'Pit Data',
+        dxfType: metaDB.dxfType,
+        metaDB: metaDB,
+        fileSize: layer.fileSize,
+        lastModified: layer.lastModified,
+        
+        textureMeta: layer.textureMeta ? {
+            name: layer.textureMeta.name,
+            size: layer.textureMeta.size,
+            width: layer.textureMeta.width,
+            height: layer.textureMeta.height,
+            gcpPoints: layer.textureMeta.gcpPoints || null,  // Tambahkan Metadata Titik GCP (Affine Transform)
+            transform: layer.textureMeta.transform || null   // Matrix Transformation
+        } : null,
+        
         meshes: [], lines: [], textureBase64: null
     };
 
@@ -256,11 +313,12 @@ function extractSingleDxfLayer(layer) {
         if (c.isMesh) {
             dxfData.meshes.push({
                 positions: c.geometry.attributes.position ? Array.from(c.geometry.attributes.position.array) : [],
-                uvs: c.geometry.attributes.uv ? Array.from(c.geometry.attributes.uv.array) : null,
+                uvs: c.geometry.attributes.uv ? Array.from(c.geometry.attributes.uv.array) : null, // Ekstrak UV
                 indices: c.geometry.index ? Array.from(c.geometry.index.array) : null,
-                color: c.material.color.getHex(),
+                color: c.material.color ? c.material.color.getHex() : 0xffffff,
                 originalColor: c.userData.originalColor
             });
+            // Jika ada map texture aktif, convert dan simpan Base64
             if (c.material.map && c.material.map.image && !dxfData.textureBase64) {
                 try {
                     const canvas = document.createElement('canvas');
@@ -273,11 +331,19 @@ function extractSingleDxfLayer(layer) {
         } else if (c.isLine || c.isLineSegments) {
             dxfData.lines.push({ 
                 positions: c.geometry.attributes.position ? Array.from(c.geometry.attributes.position.array) : [], 
-                color: c.material.color.getHex(), 
+                color: c.material.color ? c.material.color.getHex() : 0xffffff, 
                 originalColor: c.userData.originalColor 
             });
         }
     });
+
+    // Fallback ekstraksi gambar base64 jika canvas gagal dirender atau hanya tersimpan di textureMeta.file
+    if (layer.textureMeta && layer.textureMeta.file && !dxfData.textureBase64) {
+        try {
+            dxfData.textureBase64 = await fileToBase64(layer.textureMeta.file);
+        } catch(e) {}
+    }
+
     return dxfData;
 }
 
@@ -441,7 +507,8 @@ async function executeProgressiveStreamSave(fileHandle, fileName) {
                     const dxfLayers = typeof appLayers !== 'undefined' ? appLayers.filter(l => l.type === 'dxf') : [];
                     for (let i = 0; i < dxfLayers.length; i++) {
                         if (loadingTextEl) loadingTextEl.textContent = `Menulis data DXF (${i+1}/${dxfLayers.length})...`;
-                        const dxfData = extractSingleDxfLayer(dxfLayers[i]);
+                        // Ambil DXF lengkap dengan metadata via async
+                        const dxfData = await extractSingleDxfLayer(dxfLayers[i]);
                         const separator = (i === 0) ? '' : ',';
                         controller.enqueue(new TextEncoder().encode(separator + JSON.stringify(dxfData)));
                         await new Promise(resolve => setTimeout(resolve, 0));
@@ -730,6 +797,12 @@ async function processLoadedData(data, fileName) {
         return;
     }
 
+    // =========================================================
+    // REQUIREMENT 3: PEMBERSIHAN TOTAL AGAR TIDAK ADA KETERGANTUNGAN
+    // =========================================================
+    if (typeof window.resetFileTabForNewProject === 'function') {
+        await window.resetFileTabForNewProject();
+    }
     resetFullProject();
 
     if (data.worldOrigin) {
@@ -867,10 +940,15 @@ async function processLoadedData(data, fileName) {
 
         for (const [pitId, savedState] of Object.entries(data.pitStates)) {
             window.pitStates[pitId] = {
-                mrFile: savedState.mrFilePlaceholder, 
-                refFile: savedState.refFilePlaceholder, 
+                mrFileName: savedState.mrFileName || (savedState.mrFilePlaceholder ? savedState.mrFilePlaceholder.name : null),
+                refFileName: savedState.refFileName || (savedState.refFilePlaceholder ? savedState.refFilePlaceholder.name : null),
+                buildMethod: savedState.buildMethod || (savedState.refFilePlaceholder ? 'CEN' : 'NON_CEN'),
+                refFileApplied: savedState.refFileApplied || false,
+                mrFile: null,  // Hindari object palsu agar `.size` tidak eror
+                refFile: null, // Hindari object palsu
                 generatedCsv: null, 
                 summaryObj: savedState.summaryObj,
+                originalSummaryObj: savedState.originalSummaryObj, // FIX: Kembalikan nilai original
                 mrStats: savedState.mrStats || { text: '0.00 MB (0 Row, 0 Column)' },
                 refStats: savedState.refStats || { text: '0.00 MB (0 Row, 0 Column)' },
                 neStats: savedState.neStats || { text: '0 Block' },
@@ -881,10 +959,31 @@ async function processLoadedData(data, fileName) {
             };
 
             const safeId = pitId.replace(/\s+/g, '_');
-            const buildMethod = savedState.refFilePlaceholder ? 'CEN' : 'NON_CEN';
+            const buildMethod = window.pitStates[pitId].buildMethod;
             localStorage.setItem(`rizpec_build_type_${safeId}`, buildMethod);
+            
             if (savedState.summaryObj) {
                 localStorage.setItem(`rizpec_entity_${safeId}_summary`, JSON.stringify(savedState.summaryObj));
+            }
+
+            // FIX 3: Tulis ulang _meta ke IndexedDB saat load project
+            if (typeof RizpecDB !== 'undefined') {
+                const metaToSave = {
+                    buildMethod: window.pitStates[pitId].buildMethod,
+                    mrFileName: window.pitStates[pitId].mrFileName,
+                    refFileName: window.pitStates[pitId].refFileName,
+                    mrStats: window.pitStates[pitId].mrStats,
+                    refStats: window.pitStates[pitId].refStats,
+                    neStats: window.pitStates[pitId].neStats,
+                    summaryObj: window.pitStates[pitId].summaryObj,
+                    originalSummaryObj: window.pitStates[pitId].originalSummaryObj, // FIX: Simpan nilai original ke DB
+                    cols: window.pitStates[pitId].cols,
+                    substrings: window.pitStates[pitId].substrings,
+                    mrHeaders: window.pitStates[pitId].mrHeaders,
+                    refHeaders: window.pitStates[pitId].refHeaders,
+                    refFileApplied: window.pitStates[pitId].refFileApplied
+                };
+                RizpecDB.set(`rizpec_pit_entity_${safeId}_meta`, metaToSave).catch(e => console.warn(e));
             }
 
             if (typeof folderState !== 'undefined') folderState[rootName]++;
@@ -923,10 +1022,15 @@ async function processLoadedData(data, fileName) {
 
         for (const [dispId, savedState] of Object.entries(data.disposalStates)) {
             window.disposalStates[dispId] = {
-                mrFile: savedState.mrFilePlaceholder, 
-                refFile: savedState.refFilePlaceholder, 
+                mrFileName: savedState.mrFileName || (savedState.mrFilePlaceholder ? savedState.mrFilePlaceholder.name : null),
+                refFileName: savedState.refFileName || (savedState.refFilePlaceholder ? savedState.refFilePlaceholder.name : null),
+                buildMethod: savedState.buildMethod || (savedState.refFilePlaceholder ? 'CEN' : 'NON_CEN'),
+                refFileApplied: savedState.refFileApplied || false,
+                mrFile: null, 
+                refFile: null, 
                 generatedCsv: null, 
                 summaryObj: savedState.summaryObj,
+                originalSummaryObj: savedState.originalSummaryObj, // FIX: Kembalikan nilai original
                 mrStats: savedState.mrStats || { text: '0.00 MB (0 Row, 0 Column)' },
                 refStats: savedState.refStats || { text: '0.00 MB (0 Row, 0 Column)' },
                 neStats: savedState.neStats || { text: '0 Block' },
@@ -937,10 +1041,29 @@ async function processLoadedData(data, fileName) {
             };
 
             const safeId = dispId.replace(/\s+/g, '_');
-            const buildMethod = savedState.refFilePlaceholder ? 'CEN' : 'NON_CEN';
+            const buildMethod = window.disposalStates[dispId].buildMethod;
             localStorage.setItem(`rizpec_disp_build_type_${safeId}`, buildMethod);
             if (savedState.summaryObj) {
                 localStorage.setItem(`rizpec_disp_entity_${safeId}_summary`, JSON.stringify(savedState.summaryObj));
+            }
+
+            if (typeof RizpecDB !== 'undefined') {
+                const metaToSave = {
+                    buildMethod: window.disposalStates[dispId].buildMethod,
+                    mrFileName: window.disposalStates[dispId].mrFileName,
+                    refFileName: window.disposalStates[dispId].refFileName,
+                    mrStats: window.disposalStates[dispId].mrStats,
+                    refStats: window.disposalStates[dispId].refStats,
+                    neStats: window.disposalStates[dispId].neStats,
+                    summaryObj: window.disposalStates[dispId].summaryObj,
+                    originalSummaryObj: window.disposalStates[dispId].originalSummaryObj, // FIX: Simpan nilai original ke DB
+                    cols: window.disposalStates[dispId].cols,
+                    substrings: window.disposalStates[dispId].substrings,
+                    mrHeaders: window.disposalStates[dispId].mrHeaders,
+                    refHeaders: window.disposalStates[dispId].refHeaders,
+                    refFileApplied: window.disposalStates[dispId].refFileApplied
+                };
+                RizpecDB.set(`rizpec_disp_entity_${safeId}_meta`, metaToSave).catch(e => console.warn(e));
             }
 
             if (typeof folderState !== 'undefined') folderState[rootName]++;
@@ -973,8 +1096,13 @@ async function processLoadedData(data, fileName) {
 
     const imagePromises = [];
 
+    // =========================================================
+    // DXF RESTORE LOGIC - DENGAN KONFIGURASI BADGES & TEKSTUR
+    // =========================================================
     if (data.dxfLayers && data.dxfLayers.length > 0 && typeof scene !== 'undefined') {
-        data.dxfLayers.forEach(lData => {
+        const rootName = 'DXF Data';
+        
+        for (const lData of data.dxfLayers) {
             const group = new THREE.Group();
             group.name = lData.name;
             let texture = null;
@@ -988,6 +1116,9 @@ async function processLoadedData(data, fileName) {
 
                 img.src = lData.textureBase64;
                 texture = new THREE.Texture(img);
+                texture.wrapS = THREE.ClampToEdgeWrapping;
+                texture.wrapT = THREE.ClampToEdgeWrapping;
+                texture.minFilter = THREE.LinearFilter;
                 texture.needsUpdate = true;
             }
 
@@ -998,18 +1129,28 @@ async function processLoadedData(data, fileName) {
                 if(m.uvs) geo.setAttribute('uv', new THREE.Float32BufferAttribute(m.uvs, 2));
                 geo.computeVertexNormals();
 
-                const mat = new THREE.MeshStandardMaterial({
+                const baseMat = new THREE.MeshStandardMaterial({
                     color: m.color, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.1,
                     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
                     transparent: lData.opacity < 1, opacity: lData.opacity
                 });
-                if (texture) {
-                    mat.map = texture;
-                    mat.color.setHex(0xffffff);
-                }
-                const mesh = new THREE.Mesh(geo, mat);
+                
+                const mesh = new THREE.Mesh(geo, baseMat);
                 mesh.userData.originalColor = m.originalColor;
-                if (texture) mesh.userData.hasFootprintMask = true;
+                mesh.userData.originalMaterial = baseMat.clone();
+                
+                if (texture) {
+                    const texMat = baseMat.clone();
+                    texMat.map = texture;
+                    texMat.color.setHex(0xffffff);
+                    mesh.userData.originalMaterialTex = texMat;
+                    mesh.userData.hasFootprintMask = true; // Legacy marker
+                    
+                    if (lData.colorMode === 'Texture') {
+                        mesh.material = texMat;
+                    }
+                }
+                
                 group.add(mesh);
             });
 
@@ -1023,21 +1164,94 @@ async function processLoadedData(data, fileName) {
             });
 
             group.visible = lData.visible;
+
+            // --- RE-APPLY RAINBOW COLOR MODE ---
+            // Bangun ulang vertex colors khusus untuk mode Rainbow agar tidak membebani ukuran file .riz saat di save
+            if (lData.colorMode === 'Rainbow') {
+                const box = new THREE.Box3().setFromObject(group);
+                const minY = box.min.y;
+                const maxY = box.max.y;
+                const rangeY = maxY - minY || 1; 
+                
+                const tempColor = new THREE.Color();
+                
+                group.traverse((child) => {
+                    if ((child.isMesh || child.isLineSegments) && child.geometry && child.geometry.attributes.position) {
+                        const posAttr = child.geometry.attributes.position;
+                        const count = posAttr.count;
+                        
+                        if (!child.geometry.attributes.color) {
+                            child.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+                        }
+                        const colAttr = child.geometry.attributes.color;
+                        
+                        for (let i = 0; i < count; i++) {
+                            const y = posAttr.getY(i);
+                            const t = Math.max(0, Math.min(1, (y - minY) / rangeY));
+                            
+                            const hue = 0.75 * (1 - t);
+                            tempColor.setHSL(hue, 1.0, 0.5);
+                            
+                            colAttr.setXYZ(i, tempColor.r, tempColor.g, tempColor.b);
+                        }
+                        colAttr.needsUpdate = true;
+                        
+                        if (child.material) {
+                            child.material.vertexColors = true;
+                            child.material.color.setHex(0xffffff); 
+                            child.material.needsUpdate = true;
+                        }
+                    }
+                });
+            }
+
             scene.add(group);
+            
+            // Re-hydrate Base64 kembali menjadi File Object beserta Metadata GCP untuk keperluan UI Tab File
+            let restoredTextureMeta = null;
+            if (lData.textureMeta && lData.textureBase64) {
+                const restoredFile = base64ToFile(lData.textureBase64, lData.textureMeta.name);
+                restoredTextureMeta = {
+                    name: lData.textureMeta.name,
+                    size: lData.textureMeta.size,
+                    width: lData.textureMeta.width,
+                    height: lData.textureMeta.height,
+                    file: restoredFile,
+                    gcpPoints: lData.textureMeta.gcpPoints || null,
+                    transform: lData.textureMeta.transform || null
+                };
+            }
             
             if (typeof appLayers !== 'undefined') {
                 appLayers.push({
                     id: lData.id, name: lData.name, visible: lData.visible,
                     threeObject: group, colorHex: lData.colorHex, defaultColorHex: lData.defaultColorHex,
                     type: 'dxf', hasFaces: lData.hasFaces, opacity: lData.opacity,
-                    clippingEnabled: lData.clippingEnabled || false
+                    
+                    // Restore Properties Lanjutan DXF
+                    clippingEnabled: lData.clippingEnabled || false,
+                    colorMode: lData.colorMode || 'Default',
+                    visualColor: lData.visualColor || lData.colorHex,
+                    clipFootprints: lData.clipFootprints || 'Pit Data',
+                    dxfType: lData.dxfType || (lData.hasFaces ? 'Polymesh' : 'Polyline'),
+                    fileSize: lData.fileSize || 0,
+                    lastModified: lData.lastModified || '-',
+                    textureMeta: restoredTextureMeta
                 });
             }
 
+            // --- RESTORE DB META UNTUK BADGES ---
+            if (typeof RizpecDB !== 'undefined') {
+                const safeName = lData.name.replace(/\s+/g, '_');
+                const metaDB = lData.metaDB || { dxfType: lData.dxfType || (lData.hasFaces ? 'Polymesh' : 'Polyline') };
+                await RizpecDB.set(`rizpec_dxf_entity_${safeName}_meta`, metaDB).catch(()=>{});
+            }
+
+            // --- RESTORE FOLDER UI ---
             if (typeof window.restoreDxfFolderUI === 'function') {
                 window.restoreDxfFolderUI(lData.name);
             }
-        });
+        }
     }
 
     if (imagePromises.length > 0) {
@@ -1190,5 +1404,20 @@ async function processLoadedData(data, fileName) {
                 }
             });
         }
+        
+        // Re-Apply Footprint Clipping Shader khusus untuk layer DXF yang kondisinya aktif
+        if (typeof window.executeDxfFootprintClipping === 'function' && typeof appLayers !== 'undefined') {
+            appLayers.forEach(layer => {
+                if (layer.type === 'dxf' && layer.clippingEnabled && layer.hasFaces) {
+                    window.executeDxfFootprintClipping(layer);
+                }
+            });
+        }
+
+        // Segarkan List dan Panel Summary DXF setelah Open File 
+        if (typeof window.updateDxfListUI === 'function') window.updateDxfListUI();
+        if (typeof window.updateGeometryDxfListUI === 'function') window.updateGeometryDxfListUI();
+        if (typeof aggregateAllDxfData === 'function') aggregateAllDxfData();
+        
     }, 350);
 }

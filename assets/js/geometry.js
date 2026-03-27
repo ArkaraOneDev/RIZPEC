@@ -92,6 +92,12 @@ window.unloadGeometry = function(entityId, type) {
         
         keysToDelete.forEach(k => delete meshes[k]);
 
+        // --- [UPDATE]: TRIGGER AUTO-RELOAD DXF CLIPPING ---
+        // Jika data pit/disposal dihapus dari memori layar, kalkulasi ulang pemotongan topografi
+        if (typeof window.refreshAllDxfClipping === 'function') {
+            window.refreshAllDxfClipping();
+        }
+
         // [UPDATE]: PENTING! Hapus logika reset worldOrigin di sini. 
         // Origin tidak boleh direset saat di-uncheck. Hanya boleh reset saat "New Project".
     }
@@ -611,6 +617,12 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         }
 
                         window.recalculateGlobalSums();
+
+                        // --- [UPDATE]: TRIGGER AUTO-RELOAD DXF CLIPPING ---
+                        // Memastikan jika DXF sedang di-masking, dia akan menghitung ulang ukurannya terhadap geometri Pit baru ini
+                        if (typeof window.refreshAllDxfClipping === 'function') {
+                            window.refreshAllDxfClipping();
+                        }
 
                         if (typeof appLayers !== 'undefined') {
                             const existingLayer = appLayers.find(l => l.id === 'layer_pit_reserve');
