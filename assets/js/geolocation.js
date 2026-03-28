@@ -177,17 +177,22 @@ window.AppGeolocation = {
     handleOrientation: function(event) {
         if (!window.AppGeolocation.isTracking || !window.AppGeolocation.headingCone) return;
         
-        // Pengecekan Desktop vs Mobile:
-        // Jika event alpha null (Desktop), jangan ubah rotasi agar marker menunjuk lurus ke atas layar (-Z).
-        if (event.webkitCompassHeading != null || event.alpha != null) {
-            let heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
-            
+        let heading = null;
+
+        // Validasi ketat untuk menghindari nilai null yang membuat angle menjadi 360 (terkunci ke Utara)
+        if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
+            heading = event.webkitCompassHeading;
+        } else if (event.alpha !== null) {
+            heading = Math.abs(event.alpha - 360);
+        }
+
+        if (heading !== null) {
             // --- PERBAIKAN: Kompensasi Orientasi Layar (Portrait/Landscape) ---
             let screenOrientation = 0;
             if (screen.orientation && screen.orientation.angle !== undefined) {
                 screenOrientation = screen.orientation.angle;
             } else if (window.orientation !== undefined) {
-                screenOrientation = window.orientation; // Fallback untuk iOS Safari lawas
+                screenOrientation = window.orientation; // Fallback untuk iPad/iOS lawas
             }
             
             // Tambahkan sudut orientasi layar ke heading aktual perangkat
@@ -225,7 +230,7 @@ window.AppGeolocation = {
         // START TRACKING
         this.isTracking = true;
         this.markerGroup.visible = true;
-        // Default hadap lurus ke depan (layar atas) jika digunakan di desktop
+        // Default hadap lurus ke depan (layar atas) jika digunakan di desktop/tanpa sensor
         this.markerGroup.rotation.y = 0;
 
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -280,7 +285,9 @@ window.AppGeolocation = {
                 // Animasi pergerakan marker (Offset +6 meter dari ground agar dasar bola tidak tenggelam)
                 this.markerGroup.position.set(localCoords.x, elevY + 6, localCoords.y);
 
-                if (typeof renderer !== 'undefined') renderer.render(scene, camera);
+                // PERBAIKAN: Pemanggilan renderer.render() secara sinkron dari sini DIHAPUS 
+                // untuk mencegah konflik memori GPU (WebGL Context Lost) ketika render DXF.
+                // Main.js secara otomatis akan me-render pergerakan marker ini di frame berikutnya.
             },
             (error) => {
                 console.error("Geolocation Error:", error.message);
