@@ -149,7 +149,7 @@ function processDXF(dxfText, fileName) {
             
             const mesh = new THREE.Mesh(geo, mat);
             mesh.userData.originalColor = finalColor;
-            mesh.userData.originalMaterial = mat; // Simpan material dasar untuk rujukan masking
+            mesh.userData.originalMaterial = mat; 
             group.add(mesh);
         }
     });
@@ -242,6 +242,9 @@ window.activeDxfId = null;
 window._lastSelectedDxfFolderName = null; 
 window.dxfTempState = null;
 
+// GLOBAL CACHE UNTUK RENDERER 2D PREVIEW (Mencegah Context Lost & Memory Leak)
+window._dxfPreviewSystem = null;
+
 window.getDxfFolderBadgeHTML = function(name, rootName) {
     if (rootName === 'DXF Data') {
         const safeId = name.replace(/\s+/g, '_');
@@ -297,9 +300,10 @@ window.render2DDxfPreview = function(layers) {
     const container = document.getElementById('dxf-preview-3d-canvas');
     if (!container) return;
     
-    container.innerHTML = '';
-
     if (!layers || layers.length === 0) {
+        if (window._dxfPreviewSystem && window._dxfPreviewSystem.renderer.domElement.parentNode) {
+            container.removeChild(window._dxfPreviewSystem.renderer.domElement);
+        }
         container.innerHTML = `
             <div id="dxf-preview-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 opacity-70 pointer-events-none">
                 <i class="fa-solid fa-map text-4xl lg:text-3xl mb-3 lg:mb-2"></i>
@@ -310,20 +314,44 @@ window.render2DDxfPreview = function(layers) {
 
     const width = container.clientWidth;
     const height = container.clientHeight;
-    
     if (width === 0 || height === 0) return;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    // INISIALISASI SISTEM PREVIEW HANYA 1 KALI (PERBAIKAN CONTEXT LOST)
+    if (!window._dxfPreviewSystem) {
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setClearColor(0x0f172a, 1);
+        renderer.domElement.style.position = 'absolute';
+        renderer.domElement.style.top = '0';
+        renderer.domElement.style.left = '0';
+        
+        const scene = new THREE.Scene();
+        const previewGroup = new THREE.Group();
+        scene.add(previewGroup);
+        
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+        camera.up.set(0, 0, -1); 
+        
+        const ambient = new THREE.AmbientLight(0xffffff, 0.85);
+        scene.add(ambient);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        scene.add(dirLight);
+        
+        window._dxfPreviewSystem = { renderer, scene, camera, previewGroup, dirLight };
+    }
+
+    const { renderer, scene, camera, previewGroup, dirLight } = window._dxfPreviewSystem;
+
+    // Bersihkan DOM dan masukkan renderer yang di-cache
+    container.innerHTML = '';
     renderer.setSize(width, height);
-    renderer.setClearColor(0x0f172a, 1);
-    renderer.domElement.style.position = 'absolute';
-    renderer.domElement.style.top = '0';
-    renderer.domElement.style.left = '0';
     container.appendChild(renderer.domElement);
 
-    const scene = new THREE.Scene();
-    const previewGroup = new THREE.Group();
+    // Hapus clone lama dari preview group
+    while(previewGroup.children.length > 0) {
+        previewGroup.remove(previewGroup.children[0]);
+    }
 
+    // Tambahkan clone baru
     layers.forEach(l => {
         if(l.threeObject) {
             const clone = l.threeObject.clone();
@@ -332,15 +360,11 @@ window.render2DDxfPreview = function(layers) {
         }
     });
 
-    scene.add(previewGroup);
-
     const box = new THREE.Box3().setFromObject(previewGroup);
     if(box.isEmpty()) return;
 
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    const center = new THREE.Vector3();
-    box.getCenter(center);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const center = new THREE.Vector3(); box.getCenter(center);
 
     const aspect = width / height;
     const maxDim = Math.max(size.x, size.z);
@@ -348,21 +372,18 @@ window.render2DDxfPreview = function(layers) {
     const frustumHeight = size.z > size.x / aspect ? size.z * 1.15 : (size.x / aspect) * 1.15;
     const frustumWidth = frustumHeight * aspect;
 
-    const camera = new THREE.OrthographicCamera(
-        -frustumWidth / 2, frustumWidth / 2,
-        frustumHeight / 2, -frustumHeight / 2,
-        -maxDim * 5, maxDim * 5
-    );
+    camera.left = -frustumWidth / 2;
+    camera.right = frustumWidth / 2;
+    camera.top = frustumHeight / 2;
+    camera.bottom = -frustumHeight / 2;
+    camera.near = -maxDim * 5;
+    camera.far = maxDim * 5;
 
     camera.position.set(center.x, box.max.y + maxDim, center.z);
     camera.lookAt(center.x, center.y, center.z);
-    camera.up.set(0, 0, -1); 
+    camera.updateProjectionMatrix();
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.85);
-    scene.add(ambient);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
     dirLight.position.set(center.x, box.max.y + maxDim, center.z);
-    scene.add(dirLight);
 
     renderer.render(scene, camera);
     
@@ -372,9 +393,11 @@ window.render2DDxfPreview = function(layers) {
         const newH = container.clientHeight;
         if(newW === 0 || newH === 0) return;
         renderer.setSize(newW, newH);
+        
         const newAspect = newW / newH;
         const newFrustumHeight = size.z > size.x / newAspect ? size.z * 1.15 : (size.x / newAspect) * 1.15;
         const newFrustumWidth = newFrustumHeight * newAspect;
+        
         camera.left = -newFrustumWidth / 2;
         camera.right = newFrustumWidth / 2;
         camera.top = newFrustumHeight / 2;
@@ -458,6 +481,24 @@ window.updateDxfListUI = function() {
                 if (layer.threeObject) layer.threeObject.visible = layer.visible;
                 window.updateDxfListUI();
                 if (typeof updateLayerUI === 'function') updateLayerUI();
+
+                // =========================================================================
+                // GEOLOCATION VALIDATION: MATIKAN TRACKING JIKA SEMUA 3D MODEL KOSONG/HIDDEN
+                // =========================================================================
+                if (!layer.visible && typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
+                    const geoCheck = window.AppGeolocation.checkActiveBounds();
+                    if (!geoCheck.hasData) {
+                        console.warn("Semua data 3D telah dihapus/disembunyikan. Mematikan fitur Geolocation otomatis.");
+                        window.AppGeolocation.toggleTracking(); 
+                        const btnTrack = document.getElementById('btn-start-tracking');
+                        if (btnTrack) {
+                            btnTrack.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Start Tracking';
+                            btnTrack.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+                            btnTrack.classList.add('bg-blue-600', 'hover:bg-blue-500');
+                        }
+                    }
+                }
+                // =========================================================================
             });
             
             listEl.appendChild(div);
@@ -556,15 +597,28 @@ window.onDxfFolderDeleted = async function(name, rootName) {
             const index = appLayers.findIndex(l => l.name === name && l.type === 'dxf');
             if (index !== -1) {
                 const layer = appLayers[index];
-                if (layer.maskRenderTarget) { // Cleanup Texture Mask Memory
-                    layer.maskRenderTarget.dispose();
+                
+                // PERBAIKAN MEMORY LEAK: Hapus dari Memori GPU sepenuhnya!
+                if (layer.maskRenderTarget) layer.maskRenderTarget.dispose();
+                if (layer.clipInterval) clearInterval(layer.clipInterval);
+                
+                if (layer.threeObject) {
+                    layer.threeObject.traverse((child) => {
+                        if (child.isMesh || child.isLineSegments) {
+                            if (child.geometry) child.geometry.dispose();
+                            if (child.material) {
+                                if (Array.isArray(child.material)) {
+                                    child.material.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+                                } else {
+                                    if (child.material.map) child.material.map.dispose();
+                                    child.material.dispose();
+                                }
+                            }
+                        }
+                    });
+                    if (typeof scene !== 'undefined') scene.remove(layer.threeObject);
                 }
-                if (layer.clipInterval) { // Cleanup Realtime Updater Loop
-                    clearInterval(layer.clipInterval);
-                }
-                if (layer.threeObject && typeof scene !== 'undefined') {
-                    scene.remove(layer.threeObject);
-                }
+                
                 appLayers.splice(index, 1);
                 if (typeof updateLayerUI === 'function') updateLayerUI();
             }
@@ -587,6 +641,24 @@ window.onDxfFolderDeleted = async function(name, rootName) {
             window.updateDxfListUI();
             aggregateAllDxfData();
         }
+
+        // =========================================================================
+        // GEOLOCATION VALIDATION: MATIKAN TRACKING JIKA SEMUA 3D MODEL KOSONG/HIDDEN
+        // =========================================================================
+        if (typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
+            const geoCheck = window.AppGeolocation.checkActiveBounds();
+            if (!geoCheck.hasData) {
+                console.warn("Semua data 3D telah dihapus/disembunyikan. Mematikan fitur Geolocation otomatis.");
+                window.AppGeolocation.toggleTracking(); 
+                const btnTrack = document.getElementById('btn-start-tracking');
+                if (btnTrack) {
+                    btnTrack.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Start Tracking';
+                    btnTrack.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+                    btnTrack.classList.add('bg-blue-600', 'hover:bg-blue-500');
+                }
+            }
+        }
+        // =========================================================================
     }
 };
 
@@ -844,13 +916,11 @@ function renderDxfPreview(singleLayer, allLayers = []) {
 window.executeDxfFootprintClipping = function(layer) {
     if (!layer.threeObject) return;
 
-    // Bersihkan Interval Update Realtime Lama (jika di-apply berulang)
     if (layer.clipInterval) {
         clearInterval(layer.clipInterval);
         layer.clipInterval = null;
     }
 
-    // Reset ke kondisi awal material jika sebelumnya di-clip
     layer.threeObject.traverse((child) => {
         if (!child.isMesh) return;
 
@@ -868,8 +938,6 @@ window.executeDxfFootprintClipping = function(layer) {
 
     if (!layer.clippingEnabled) return;
 
-    // 1. Kumpulkan SELURUH target meshes yang berpotensi menjadi acuan (Tanpa peduli tampil/tidak saat ini)
-    // Tujuannya agar kita bisa mengunci batas luas Mask (Bounding Box) secara fix untuk Shader Math.
     let allTargetMeshes = [];
     if (typeof meshes !== 'undefined') {
         Object.values(meshes).forEach(m => {
@@ -888,7 +956,6 @@ window.executeDxfFootprintClipping = function(layer) {
         return;
     }
 
-    // 2. Setup 2D Bounding Box FIX agar ukuran Shader Box (Mapping) stabil walau visibility berubah
     const targetBox2D = new THREE.Box3();
     allTargetMeshes.forEach(m => {
         if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
@@ -914,10 +981,9 @@ window.executeDxfFootprintClipping = function(layer) {
     cam.lookAt(cx, 0, cz);
     cam.updateProjectionMatrix();
 
-    // 3. Persiapkan Scene Masking & RenderTarget (TIdak dirender disini, tapi di dalam updater realtime)
     const maskScene = new THREE.Scene();
-    maskScene.background = new THREE.Color(0x000000); // Luar area pit = Hitam (0.0)
-    const maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }); // Dalam pit = Putih (1.0)
+    maskScene.background = new THREE.Color(0x000000); 
+    const maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }); 
 
     if (layer.maskRenderTarget) {
         layer.maskRenderTarget.dispose(); 
@@ -932,7 +998,6 @@ window.executeDxfFootprintClipping = function(layer) {
     });
     layer.maskRenderTarget = rt;
 
-    // 4. Injeksi Shader Discard Pixel ke dalam Material DXF
     layer.threeObject.traverse((child) => {
         if (!child.isMesh) return;
 
@@ -967,15 +1032,11 @@ window.executeDxfFootprintClipping = function(layer) {
                 `#include <dithering_fragment>`,
                 `#include <dithering_fragment>
 
-                // Mapping kordinat Dunia ke 0.0 - 1.0 (UV Texture Mask)
                 float u = (vMaskWorldPos.x - maskBounds.x) / maskBounds.y;
                 float v = (vMaskWorldPos.z - maskBounds.z) / maskBounds.w;
 
-                // Pastikan fragment berada dalam range masking Box2D
                 if (u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0) {
                     float maskVal = texture2D(maskTexture, vec2(u, v)).r;
-                    
-                    // Cek Warna Pixel, Jika putih (ada pit) maka Discard!
                     if (maskVal > 0.05) {
                         discard;
                     }
@@ -987,19 +1048,16 @@ window.executeDxfFootprintClipping = function(layer) {
         child.material = newMat;
     });
 
-    // 5. Fungsi Update Realtime (Akan mengupdate RenderTarget HANYA ketika visibilitas Pit berubah)
     layer.lastMaskHash = "";
 
     layer.updateClippingMask = function() {
         let hash = "";
         let currentVisibleMeshes = [];
 
-        // Cek target mana saja yang Parent-nya aktif di scene (Abaikan status hide individual block hasil Record)
         allTargetMeshes.forEach(m => {
             let isParentVisible = true;
-            let obj = m.parent; // MULAI CEK DARI PARENT. Abaikan m.visible milik block itu sendiri.
+            let obj = m.parent; 
             
-            // Traverse ke atas untuk memastikan layer induknya (Folder UI) tidak di-hide
             while(obj) {
                 if (obj.visible === false) {
                     isParentVisible = false;
@@ -1014,26 +1072,22 @@ window.executeDxfFootprintClipping = function(layer) {
             }
         });
 
-        // Jika kombinasi mesh yang aktif masih sama seperti iterasi sebelumnya, batalkan update (Hemat Performa)
         if (hash === layer.lastMaskHash) return;
         layer.lastMaskHash = hash;
 
-        // Bersihkan objek masker dari tangkapan rendering sebelumnya
         while(maskScene.children.length > 0){ 
             maskScene.remove(maskScene.children[0]); 
         }
 
-        // Tambahkan geometri acuan clipping terbaru ke dalam frame RenderTarget
         currentVisibleMeshes.forEach(m => {
             const clone = m.clone();
             clone.material = maskMat;
             clone.matrixAutoUpdate = false;
             clone.matrix.copy(m.matrixWorld); 
-            clone.visible = true; // PAKSA TAMPIL di dalam dunia Masking, walaupun di dunia asli di-hide karena Record!
+            clone.visible = true; 
             maskScene.add(clone);
         });
 
-        // Tembak Orthographic Kamera untuk mengupdate Mask Texture!
         const oldRT = renderer.getRenderTarget();
         const oldClearColor = renderer.getClearColor(new THREE.Color());
         const oldClearAlpha = renderer.getClearAlpha();
@@ -1047,32 +1101,23 @@ window.executeDxfFootprintClipping = function(layer) {
         renderer.setClearColor(oldClearColor, oldClearAlpha);
     };
 
-    // Eksekusi pemotongan perdana saat fungsi ini dipanggil
     layer.updateClippingMask();
 
-    // Jadwalkan pengecekan pembaruan visibilitas pit secara rutin (Interval Loop Ringan)
     layer.clipInterval = setInterval(() => {
         if (layer && layer.threeObject && layer.clippingEnabled) {
             layer.updateClippingMask();
         } else {
             clearInterval(layer.clipInterval);
         }
-    }, 300); // 300ms delay dirasa paling pas antara real-time & penghematan resources
+    }, 300); 
 };
 
-// ==========================================
-// [UPDATE]: AUTO-REFRESH CLIPPING GLOBAL
-// Dipanggil oleh geometry.js saat Pit/Disposal baru dibuild atau dihapus
-// ==========================================
 window.refreshAllDxfClipping = function() {
     if (typeof appLayers === 'undefined') return;
     
-    // Cari semua layer DXF yang memang sedang mengaktifkan fitur Clipping
     const activeClippingLayers = appLayers.filter(l => l.type === 'dxf' && l.hasFaces && l.clippingEnabled);
     
     activeClippingLayers.forEach(layer => {
-        // 1. Reset material ke kondisi original (warna murni atau tekstur)
-        // PENTING: Mencegah 'double-injection' shader pada material yang sama
         if (layer.threeObject) {
             layer.threeObject.traverse((child) => {
                 if (child.isMesh && child.userData) {
@@ -1085,8 +1130,6 @@ window.refreshAllDxfClipping = function() {
                 }
             });
         }
-        
-        // 2. Eksekusi ulang kalkulasi Bounding Box dan Apply Shader Masking
         window.executeDxfFootprintClipping(layer);
     });
 };
@@ -1154,7 +1197,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- GCP MODAL TRIGGER (Texture Input Change) ---
     if (texInput) {
         texInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0 && window.activeDxfId && window.dxfTempState) {
@@ -1200,7 +1242,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- APPLY BUTTON LOGIC ---
     if (applyBtn) {
         applyBtn.addEventListener('click', () => {
             if (!window.activeDxfId || !window.dxfTempState) return;
@@ -1243,9 +1284,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.dxfTempState.textureChanged = false;
                 }
 
-                // Fungsi Pengeksekusi Masking & Pewarnaan
                 const processChanges = () => {
-                    // Helper untuk update vertex color di Array atau Material Tunggal (Mendukung shader mod)
                     const setMatColors = (mesh, state, defaultHex) => {
                         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
                         mats.forEach(m => {
@@ -1259,12 +1298,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                     };
 
-                    // 1. Eksekusi Pewarnaan Visual & Reset Material TERLEBIH DAHULU
                     if (layer.threeObject) {
                         if (layer.colorMode === 'Default') {
                             layer.threeObject.traverse((child) => {
                                 if (child.material) {
-                                    if(child.isMesh) child.material = child.userData.originalMaterial; // revert to original, no texture
+                                    if(child.isMesh) child.material = child.userData.originalMaterial; 
                                     setMatColors(child, false, child.userData.originalColor);
                                 }
                             });
@@ -1272,7 +1310,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const colorHex = parseInt(layer.visualColor.replace('#', '0x'), 16);
                             layer.threeObject.traverse((child) => {
                                 if ((child.isMesh || child.isLineSegments) && child.material) {
-                                    if(child.isMesh) child.material = child.userData.originalMaterial; // Lepas tekstur jika mode pallete
+                                    if(child.isMesh) child.material = child.userData.originalMaterial; 
                                     setMatColors(child, false, colorHex);
                                 }
                             });
@@ -1303,8 +1341,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                     }
                                     colAttr.needsUpdate = true;
                                     
-                                    if(child.isMesh) child.material = child.userData.originalMaterial; // Lepas tekstur
-                                    setMatColors(child, true, 0xffffff); // Set putih untuk meneruskan pure vertex colors
+                                    if(child.isMesh) child.material = child.userData.originalMaterial; 
+                                    setMatColors(child, true, 0xffffff); 
                                 }
                             });
                         } else if (layer.colorMode === 'Texture') {
@@ -1313,13 +1351,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                     let matToUse = layer.textureMeta && child.userData.originalMaterialTex ? child.userData.originalMaterialTex : child.userData.originalMaterial;
                                     if(child.isMesh) child.material = matToUse;
                                     setMatColors(child, false, child.userData.originalColor);
-                                    if(matToUse.map && child.isMesh) matToUse.color.setHex(0xffffff); // Override to white for texture
+                                    if(matToUse.map && child.isMesh) matToUse.color.setHex(0xffffff); 
                                 }
                             });
                         }
                     }
 
-                    // 2. Eksekusi Shader Masking (Clipping) SETELAH pewarnaan
                     if (layer.hasFaces) {
                         window.executeDxfFootprintClipping(layer);
                     }
@@ -1330,7 +1367,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (typeof hideFullscreenLoading === 'function') hideFullscreenLoading();
                 };
 
-                // Berikan jeda untuk loading screen jika komputasinya berpotensi berat
                 if (layer.hasFaces && typeof showFullscreenLoading === 'function') {
                     showFullscreenLoading("Menerapkan Shader Masking & Perubahan...");
                     setTimeout(processChanges, 100);
@@ -1347,9 +1383,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 1500);
 
-    // =========================================
-    // GCP MODAL BUTTON EVENTS
-    // =========================================
     const addGcpBtn = document.getElementById('btn-add-gcp');
     const saveGcpBtn = document.getElementById('btn-save-gcp');
     const applyTexBtn = document.getElementById('btn-apply-texture');
@@ -1391,7 +1424,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 sxu += x*u; szu += z*u; sxv += x*v; szv += z*v;
             });
             
-            // Affine Transform Least Square Matrix
             const A = [[sxx, sxz, sx], [sxz, szz, sz], [sx, sz, N]];
             const invA = window.invert3x3(A);
             
@@ -1414,7 +1446,6 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const layer = window.gcpState.layer;
             
-            // Generate UV Mapping for Each Faces di Polymesh Terkait
             layer.threeObject.traverse(child => {
                 if(child.isMesh) {
                     const pos = child.geometry.attributes.position;
@@ -1431,7 +1462,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            // Simpan State Tekstur ke Memori Window
             window.dxfTempState.pendingTextureMeta = {
                 name: window.gcpState.file.name,
                 size: window.gcpState.file.size,
@@ -1443,7 +1473,6 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             window.dxfTempState.textureChanged = true;
 
-            // Load Tekstur Langsung di Memori
             const texLoader = new THREE.TextureLoader();
             texLoader.load(URL.createObjectURL(window.gcpState.file), (texture) => {
                 texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -1456,15 +1485,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             child.userData.originalMaterialTex = child.userData.originalMaterial.clone();
                         }
                         child.userData.originalMaterialTex.map = texture;
-                        child.userData.originalMaterialTex.color.setHex(0xffffff); // Hapus base color bawaan
+                        child.userData.originalMaterialTex.color.setHex(0xffffff); 
                         child.userData.originalMaterialTex.needsUpdate = true;
                         
-                        // LANGSUNG TERAPKAN KE MATERIAL AKTIF
                         child.material = child.userData.originalMaterialTex;
                     }
                 });
 
-                // Eksekusi Pemasangan (Auto Apply) di panel UI sidebar
                 const applySidebarBtn = document.getElementById('dxf-btn-apply');
                 if (applySidebarBtn) {
                     applySidebarBtn.disabled = false;
@@ -1472,7 +1499,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             
-            // Update UI Sidebar Input
             const texName = document.getElementById('dxf-texture-filename');
             const texClear = document.getElementById('dxf-clear-texture');
             if(texName) texName.textContent = window.gcpState.file.name;
@@ -1488,12 +1514,11 @@ document.addEventListener('DOMContentLoaded', () => {
 // GCP HELPER & LOGIC FUNCTIONS
 // ==========================================
 
-// Inverse Matrix 3x3 untuk perhitungan Least Square UV Transformation
 window.invert3x3 = function(m) {
     let det = m[0][0]*(m[1][1]*m[2][2] - m[2][1]*m[1][2]) -
               m[0][1]*(m[1][0]*m[2][2] - m[1][2]*m[2][0]) +
               m[0][2]*(m[1][0]*m[2][1] - m[1][1]*m[2][0]);
-    if (Math.abs(det) < 1e-8) return null; // Jika matrix tidak bisa di inverts
+    if (Math.abs(det) < 1e-8) return null; 
     return [
         [(m[1][1]*m[2][2] - m[2][1]*m[1][2])/det, (m[0][2]*m[2][1] - m[0][1]*m[2][2])/det, (m[0][1]*m[1][2] - m[0][2]*m[1][1])/det],
         [(m[1][2]*m[2][0] - m[1][0]*m[2][2])/det, (m[0][0]*m[2][2] - m[0][2]*m[2][0])/det, (m[1][0]*m[0][2] - m[0][0]*m[1][2])/det],
@@ -1501,11 +1526,9 @@ window.invert3x3 = function(m) {
     ];
 };
 
-// --- Fungsi Render Marker 3D Identik dengan Panel Kiri ---
 window.renderRightCanvasMarkers = function() {
     if(!window.gcpState || !window.gcpState.markersGroup) return;
     
-    // Hapus Marker Lama sebelum merender ulang
     while(window.gcpState.markersGroup.children.length > 0) {
         const child = window.gcpState.markersGroup.children[0];
         window.gcpState.markersGroup.remove(child);
@@ -1523,7 +1546,6 @@ window.renderRightCanvasMarkers = function() {
 
         ctx.imageSmoothingEnabled = false;
 
-        // Render bentuk Silang/Cross sama persis
         ctx.strokeStyle = colorStr;
         ctx.lineWidth = 6;
         ctx.beginPath();
@@ -1531,7 +1553,6 @@ window.renderRightCanvasMarkers = function() {
         ctx.moveTo(cx, cy - 24); ctx.lineTo(cx, cy + 24);
         ctx.stroke();
 
-        // Render Text Label sama persis
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 32px sans-serif';
         ctx.shadowColor = 'rgba(0,0,0,0.9)';
@@ -1542,23 +1563,20 @@ window.renderRightCanvasMarkers = function() {
         const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
         const sprite = new THREE.Sprite(mat);
         
-        // Setup initial scale, nantinya akan dinamis menyesuaikan Zoom via animate()
         sprite.scale.set(window.gcpState.maxDim * 0.05, window.gcpState.maxDim * 0.05, 1);
-        sprite.position.set(x, window.gcpState.camera.position.y - 10, z); // Agar tidak bertabrakan dengan scene
+        sprite.position.set(x, window.gcpState.camera.position.y - 10, z); 
         sprite.renderOrder = 999;
         sprite.userData.isMarker = true;
 
         window.gcpState.markersGroup.add(sprite);
     };
 
-    // Render ulang semua poin tersimpan (Hijau)
     window.gcpState.points.forEach((pt, i) => {
         if(pt.worldX !== undefined && pt.worldZ !== undefined) {
             create3DMarker(i + 1, '#10b981', pt.worldX, pt.worldZ); 
         }
     });
 
-    // Render ulang poin yang baru saja di klik namun belum disave (Merah)
     if (window.gcpState.currentPair.worldX !== undefined && window.gcpState.currentPair.worldZ !== undefined) {
         create3DMarker(window.gcpState.points.length + 1, '#ef4444', window.gcpState.currentPair.worldX, window.gcpState.currentPair.worldZ); 
     }
@@ -1578,22 +1596,17 @@ window.initGcpModal = function(img, file, layerTarget) {
         mouse: new THREE.Vector2()
     };
     
-    // ==========================================
-    // SETUP LEFT CANVAS (IMAGE 2D)
-    // ==========================================
     const leftCanvas = document.getElementById('gcp-left-canvas');
     const leftWrapper = document.getElementById('gcp-left-wrapper');
     leftCanvas.width = leftWrapper.clientWidth;
     leftCanvas.height = leftWrapper.clientHeight;
     
-    // Fit to viewport
     window.gcpState.scale = Math.min(leftCanvas.width / img.width, leftCanvas.height / img.height) * 0.90;
     window.gcpState.dx = (leftCanvas.width - img.width * window.gcpState.scale) / 2;
     window.gcpState.dy = (leftCanvas.height - img.height * window.gcpState.scale) / 2;
     
     window.renderLeftCanvas();
 
-    // INTERAKSI LEFT CANVAS (Pan, Zoom, Klik Add GCP)
     leftCanvas.onwheel = (e) => {
         e.preventDefault();
         const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
@@ -1601,7 +1614,6 @@ window.initGcpModal = function(img, file, layerTarget) {
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
-        // Zoom mengarah ke posisi pointer mouse
         window.gcpState.dx = mouseX - (mouseX - window.gcpState.dx) * zoomFactor;
         window.gcpState.dy = mouseY - (mouseY - window.gcpState.dy) * zoomFactor;
         window.gcpState.scale *= zoomFactor;
@@ -1621,7 +1633,7 @@ window.initGcpModal = function(img, file, layerTarget) {
         const dx = e.clientX - window.gcpState.lastXLeft;
         const dy = e.clientY - window.gcpState.lastYLeft;
         
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) window.gcpState.dragMovedLeft = true; // Status memastikan ini drag bukan klik
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) window.gcpState.dragMovedLeft = true; 
         
         window.gcpState.dx += dx;
         window.gcpState.dy += dy;
@@ -1634,34 +1646,27 @@ window.initGcpModal = function(img, file, layerTarget) {
         window.gcpState.isDraggingLeft = false;
         leftCanvas.releasePointerCapture(e.pointerId);
 
-        // Jika itu adalah "Drag Pan", abaikan eksekusi pencarian titik GCP
         if (window.gcpState.dragMovedLeft) return; 
 
-        // Jika sedang mode mencari titik di Panel Kiri
         if (window.gcpState.mode !== 'left') return;
 
-        // Gunakan e.offsetX dan e.offsetY agar lebih presisi di dalam Container Canvas
         const cx = e.offsetX;
         const cy = e.offsetY;
         
         let imgX = (cx - window.gcpState.dx) / window.gcpState.scale;
         let imgY = (cy - window.gcpState.dy) / window.gcpState.scale;
 
-        // ----------------------------------------------------
-        // MAGNETIC EFFECT / SNAP KE SISI GAMBAR
-        // ----------------------------------------------------
-        const snapThreshold = 30 / window.gcpState.scale; // Magnetic di radius 30 pixel layar visual
+        const snapThreshold = 30 / window.gcpState.scale; 
         
-        if (imgX > -snapThreshold && imgX < snapThreshold) imgX = 0; // Snap kiri
-        if (imgX > window.gcpState.img.width - snapThreshold && imgX < window.gcpState.img.width + snapThreshold) imgX = window.gcpState.img.width; // Snap kanan
-        if (imgY > -snapThreshold && imgY < snapThreshold) imgY = 0; // Snap atas
-        if (imgY > window.gcpState.img.height - snapThreshold && imgY < window.gcpState.img.height + snapThreshold) imgY = window.gcpState.img.height; // Snap bawah
+        if (imgX > -snapThreshold && imgX < snapThreshold) imgX = 0; 
+        if (imgX > window.gcpState.img.width - snapThreshold && imgX < window.gcpState.img.width + snapThreshold) imgX = window.gcpState.img.width; 
+        if (imgY > -snapThreshold && imgY < snapThreshold) imgY = 0; 
+        if (imgY > window.gcpState.img.height - snapThreshold && imgY < window.gcpState.img.height + snapThreshold) imgY = window.gcpState.img.height; 
 
-        // Pastikan tidak klik terlalu jauh di luar gambar kosong (luar toleransi snap)
         if (imgX < 0 || imgX > window.gcpState.img.width || imgY < 0 || imgY > window.gcpState.img.height) return;
         
         const u = imgX / window.gcpState.img.width;
-        const v = 1.0 - (imgY / window.gcpState.img.height); // V di WebGL dibalik (Bottom to Top)
+        const v = 1.0 - (imgY / window.gcpState.img.height); 
         
         window.gcpState.currentPair.u = u;
         window.gcpState.currentPair.v = v;
@@ -1673,37 +1678,30 @@ window.initGcpModal = function(img, file, layerTarget) {
         window.updateGcpUI();
     };
     
-    // ==========================================
-    // SETUP RIGHT CANVAS (THREE.JS TOP VIEW - ALL DXF)
-    // ==========================================
     const rightContainer = document.getElementById('gcp-right-3d');
     rightContainer.innerHTML = '';
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // Aktifkan transparansi background
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); 
     renderer.setSize(rightContainer.clientWidth, rightContainer.clientHeight);
-    renderer.setClearColor(0x0f172a, 1); // background warna slate-900 pekat
+    renderer.setClearColor(0x0f172a, 1); 
     rightContainer.appendChild(renderer.domElement);
     window.gcpState.renderer = renderer;
     
     const scene = new THREE.Scene();
     window.gcpState.scene = scene;
 
-    // Persiapkan Group untuk menampung Sprite Marker 3D
     window.gcpState.markersGroup = new THREE.Group();
     scene.add(window.gcpState.markersGroup);
 
-    // Tambahkan pencahayaan agar material terlihat
     const ambient = new THREE.AmbientLight(0xffffff, 0.85);
     scene.add(ambient);
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
     scene.add(dirLight);
     
-    // Kumpulkan semua Layer DXF yang sedang terlihat (Sama persis dengan DXF Summary View)
     const visibleDxfs = typeof appLayers !== 'undefined' ? appLayers.filter(l => l.type === 'dxf' && l.visible) : [];
     const previewGroup = new THREE.Group();
     
     visibleDxfs.forEach(l => {
         if(l.threeObject) {
-            // Cukup Di Clone Sama Persis Seperti Preview Root Folder, Tanpa Override Jaring Material
             const clone = l.threeObject.clone();
             clone.visible = true;
             previewGroup.add(clone);
@@ -1712,10 +1710,9 @@ window.initGcpModal = function(img, file, layerTarget) {
 
     scene.add(previewGroup);
     
-    // Autofit Camera Orthographic ke Seluruh Batas DXF Terkait
     const box = new THREE.Box3().setFromObject(previewGroup);
     if (box.isEmpty()) { 
-        box.setFromCenterAndSize(new THREE.Vector3(0,0,0), new THREE.Vector3(100,100,100)); // Fallback jika tidak ada geometri
+        box.setFromCenterAndSize(new THREE.Vector3(0,0,0), new THREE.Vector3(100,100,100)); 
     }
 
     const size = new THREE.Vector3(); box.getSize(size);
@@ -1724,7 +1721,6 @@ window.initGcpModal = function(img, file, layerTarget) {
     const aspect = rightContainer.clientWidth / rightContainer.clientHeight;
     window.gcpState.maxDim = Math.max(size.x, size.z);
     
-    // Perbesar threshold raycast click agar lines DXF sangat mudah terklik tanpa bantuan material solid
     window.gcpState.raycaster.params.Line.threshold = window.gcpState.maxDim * 0.01; 
 
     const fH = window.gcpState.maxDim * 1.15;
@@ -1739,15 +1735,13 @@ window.initGcpModal = function(img, file, layerTarget) {
 
     dirLight.position.set(center.x, box.max.y + window.gcpState.maxDim, center.z);
     
-    // Orbit Controls khusus Pan (Left Click) & Zoom (Scroll) -> Mode Top View Mapping
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableRotate = false; // Matikan Rotasi, pastikan selalu lurus top-view
+    controls.enableRotate = false; 
     controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: null };
     controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
     controls.target.set(center.x, center.y, center.z);
     controls.update();
     
-    // INTERAKSI RIGHT CANVAS (Pan VS Click Raycast GCP)
     let isDraggingRight = false;
     let lastMouseRight = { x: 0, y: 0 };
 
@@ -1759,7 +1753,7 @@ window.initGcpModal = function(img, file, layerTarget) {
 
     renderer.domElement.addEventListener('pointermove', (e) => {
         if (Math.abs(e.clientX - lastMouseRight.x) > 3 || Math.abs(e.clientY - lastMouseRight.y) > 3) {
-            isDraggingRight = true; // Jika user menggeser (Pan), hindari trigger klik raycast
+            isDraggingRight = true; 
         }
     });
 
@@ -1767,12 +1761,10 @@ window.initGcpModal = function(img, file, layerTarget) {
         if (isDraggingRight) return; 
         if (!window.gcpState || window.gcpState.mode !== 'right') return;
 
-        // Hitung persentase murni dari container lokal (bukan full window)
         window.gcpState.mouse.x = (e.offsetX / rightContainer.clientWidth) * 2 - 1;
         window.gcpState.mouse.y = -(e.offsetY / rightContainer.clientHeight) * 2 + 1;
         
         window.gcpState.raycaster.setFromCamera(window.gcpState.mouse, window.gcpState.camera);
-        // Tembakan panah klik hanya pada Object Grup yg ditampilkan preview
         const intersects = window.gcpState.raycaster.intersectObject(previewGroup, true);
         
         if (intersects.length > 0) {
@@ -1780,7 +1772,6 @@ window.initGcpModal = function(img, file, layerTarget) {
             window.gcpState.currentPair.worldX = pt.x;
             window.gcpState.currentPair.worldZ = pt.z;
             
-            // Generate Marker Identik untuk 3D Scene
             window.renderRightCanvasMarkers();
             
             window.gcpState.mode = 'save';
@@ -1793,10 +1784,8 @@ window.initGcpModal = function(img, file, layerTarget) {
         window.gcpState.reqId = requestAnimationFrame(animate);
         controls.update();
         
-        // Jaga ukuran marker agar konstan (tetap pixel-perfect) saat kamera di-zoom (seperti UI 2D biasa)
         if (window.gcpState.markersGroup && window.gcpState.camera && window.gcpState.renderer) {
             const frustumWidth = window.gcpState.camera.right - window.gcpState.camera.left;
-            // 96 adalah ukuran base target representasi di layar (dalam pixel)
             const scale = frustumWidth * (96 / rightContainer.clientWidth); 
             window.gcpState.markersGroup.children.forEach(child => {
                 if (child.userData.isMarker) {
@@ -1818,13 +1807,10 @@ window.renderLeftCanvas = function() {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Matikan pemulusan gambar agar pixel detail mudah dipetakan
     ctx.imageSmoothingEnabled = false;
 
-    // Render Gambar
     ctx.drawImage(window.gcpState.img, window.gcpState.dx, window.gcpState.dy, window.gcpState.img.width * window.gcpState.scale, window.gcpState.img.height * window.gcpState.scale);
     
-    // Fungsi Pembantu Render Titik Plus (Cross/X Shape)
     const drawCross = (x, y, color, label) => {
         ctx.strokeStyle = color;
         ctx.lineWidth = 2.5;
@@ -1841,18 +1827,16 @@ window.renderLeftCanvas = function() {
         ctx.shadowBlur = 0;
     };
 
-    // Render Point yang Berhasil
     window.gcpState.points.forEach((pt, i) => {
         let cx = window.gcpState.dx + pt.imgOrigX * window.gcpState.scale;
         let cy = window.gcpState.dy + pt.imgOrigY * window.gcpState.scale;
-        drawCross(cx, cy, '#10b981', i+1); // Emerald Green
+        drawCross(cx, cy, '#10b981', i+1); 
     });
     
-    // Render Point yang Sedang Diproses (Merah)
     if (window.gcpState.currentPair.imgOrigX !== undefined) {
         let cx = window.gcpState.dx + window.gcpState.currentPair.imgOrigX * window.gcpState.scale;
         let cy = window.gcpState.dy + window.gcpState.currentPair.imgOrigY * window.gcpState.scale;
-        drawCross(cx, cy, '#ef4444', window.gcpState.points.length + 1); // Red
+        drawCross(cx, cy, '#ef4444', window.gcpState.points.length + 1); 
     }
 };
 
@@ -1908,7 +1892,6 @@ window.closeGcpModal = function() {
         if(window.gcpState.renderer) window.gcpState.renderer.dispose();
     }
     
-    // Jika modal dibatalkan (bukan karena Apply), reset kembali file input-nya
     if (window.dxfTempState && !window.dxfTempState.textureChanged && document.getElementById('dxf-texture-file')) {
          document.getElementById('dxf-texture-file').value = '';
     }
@@ -1919,13 +1902,10 @@ window.closeGcpModal = function() {
 // GLOBAL EVENT LISTENERS (GCP & OTHERS)
 // ==========================================
 
-// Fitur Cancel / Undo Add GCP menggunakan tombol Ctrl + Z (atau Cmd + Z di Mac)
 document.addEventListener('keydown', (e) => {
-    // Deteksi Ctrl + Z atau Cmd + Z
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         if (window.gcpState) {
             if (window.gcpState.mode !== 'idle') {
-                // 1. Jika sedang dalam proses memilih titik (belum disave), batalkan titik tersebut
                 e.preventDefault();
                 window.gcpState.currentPair = {};
                 window.gcpState.mode = 'idle';
@@ -1935,9 +1915,8 @@ document.addEventListener('keydown', (e) => {
                 if (typeof window.renderRightCanvasMarkers === 'function') window.renderRightCanvasMarkers();
                 if (typeof window.updateGcpUI === 'function') window.updateGcpUI();
             } else if (window.gcpState.points.length > 0) {
-                // 2. Jika di mode idle, HAPUS titik GCP terakhir yang sudah tersimpan (True Undo)
                 e.preventDefault();
-                window.gcpState.points.pop(); // Hapus pasangan elemen terakhir dari array
+                window.gcpState.points.pop(); 
                 
                 if (typeof window.renderLeftCanvas === 'function') window.renderLeftCanvas();
                 if (typeof window.renderRightCanvasMarkers === 'function') window.renderRightCanvasMarkers();

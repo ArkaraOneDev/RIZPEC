@@ -77,6 +77,45 @@ function showCustomConfirm(message, onConfirm) {
     newBtnConfirm.addEventListener('click', () => { cleanup(); onConfirm(); });
 }
 
+function showCustomAlert(message, onConfirm = null) {
+    let modal = document.getElementById('rk-custom-alert');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'rk-custom-alert';
+        modal.className = 'fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center backdrop-blur-sm hidden transition-opacity duration-300';
+        modal.innerHTML = `
+            <div class="bg-slate-800 border border-slate-600 p-5 rounded shadow-2xl w-80 flex flex-col gap-4 transform transition-transform scale-100">
+                <h3 class="text-white text-[14px] font-bold text-center border-b border-slate-700 pb-2 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-circle-exclamation text-yellow-500"></i> Peringatan
+                </h3>
+                <p id="rk-alert-text" class="text-slate-300 text-[11px] text-center mb-2 leading-relaxed"></p>
+                <div class="flex justify-center mt-1">
+                    <button id="rk-btn-alert-ok" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold py-2 rounded transition-colors shadow-lg">Mengerti</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+    
+    document.getElementById('rk-alert-text').textContent = message;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    
+    const btnOk = document.getElementById('rk-btn-alert-ok');
+    const newBtnOk = btnOk.cloneNode(true);
+    btnOk.parentNode.replaceChild(newBtnOk, btnOk);
+    
+    const cleanup = () => {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    };
+    
+    newBtnOk.addEventListener('click', () => { 
+        cleanup();
+        if (onConfirm) onConfirm();
+    });
+}
+
 function showCustomPrompt(message, defaultValue, onConfirm) {
     let modal = document.getElementById('rk-custom-prompt');
     if (!modal) {

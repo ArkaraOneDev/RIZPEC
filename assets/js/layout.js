@@ -2,15 +2,22 @@
 // UI & LAYOUT LOGIC
 // ==========================================
 const LAYOUT_KEYS = {
-    geo: 'rk_layout_geo', layer: 'rk_layout_layer', info: 'rk_layout_info', control: 'rk_layout_control', orbit: 'rk_layout_orbit'
+    geolocation: 'rk_layout_geolocation', 
+    geo: 'rk_layout_geo', 
+    layer: 'rk_layout_layer', 
+    info: 'rk_layout_info', 
+    control: 'rk_layout_control', 
+    orbit: 'rk_layout_orbit'
 };
 
+const toggleGeolocation = document.getElementById('cb-layout-geolocation');
 const toggleGeo = document.getElementById('cb-layout-geo');
 const toggleLayerList = document.getElementById('cb-layout-layer');
 const toggleInfo = document.getElementById('cb-layout-info');
 const toggleControl = document.getElementById('cb-layout-helper');
 const toggleOrbit = document.getElementById('cb-layout-orbit');
 
+const containerGeolocation = document.getElementById('container-geolocation');
 const containerGeo = document.getElementById('container-geometry');
 const containerLayerList = document.getElementById('container-layerlist');
 const containerInfo = document.getElementById('container-info');
@@ -23,23 +30,30 @@ function initLayout() {
         return val !== null ? val === 'true' : defaultVal;
     };
 
+    // [PERBAIKAN]: Default container dikembalikan ke true agar panelnya tidak hilang
+    const geolocationState = getLayoutState(LAYOUT_KEYS.geolocation, true);
     const geoState = getLayoutState(LAYOUT_KEYS.geo, true);
     const layerState = getLayoutState(LAYOUT_KEYS.layer, true);
     const infoState = getLayoutState(LAYOUT_KEYS.info, true);
     const controlState = getLayoutState(LAYOUT_KEYS.control, true);
     const orbitState = getLayoutState(LAYOUT_KEYS.orbit, true);
 
+    if (toggleGeolocation) toggleGeolocation.checked = geolocationState;
     if (toggleGeo) toggleGeo.checked = geoState;
     if (toggleLayerList) toggleLayerList.checked = layerState;
     if (toggleInfo) toggleInfo.checked = infoState;
     if (toggleControl) toggleControl.checked = controlState;
     if (toggleOrbit) toggleOrbit.checked = orbitState;
 
+    if (containerGeolocation) {
+        geolocationState ? containerGeolocation.classList.remove('hidden') : containerGeolocation.classList.add('hidden');
+        geolocationState ? containerGeolocation.classList.add('flex') : containerGeolocation.classList.remove('flex');
+    }
+
     if (containerGeo) {
         geoState ? containerGeo.classList.remove('hidden') : containerGeo.classList.add('hidden');
         geoState ? containerGeo.classList.add('flex') : containerGeo.classList.remove('flex');
         
-        // Inline style dihilangkan agar mengikuti class Flexbox bawaan dari index.html
         containerGeo.style.maxHeight = '';
         containerGeo.style.height = '';
     }
@@ -63,6 +77,11 @@ function initLayout() {
         orbitState ? containerOrbit.classList.remove('hidden') : containerOrbit.classList.add('hidden');
         orbitState ? containerOrbit.classList.add('flex') : containerOrbit.classList.remove('flex');
     }
+
+    // Jalankan cek ketersediaan data saat pertama kali muat
+    setTimeout(() => {
+        if (typeof window.updateGeolocationState === 'function') window.updateGeolocationState();
+    }, 500);
 }
 
 document.querySelectorAll('.menu-btn').forEach(btn => {
@@ -83,6 +102,15 @@ document.querySelectorAll('.dropdown-content').forEach(dc => {
     dc.addEventListener('click', e => e.stopPropagation()); 
 });
 
+// [PERBAIKAN]: Menghilangkan disabled logic pada layout toggle (cb-layout-geolocation)
+if (toggleGeolocation) {
+    toggleGeolocation.addEventListener('change', (e) => {
+        const state = e.target.checked;
+        state ? containerGeolocation.classList.remove('hidden') : containerGeolocation.classList.add('hidden');
+        state ? containerGeolocation.classList.add('flex') : containerGeolocation.classList.remove('flex');
+        localStorage.setItem(LAYOUT_KEYS.geolocation, state);
+    });
+}
 if (toggleGeo) {
     toggleGeo.addEventListener('change', (e) => {
         const state = e.target.checked;
@@ -121,6 +149,113 @@ if (toggleOrbit) {
         state ? containerOrbit.classList.remove('hidden') : containerOrbit.classList.add('hidden');
         state ? containerOrbit.classList.add('flex') : containerOrbit.classList.remove('flex');
         localStorage.setItem(LAYOUT_KEYS.orbit, state);
+    });
+}
+
+// ==========================================
+// GEOLOCATION UI LOGIC & VALIDATION
+// ==========================================
+
+// Fungsi untuk memvalidasi Ketersediaan Data dan Mengunci/Membuka Switch "ENABLE LOCATION"
+window.updateGeolocationState = function() {
+    let hasData = false;
+
+    // Cek ketersediaan data (Pit/Disposal/DXF)
+    if (typeof window.AppGeolocation !== 'undefined' && typeof window.AppGeolocation.checkActiveBounds === 'function') {
+        hasData = window.AppGeolocation.checkActiveBounds().hasData;
+    } else if (typeof appLayers !== 'undefined') {
+        hasData = appLayers.some(l => (l.type === 'csv' || l.type === 'dxf') && l.visible && l.threeObject);
+    }
+
+    // Target Switch "ENABLE LOCATION" yang telah disesuaikan ID-nya dengan index.html
+    const geoToggleSwitch = document.getElementById('geo-location-toggle');
+    if (geoToggleSwitch) {
+        geoToggleSwitch.disabled = !hasData;
+        
+        // Memburamkan (opacity-50) container parent agar keseluruhan terlihat mati/disabled
+        const wrapper = geoToggleSwitch.closest('.bg-slate-900\\/50') || geoToggleSwitch.parentElement.parentElement;
+        
+        if (!hasData) {
+            if (wrapper) wrapper.classList.add('opacity-50', 'pointer-events-none');
+            geoToggleSwitch.classList.add('cursor-not-allowed');
+            
+            // Jika statusnya terlanjur ON, paksa matikan (OFF) karena datanya hilang
+            if (geoToggleSwitch.checked) {
+                geoToggleSwitch.checked = false;
+                if (typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
+                    window.AppGeolocation.toggleTracking();
+                }
+            }
+        } else {
+            if (wrapper) wrapper.classList.remove('opacity-50', 'pointer-events-none');
+            geoToggleSwitch.classList.remove('cursor-not-allowed');
+        }
+    }
+
+    // Fallback jika masih menggunakan Button biasa (bukan toggle)
+    const btnTrack = document.getElementById('btn-start-tracking');
+    if (btnTrack) {
+        btnTrack.disabled = !hasData;
+        if (!hasData) {
+            btnTrack.classList.add('opacity-50', 'cursor-not-allowed');
+            if (typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
+                window.AppGeolocation.toggleTracking();
+                btnTrack.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Start Tracking';
+                btnTrack.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+                btnTrack.classList.add('bg-blue-600', 'hover:bg-blue-500');
+            }
+        } else {
+            btnTrack.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+    }
+};
+
+// Event Listener saat User mengklik Switch "ENABLE LOCATION"
+const geoToggleSwitchNode = document.getElementById('geo-location-toggle');
+if (geoToggleSwitchNode) {
+    geoToggleSwitchNode.addEventListener('change', (e) => {
+        if (geoToggleSwitchNode.disabled) {
+            e.preventDefault();
+            e.target.checked = false;
+            return;
+        }
+
+        if (typeof window.AppGeolocation === 'undefined') {
+            alert("Modul Geolocation belum dimuat dengan sempurna.");
+            e.target.checked = false;
+            return;
+        }
+
+        // Jalankan fungsi toggle tracking
+        const isActive = window.AppGeolocation.toggleTracking();
+        
+        // Sinkronisasi status checked dengan balikan dari fungsi
+        e.target.checked = isActive;
+    });
+}
+
+// Fallback logic untuk tombol biasa (jika masih digunakan)
+const btnTrackNode = document.getElementById('btn-start-tracking');
+if (btnTrackNode) {
+    btnTrackNode.addEventListener('click', () => {
+        if (btnTrackNode.disabled) return; 
+
+        if (typeof window.AppGeolocation === 'undefined') {
+            alert("Modul Geolocation belum dimuat dengan sempurna.");
+            return;
+        }
+
+        const isActive = window.AppGeolocation.toggleTracking();
+        
+        if (isActive) {
+            btnTrackNode.innerHTML = '<i class="fa-solid fa-stop"></i> Stop Tracking';
+            btnTrackNode.classList.remove('bg-blue-600', 'hover:bg-blue-500');
+            btnTrackNode.classList.add('bg-rose-600', 'hover:bg-rose-500');
+        } else {
+            btnTrackNode.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Start Tracking';
+            btnTrackNode.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+            btnTrackNode.classList.add('bg-blue-600', 'hover:bg-blue-500');
+        }
     });
 }
 
@@ -216,7 +351,6 @@ window.updateLayerUI = function() {
     const gl = document.getElementById('geometry-list');
     if (!gl) return;
     
-    // Hapus inline style agar sistem scrollbar dan Flexbox Tailwind dari index.html bekerja
     gl.style.maxHeight = '';
     gl.style.overflow = '';
     gl.style.height = '';
@@ -338,6 +472,11 @@ window.updateLayerUI = function() {
 
     if (!hasGeometryData) {
         gl.innerHTML = '<div class="text-[9px] text-slate-500 italic text-center py-1 flex-1">Belum ada Geometri</div>';
+    }
+
+    // Panggil Validasi Geolocation setiap kali list Layer/Geometry berubah
+    if (typeof window.updateGeolocationState === 'function') {
+        window.updateGeolocationState();
     }
 };
 

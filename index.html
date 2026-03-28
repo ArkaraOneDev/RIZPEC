@@ -19,6 +19,9 @@
     <!-- DXF Parser -->
     <script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
 
+    <!-- Proj4js untuk Konversi UTM (Geolocation) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.2/proj4.js"></script>
+
     <!-- Custom Style Eksternal -->
     <link rel="stylesheet" href="assets/css/style.css">
 
@@ -80,6 +83,9 @@
                 </button>
                 <div class="absolute right-0 mt-1 w-48 lg:w-44 bg-slate-800 border border-slate-600 rounded shadow-xl hidden z-50 dropdown-content py-1 font-normal">
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
+                        <input type="checkbox" id="cb-layout-geolocation" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Geolocation
+                    </label>
+                    <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
                         <input type="checkbox" id="cb-layout-geo" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Geometry
                     </label>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
@@ -93,7 +99,7 @@
                     </label>
                     <div class="border-t border-slate-600 my-1"></div>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
-                        <input type="checkbox" id="cb-layout-info" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Block Info
+                        <input type="checkbox" id="cb-layout-info" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Information
                     </label>
                 </div>
             </div>
@@ -810,13 +816,13 @@
                 <!-- FLOATING LEFT PANEL (BOTTOM) -->
                 <div class="absolute bottom-4 left-4 z-20 flex flex-col items-start pointer-events-none gap-2">
                     
-                    <!-- Unified Block Info Container -->
+                    <!-- Unified Information Container -->
                     <div id="container-info" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col w-56 lg:w-64 transition-all">
                         
                         <!-- Header -->
                         <div class="p-2 lg:p-2 border-b border-slate-700 flex items-center justify-between rounded-t bg-slate-800/30 shrink-0">
                             <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                                <i class="fa-solid fa-circle-info text-yellow-400"></i> Block Info
+                                <i class="fa-solid fa-circle-info text-yellow-400"></i> Information
                             </h3>
                         </div>
 
@@ -848,29 +854,22 @@
                 <div class="absolute top-4 bottom-4 right-4 z-20 flex flex-col items-end pointer-events-none">
                     <div id="layer-container" class="w-56 lg:w-64 h-full flex flex-col gap-2 transition-all">
                         
-                        <!-- Visualization (Fixed height) -->
-                        <div id="container-visualization" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm p-3 lg:p-2 flex flex-col gap-2 shrink-0 hidden">
+                        <!-- Panel Geolocation (Top Right, fixed to top outside of middle section) -->
+                        <div id="container-geolocation" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm p-3 lg:p-2 flex flex-col gap-2 shrink-0">
                             <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-1">
-                                <i class="fa-solid fa-display text-blue-400"></i> Visualization
+                                <i class="fa-solid fa-map-location-dot text-rose-400"></i> Geolocation
                             </h3>
                             <div class="flex items-center justify-between p-2 lg:p-1.5 bg-slate-900/50 rounded border border-slate-700">
                                 <div class="flex flex-col">
-                                    <label class="text-[11px] lg:text-[10px] text-slate-300 font-bold uppercase tracking-wide flex items-center gap-2 lg:gap-1.5 cursor-pointer" for="mode-toggle">
-                                        <i class="fa-solid fa-cubes text-slate-400"></i> <span id="mode-label-text">Triangulation</span>
+                                    <label class="text-[11px] lg:text-[10px] text-slate-300 font-bold uppercase tracking-wide flex items-center gap-2 lg:gap-1.5 cursor-pointer" for="geo-location-toggle">
+                                        <i class="fa-solid fa-location-crosshairs text-slate-400"></i> <span id="geo-label-text">Enable Location</span>
                                     </label>
                                 </div>
+                                <!-- Toggle Switch (Unchecked by default) -->
                                 <div class="relative inline-block w-10 lg:w-9 align-middle select-none transition duration-200 ease-in">
-                                    <input type="checkbox" name="toggle" id="mode-toggle" class="toggle-checkbox absolute block w-5 h-5 lg:w-4 lg:h-4 rounded-full bg-white border-[3px] appearance-none cursor-pointer z-10 top-0 bottom-0 m-auto transition-all duration-300" />
-                                    <label for="mode-toggle" class="toggle-label block overflow-hidden h-5 lg:h-4 rounded-full bg-slate-600 cursor-pointer transition-all duration-300"></label>
+                                    <input type="checkbox" name="geo-toggle" id="geo-location-toggle" class="toggle-checkbox absolute block w-5 h-5 lg:w-4 lg:h-4 rounded-full bg-white border-[3px] appearance-none cursor-pointer z-10 top-0 bottom-0 m-auto transition-all duration-300" />
+                                    <label for="geo-location-toggle" class="toggle-label block overflow-hidden h-5 lg:h-4 rounded-full bg-slate-600 cursor-pointer transition-all duration-300"></label>
                                 </div>
-                            </div>
-                            
-                            <div id="extrusion-settings" class="hidden items-center gap-2 transition-opacity duration-300">
-                                <span class="text-[10px] lg:text-[9px] text-slate-400 uppercase font-semibold flex-1">Extrusion (m)</span>
-                                <input type="number" id="extrusion-input" value="5" min="1" max="50" class="w-14 lg:w-12 bg-slate-900 border border-slate-600 rounded px-2 lg:px-1.5 py-1.5 lg:py-1 text-[12px] lg:text-[11px] text-white text-center outline-none focus:border-blue-500">
-                                <button id="apply-extrusion-btn" class="bg-blue-600 hover:bg-blue-500 text-white text-[10px] lg:text-[9px] font-bold py-1.5 lg:py-1 px-3 lg:px-2.5 rounded transition-colors disabled:opacity-50 tracking-wider">
-                                    GENERATE
-                                </button>
                             </div>
                         </div>
 
@@ -1077,6 +1076,7 @@
     <script src="assets/js/file-disposal.js"></script>
     <script src="assets/js/file-dxf.js"></script>
     <script src="assets/js/project.js"></script>
+    <script src="assets/js/geolocation.js"></script>
     
     <!-- Tambahan Skrip Interaksi & Alat (Dipisahkan) -->
     <script src="assets/js/tools.js"></script>

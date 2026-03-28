@@ -79,7 +79,7 @@ const polygonShape = document.getElementById('polygon-shape');
 const polygonLine = document.getElementById('polygon-line');
 
 const infoTitle = document.querySelector('#container-info h3');
-if (infoTitle) infoTitle.innerHTML = '<i class="fa-solid fa-circle-info text-yellow-400"></i> Block Info';
+if (infoTitle) infoTitle.innerHTML = '<i class="fa-solid fa-circle-info text-yellow-400"></i> Information';
 
 const hoverBar = document.getElementById('hover-empty')?.parentElement;
 if (hoverBar) hoverBar.classList.add('hidden'); 

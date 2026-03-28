@@ -101,49 +101,48 @@ function init3D() {
     camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100000);
     camera.position.set(0, 500, 500);
 
-    // --- OPTIMASI GPU KHUSUS TABLET & MOBILE (SWEET SPOT) ---
-    // Deteksi apakah perangkat adalah Tablet/Mobile (berdasarkan User Agent & Touch points)
     const isMobileOrTablet = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
     renderer = new THREE.WebGLRenderer({ 
-        // 1. Matikan antialias di perangkat mobile untuk mencegah FPS drop drastis pada model CAD berat.
         antialias: !isMobileOrTablet, 
-        
-        // 2. [KEMBALI KE TRUE] Wajib TRUE untuk data koordinat tambang (UTM) yang angkanya raksasa.
-        // Jika false, akan terjadi Z-Fighting (Mesh berkelap-kelip saling tumpang tindih) yang merusak FPS.
         logarithmicDepthBuffer: true, 
-        
-        // 3. Gunakan high-performance agar OS Tablet memberikan daya prioritas GPU penuh.
         powerPreference: "high-performance"
     });
     
+    // --- EVENT LISTENER CONTEXT LOST (PENTING!) ---
+    renderer.domElement.addEventListener('webglcontextlost', function(e) {
+        e.preventDefault();
+        console.error("WEBGL CONTEXT LOST DETECTED");
+        alert("Peringatan: Memori Grafis (GPU) Anda Penuh!\n\nHal ini disebabkan karena terlalu banyak data DXF/Texture yang diload, atau batasan dari browser. Tampilan 3D akan berhenti.\n\nHarap Refresh halaman (F5) untuk melanjutkan.");
+        window.pause3D();
+    }, false);
+
+    renderer.domElement.addEventListener('webglcontextrestored', function(e) {
+        console.log("WEBGL CONTEXT RESTORED");
+        // Kita tidak bisa auto-resume dengan mudah karena data scene harus dikompilasi ulang oleh GPU, 
+        // lebih aman meminta user refresh halaman setelah context lost.
+    }, false);
+    
     renderer.setSize(container.clientWidth, container.clientHeight);
     
-    // 4. Batasi Pixel Ratio. Layar tablet modern sangat tajam (Resolusi 2K / 120Hz). 
-    // Merender geometri berat di resolusi natifnya akan membuat VRAM GPU jebol.
-    // Cap ke maksimal 1.25 untuk tablet, biarkan 2.0 untuk Laptop/PC.
     const maxPixelRatio = isMobileOrTablet ? 1.25 : 2;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
     
-    // [PENTING] autoClear dinonaktifkan agar overlay compass tidak tertimpa scene utama
     renderer.autoClear = false; 
     
     container.appendChild(renderer.domElement);
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     
-    // --- Konfigurasi Kamera ---
     controls.zoomSpeed = 3.5;
     controls.panSpeed = 1.5;
 
-    // Mematikan fitur damping karena membuat orbit terasa lambat dan memakan FPS
     controls.enableDamping = false;
     
-    // Mengubah kontrol mouse
     controls.mouseButtons = {
         LEFT: THREE.MOUSE.PAN,
-        MIDDLE: null, // Dimatikan, akan di-handle manual untuk Custom Orbit
-        RIGHT: null   // Dimatikan sementara sesuai permintaan
+        MIDDLE: null, 
+        RIGHT: null   
     };
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
@@ -175,12 +174,10 @@ function init3D() {
     const compassGroup = new THREE.Group();
     compassScene.add(compassGroup);
 
-    // 1. Bola Tengah
     const centerGeo = new THREE.SphereGeometry(0.15, 16, 16);
     const centerMat = new THREE.MeshPhongMaterial({ color: 0x888888 });
     compassGroup.add(new THREE.Mesh(centerGeo, centerMat));
 
-    // 2. Jarum Utara
     const northGeo = new THREE.ConeGeometry(0.15, 1, 16);
     northGeo.translate(0, 0.5, 0);
     const northMat = new THREE.MeshPhongMaterial({ color: 0xff3333 });
@@ -188,20 +185,17 @@ function init3D() {
     northMesh.rotation.x = -Math.PI / 2; 
     compassGroup.add(northMesh);
 
-    // 3. Jarum Selatan
     const southMat = new THREE.MeshPhongMaterial({ color: 0xdddddd });
     const southMesh = new THREE.Mesh(northGeo, southMat);
     southMesh.rotation.x = Math.PI / 2; 
     compassGroup.add(southMesh);
 
-    // 4. Garis Timur - Barat
     const ewGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.5, 8);
     const ewMat = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
     const ewMesh = new THREE.Mesh(ewGeo, ewMat);
     ewMesh.rotation.z = Math.PI / 2;
     compassGroup.add(ewMesh);
 
-    // 5. Pembuatan Label (N, S, E, W)
     function createCompassLabel(text, color) {
         const canvas = document.createElement('canvas');
         canvas.width = 64; canvas.height = 64;
@@ -235,7 +229,6 @@ function init3D() {
     wLabel.position.set(-1.1, 0.1, 0);
     compassGroup.add(wLabel);
 
-    // Hitbox transparan untuk menampung fungsi klik kompas
     const compassHitbox = document.createElement('div');
     compassHitbox.id = 'compass-hitbox';
     compassHitbox.className = 'absolute top-4 left-4 z-10 cursor-pointer rounded-full';
@@ -305,7 +298,6 @@ function init3D() {
         }
     });
     
-    // Cegah default context menu (Klik Kanan) agar tidak muncul
     container.addEventListener('contextmenu', (e) => { e.preventDefault(); });
 
     container.addEventListener('pointerdown', (e) => {
@@ -314,9 +306,8 @@ function init3D() {
     container.addEventListener('pointermove', window.onPointerMove);
     container.addEventListener('pointerup', window.onPointerUp);
 
-    // Logika Custom Orbit Off-Center
     container.addEventListener('pointerdown', (e) => {
-        if (e.button === 1) { // Klik Tengah
+        if (e.button === 1) { 
             e.preventDefault(); 
             if (!window.is3DRenderingActive) return; 
             
@@ -552,7 +543,6 @@ function init3D() {
         }
     });
 
-    // --- OBSERVER UNTUK PAUSE/RESUME 3D SECARA OTOMATIS (INTERSECTION OBSERVER) ---
     const canvasContainerDOM = document.getElementById('canvas-container');
     if (canvasContainerDOM) {
         const observer = new IntersectionObserver((entries) => {
@@ -572,7 +562,6 @@ function init3D() {
 }
 
 function animate() {
-    // BATALKAN RENDER JIKA 3D SEDANG DI-PAUSE
     if (!window.is3DRenderingActive) return;
     
     window.animationFrameId = requestAnimationFrame(animate);
@@ -580,12 +569,10 @@ function animate() {
 
     const container = document.getElementById('canvas-container');
 
-    // 1. Render Main Scene
     renderer.setViewport(0, 0, container.clientWidth, container.clientHeight);
     renderer.clear();
     renderer.render(scene, camera);
 
-    // 2. Render Overlay Compass Scene
     if (compassScene && compassCamera) {
         renderer.clearDepth(); 
         
@@ -598,7 +585,6 @@ function animate() {
         renderer.render(compassScene, compassCamera);
     }
 
-    // 3. Render Overlay Orbit Pad (View Cube)
     if (padScene && padCamera && padRenderer) {
         const trackpad = document.getElementById('orbit-trackpad');
         if (trackpad && trackpad.clientWidth > 0 && trackpad.clientWidth !== padRenderer.domElement.width / window.devicePixelRatio) {

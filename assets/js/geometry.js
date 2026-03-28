@@ -108,6 +108,30 @@ window.unloadGeometry = function(entityId, type) {
     if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
         requestAnimationFrame(() => renderer.render(scene, camera));
     }
+
+    // =========================================================================
+    // GEOLOCATION VALIDATION: MATIKAN TRACKING JIKA SEMUA 3D MODEL KOSONG
+    // =========================================================================
+    if (typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
+        // Cek apakah setelah mesh dihapus, masih ada data 3D lain di layar?
+        const geoCheck = window.AppGeolocation.checkActiveBounds();
+        
+        if (!geoCheck.hasData) {
+            console.warn("Semua data 3D telah dihapus. Mematikan fitur Geolocation otomatis.");
+            
+            // Matikan fungsi tracking agar marker hilang
+            window.AppGeolocation.toggleTracking(); 
+            
+            // Kembalikan status tombol UI Geolocation di layout
+            const btnTrack = document.getElementById('btn-start-tracking');
+            if (btnTrack) {
+                btnTrack.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Start Tracking';
+                btnTrack.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+                btnTrack.classList.add('bg-blue-600', 'hover:bg-blue-500');
+            }
+        }
+    }
+    // =========================================================================
 };
 
 // Expose fungsi secara spesifik agar kompatibel dengan file manager masing-masing
