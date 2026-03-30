@@ -374,8 +374,16 @@ if (btnSaveProj) {
                     fileHandle = await window.showSaveFilePicker({
                         id: 'rk-project-dir', 
                         startIn: 'documents',
-                        suggestedName: defaultName,
-                        types: [{ description: 'RIZPEC Project File', accept: {'application/json': ['.riz']} }],
+                        suggestedName: defaultName + ".riz", // FIX 1: Secara eksplisit menambahkan .riz agar Mac/Linux tahu ekstensi yang diminta
+                        types: [{ 
+                            description: 'RIZPEC Project File', 
+                            accept: {
+                                // FIX 2: Menggunakan MIME type binary kustom, bukan 'application/json' 
+                                // agar OS tidak merubah paksanya kembali menjadi .json
+                                'application/octet-stream': ['.riz'],
+                                'application/x-rizpec': ['.riz']
+                            } 
+                        }],
                     });
                 } catch (err) {
                     if (err.name === 'AbortError') return; // User membatalkan dialog

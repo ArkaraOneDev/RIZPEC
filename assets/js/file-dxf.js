@@ -1,5 +1,6 @@
 // ==========================================
 // DXF IMPORTER CORE LOGIC
+// OPTIMIZED FOR MEMORY LEAK PREVENTION (HUAWEI MATEPAD)
 // ==========================================
 function processDXF(dxfText, fileName) {
     const parser = new window.DxfParser();
@@ -152,6 +153,8 @@ function processDXF(dxfText, fileName) {
             mesh.userData.originalMaterial = mat; 
             group.add(mesh);
         }
+        // Bersihkan array sementara untuk bantu GC
+        colorFaceGroups[hexKey].length = 0; 
     });
 
     Object.keys(colorLineGroups).forEach(hexKey => {
@@ -163,7 +166,12 @@ function processDXF(dxfText, fileName) {
             lines.userData.originalColor = parseInt(hexKey);
             group.add(lines);
         }
+        colorLineGroups[hexKey].length = 0;
     });
+
+    // --- [PERBAIKAN MEMORI EKSTREM] ---
+    // Segera putuskan referensi ke objek DxfData raksasa agar RAM perangkat Anda kembali lega!
+    dxfData = null;
 
     if (typeof scene !== 'undefined') scene.add(group);
     const layerId = 'layer_' + Date.now();
@@ -245,6 +253,38 @@ window.dxfTempState = null;
 // GLOBAL CACHE UNTUK RENDERER 2D PREVIEW (Mencegah Context Lost & Memory Leak)
 window._dxfPreviewSystem = null;
 
+// --- [PERBAIKAN MEMORY LEAK]: GLOBAL EVENT DELEGATION UNTUK CHECKBOX DXF ---
+document.addEventListener('change', (e) => {
+    if (e.target && e.target.classList.contains('dxf-visibility-cb')) {
+        const layerId = e.target.getAttribute('data-id');
+        const layer = typeof appLayers !== 'undefined' ? appLayers.find(l => l.id === layerId) : null;
+        
+        if (layer) {
+            layer.visible = e.target.checked;
+            if (layer.threeObject) layer.threeObject.visible = layer.visible;
+            
+            window.updateDxfListUI();
+            if (typeof updateLayerUI === 'function') updateLayerUI();
+
+            // Geolocation Validation
+            if (!layer.visible && typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
+                const geoCheck = window.AppGeolocation.checkActiveBounds();
+                if (!geoCheck.hasData) {
+                    console.warn("Semua data 3D telah dihapus/disembunyikan. Mematikan fitur Geolocation otomatis.");
+                    window.AppGeolocation.toggleTracking(); 
+                    const btnTrack = document.getElementById('btn-start-tracking');
+                    if (btnTrack) {
+                        btnTrack.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Start Tracking';
+                        btnTrack.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+                        btnTrack.classList.add('bg-blue-600', 'hover:bg-blue-500');
+                    }
+                }
+            }
+        }
+    }
+});
+// ---------------------------------------------------------------------------
+
 window.getDxfFolderBadgeHTML = function(name, rootName) {
     if (rootName === 'DXF Data') {
         const safeId = name.replace(/\s+/g, '_');
@@ -316,7 +356,6 @@ window.render2DDxfPreview = function(layers) {
     const height = container.clientHeight;
     if (width === 0 || height === 0) return;
 
-    // INISIALISASI SISTEM PREVIEW HANYA 1 KALI (PERBAIKAN CONTEXT LOST)
     if (!window._dxfPreviewSystem) {
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setClearColor(0x0f172a, 1);
@@ -341,17 +380,14 @@ window.render2DDxfPreview = function(layers) {
 
     const { renderer, scene, camera, previewGroup, dirLight } = window._dxfPreviewSystem;
 
-    // Bersihkan DOM dan masukkan renderer yang di-cache
     container.innerHTML = '';
     renderer.setSize(width, height);
     container.appendChild(renderer.domElement);
 
-    // Hapus clone lama dari preview group
     while(previewGroup.children.length > 0) {
         previewGroup.remove(previewGroup.children[0]);
     }
 
-    // Tambahkan clone baru
     layers.forEach(l => {
         if(l.threeObject) {
             const clone = l.threeObject.clone();
@@ -460,6 +496,7 @@ window.updateDxfListUI = function() {
             const div = document.createElement('div');
             div.className = `flex items-center justify-between gap-2.5 bg-slate-900/80 border ${layer.visible ? 'border-rose-500/50 shadow-sm' : 'border-slate-700/80'} p-2 rounded-md transition-all hover:bg-slate-800 group`;
             
+            // Perbaikan: Hapus event listener di dalam loop, sekarang ditangani oleh Event Delegation Document
             div.innerHTML = `
                 <div class="flex items-center gap-2.5 overflow-hidden">
                     <label class="relative flex items-center justify-center w-5 h-5 cursor-pointer m-0 shrink-0">
@@ -474,32 +511,6 @@ window.updateDxfListUI = function() {
                     <div class="w-3 h-3 rounded-full shadow-inner border border-slate-600" style="background-color: ${layer.colorHex}"></div>
                 </div>
             `;
-            
-            const cb = div.querySelector('.dxf-visibility-cb');
-            cb.addEventListener('change', (e) => {
-                layer.visible = e.target.checked;
-                if (layer.threeObject) layer.threeObject.visible = layer.visible;
-                window.updateDxfListUI();
-                if (typeof updateLayerUI === 'function') updateLayerUI();
-
-                // =========================================================================
-                // GEOLOCATION VALIDATION: MATIKAN TRACKING JIKA SEMUA 3D MODEL KOSONG/HIDDEN
-                // =========================================================================
-                if (!layer.visible && typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
-                    const geoCheck = window.AppGeolocation.checkActiveBounds();
-                    if (!geoCheck.hasData) {
-                        console.warn("Semua data 3D telah dihapus/disembunyikan. Mematikan fitur Geolocation otomatis.");
-                        window.AppGeolocation.toggleTracking(); 
-                        const btnTrack = document.getElementById('btn-start-tracking');
-                        if (btnTrack) {
-                            btnTrack.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Start Tracking';
-                            btnTrack.classList.remove('bg-rose-600', 'hover:bg-rose-500');
-                            btnTrack.classList.add('bg-blue-600', 'hover:bg-blue-500');
-                        }
-                    }
-                }
-                // =========================================================================
-            });
             
             listEl.appendChild(div);
         });
@@ -598,14 +609,16 @@ window.onDxfFolderDeleted = async function(name, rootName) {
             if (index !== -1) {
                 const layer = appLayers[index];
                 
-                // PERBAIKAN MEMORY LEAK: Hapus dari Memori GPU sepenuhnya!
+                // PERBAIKAN MEMORY LEAK: Hapus seluruh Mask & Clip Material dari GPU sepenuhnya!
                 if (layer.maskRenderTarget) layer.maskRenderTarget.dispose();
+                if (layer.maskMat) layer.maskMat.dispose(); 
                 if (layer.clipInterval) clearInterval(layer.clipInterval);
                 
                 if (layer.threeObject) {
                     layer.threeObject.traverse((child) => {
                         if (child.isMesh || child.isLineSegments) {
                             if (child.geometry) child.geometry.dispose();
+                            
                             if (child.material) {
                                 if (Array.isArray(child.material)) {
                                     child.material.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
@@ -613,6 +626,15 @@ window.onDxfFolderDeleted = async function(name, rootName) {
                                     if (child.material.map) child.material.map.dispose();
                                     child.material.dispose();
                                 }
+                            }
+                            
+                            if (child.userData.originalMaterial) {
+                                if (child.userData.originalMaterial.map) child.userData.originalMaterial.map.dispose();
+                                child.userData.originalMaterial.dispose();
+                            }
+                            if (child.userData.originalMaterialTex) {
+                                if (child.userData.originalMaterialTex.map) child.userData.originalMaterialTex.map.dispose();
+                                child.userData.originalMaterialTex.dispose();
                             }
                         }
                     });
@@ -643,7 +665,7 @@ window.onDxfFolderDeleted = async function(name, rootName) {
         }
 
         // =========================================================================
-        // GEOLOCATION VALIDATION: MATIKAN TRACKING JIKA SEMUA 3D MODEL KOSONG/HIDDEN
+        // GEOLOCATION VALIDATION
         // =========================================================================
         if (typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
             const geoCheck = window.AppGeolocation.checkActiveBounds();
@@ -983,13 +1005,17 @@ window.executeDxfFootprintClipping = function(layer) {
 
     const maskScene = new THREE.Scene();
     maskScene.background = new THREE.Color(0x000000); 
-    const maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }); 
+    
+    // --- [PERBAIKAN MEMORI]: Simpan Material Mask ke dalam Cache Layer agar bisa di-dispose
+    if (layer.maskMat) layer.maskMat.dispose();
+    layer.maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }); 
 
     if (layer.maskRenderTarget) {
         layer.maskRenderTarget.dispose(); 
     }
 
-    const rtRes = 2048;
+    // 3. OPTIMASI VRAM GPU: Resolusi render target dibuat 1024 (cukup untuk footprint tanpa over-consume VRAM)
+    const rtRes = 1024;
     const rt = new THREE.WebGLRenderTarget(rtRes, rtRes, {
         format: THREE.RedFormat,
         minFilter: THREE.LinearFilter,
@@ -1001,7 +1027,14 @@ window.executeDxfFootprintClipping = function(layer) {
     layer.threeObject.traverse((child) => {
         if (!child.isMesh) return;
 
-        const baseMat = child.material;
+        if (child.material && child.material.customProgramCacheKey) {
+            child.material.dispose();
+        }
+
+        const baseMat = (layer.colorMode === 'Texture' && layer.textureMeta && child.userData.originalMaterialTex) 
+                        ? child.userData.originalMaterialTex 
+                        : child.userData.originalMaterial;
+
         const newMat = baseMat.clone();
 
         newMat.customProgramCacheKey = function() {
@@ -1081,7 +1114,7 @@ window.executeDxfFootprintClipping = function(layer) {
 
         currentVisibleMeshes.forEach(m => {
             const clone = m.clone();
-            clone.material = maskMat;
+            clone.material = layer.maskMat;
             clone.matrixAutoUpdate = false;
             clone.matrix.copy(m.matrixWorld); 
             clone.visible = true; 
@@ -1125,6 +1158,9 @@ window.refreshAllDxfClipping = function() {
                                     ? child.userData.originalMaterialTex 
                                     : child.userData.originalMaterial;
                     if (baseMat) {
+                        if (child.material && child.material !== baseMat && child.material.customProgramCacheKey) {
+                            child.material.dispose();
+                        }
                         child.material = baseMat;
                     }
                 }
@@ -1231,7 +1267,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (layer && layer.threeObject) {
                     layer.threeObject.traverse((child) => {
                         if (child.isMesh && child.userData.originalMaterial) {
+                            if (child.material && child.material !== child.userData.originalMaterial && child.material.customProgramCacheKey) {
+                                child.material.dispose();
+                            }
                             child.material = child.userData.originalMaterial;
+                            
+                            if (child.userData.originalMaterialTex) {
+                                if (child.userData.originalMaterialTex.map) child.userData.originalMaterialTex.map.dispose();
+                                child.userData.originalMaterialTex.dispose();
+                            }
                             child.userData.originalMaterialTex = null;
                         }
                     });
@@ -1302,7 +1346,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (layer.colorMode === 'Default') {
                             layer.threeObject.traverse((child) => {
                                 if (child.material) {
-                                    if(child.isMesh) child.material = child.userData.originalMaterial; 
+                                    if(child.isMesh) {
+                                        if (child.material && child.material !== child.userData.originalMaterial && child.material.customProgramCacheKey) child.material.dispose();
+                                        child.material = child.userData.originalMaterial; 
+                                    }
                                     setMatColors(child, false, child.userData.originalColor);
                                 }
                             });
@@ -1310,7 +1357,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             const colorHex = parseInt(layer.visualColor.replace('#', '0x'), 16);
                             layer.threeObject.traverse((child) => {
                                 if ((child.isMesh || child.isLineSegments) && child.material) {
-                                    if(child.isMesh) child.material = child.userData.originalMaterial; 
+                                    if(child.isMesh) {
+                                        if (child.material && child.material !== child.userData.originalMaterial && child.material.customProgramCacheKey) child.material.dispose();
+                                        child.material = child.userData.originalMaterial; 
+                                    }
                                     setMatColors(child, false, colorHex);
                                 }
                             });
@@ -1341,7 +1391,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                     }
                                     colAttr.needsUpdate = true;
                                     
-                                    if(child.isMesh) child.material = child.userData.originalMaterial; 
+                                    if(child.isMesh) {
+                                        if (child.material && child.material !== child.userData.originalMaterial && child.material.customProgramCacheKey) child.material.dispose();
+                                        child.material = child.userData.originalMaterial; 
+                                    }
                                     setMatColors(child, true, 0xffffff); 
                                 }
                             });
@@ -1349,7 +1402,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             layer.threeObject.traverse((child) => {
                                 if (child.material) {
                                     let matToUse = layer.textureMeta && child.userData.originalMaterialTex ? child.userData.originalMaterialTex : child.userData.originalMaterial;
-                                    if(child.isMesh) child.material = matToUse;
+                                    if(child.isMesh) {
+                                        if (child.material && child.material !== matToUse && child.material.customProgramCacheKey) child.material.dispose();
+                                        child.material = matToUse;
+                                    }
                                     setMatColors(child, false, child.userData.originalColor);
                                     if(matToUse.map && child.isMesh) matToUse.color.setHex(0xffffff); 
                                 }
@@ -1483,6 +1539,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if(child.isMesh) {
                         if(!child.userData.originalMaterialTex) {
                             child.userData.originalMaterialTex = child.userData.originalMaterial.clone();
+                        } else {
+                            if (child.userData.originalMaterialTex.map) {
+                                child.userData.originalMaterialTex.map.dispose();
+                            }
                         }
                         child.userData.originalMaterialTex.map = texture;
                         child.userData.originalMaterialTex.color.setHex(0xffffff); 

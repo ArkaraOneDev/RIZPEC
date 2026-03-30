@@ -11,6 +11,13 @@ window.AppGeolocation = {
     compassPermissionGranted: false, // Mencegah prompt kompas berulang
     hasWarnedDistance: false, // Mencegah alert out-of-bounds muncul terus-menerus
     
+    // --- TAMBAHAN VARIABEL THROTTLING ---
+    lastCalcX: null,
+    lastCalcZ: null,
+    lastCalcElev: null,
+    throttleDistance: 5.0, // Batas jarak (meter) diturunkan menjadi 5 meter
+    // ------------------------------------
+    
     // Proyeksi dasar GPS (WGS84 Lat/Lon)
     epsgWgs84: "+proj=longlat +datum=WGS84 +no_defs",
 
@@ -170,7 +177,58 @@ window.AppGeolocation = {
         if (intersects.length > 0) {
             return intersects[0].point.y; 
         }
-        return 0; // Miss
+        return null; // DIUBAH: Return null jika meleset (miss), bukan 0
+    },
+
+    // 5. Menampilkan Pop-up Warning Kustom UI
+    showWarningModal: function(dist, pEast, pNorth, uEast, uNorth) {
+        const existing = document.getElementById('geo-warning-modal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'geo-warning-modal';
+        modal.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4';
+        
+        modal.innerHTML = `
+            <div class="bg-slate-800 border border-slate-600 rounded-lg p-5 max-w-sm w-full shadow-2xl scale-100 transition-transform">
+                <div class="flex items-center gap-3 mb-4 text-rose-500">
+                    <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
+                    <h3 class="text-base font-bold text-white leading-tight">Lokasi anda saat ini terlalu jauh</h3>
+                </div>
+                
+                <div class="space-y-3 text-sm text-slate-300 bg-slate-900/50 p-4 rounded border border-slate-700 mb-4">
+                    <div>
+                        <span class="block text-slate-500 text-[10px] uppercase font-bold tracking-wider mb-0.5">Lokasi Project (Centroid)</span>
+                        <span class="font-mono text-emerald-400">E: ${pEast.toFixed(2)}</span><br>
+                        <span class="font-mono text-emerald-400">N: ${pNorth.toFixed(2)}</span>
+                    </div>
+                    <div>
+                        <span class="block text-slate-500 text-[10px] uppercase font-bold tracking-wider mb-0.5">Lokasi Anda (GPS)</span>
+                        <span class="font-mono text-blue-400">E: ${uEast.toFixed(2)}</span><br>
+                        <span class="font-mono text-blue-400">N: ${uNorth.toFixed(2)}</span>
+                    </div>
+                    <div class="pt-2 border-t border-slate-700 mt-2">
+                        <span class="block text-slate-500 text-[10px] uppercase font-bold tracking-wider mb-0.5">Jarak</span>
+                        <span class="font-bold text-rose-400 text-lg">${(dist / 1000).toFixed(2)} KM</span>
+                    </div>
+                </div>
+
+                <div class="text-center font-medium text-slate-300 text-sm mb-4">
+                    Geolocation dibatalkan
+                </div>
+
+                <button id="btn-geo-understand" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-4 rounded transition-colors flex justify-center items-center gap-2">
+                    <i class="fa-solid fa-check"></i> Mengerti
+                </button>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Hapus modal jika tombol ditekan
+        document.getElementById('btn-geo-understand').addEventListener('click', () => {
+            modal.remove();
+        });
     },
 
     // Update Arah Kompas (Device Orientation)
@@ -219,6 +277,13 @@ window.AppGeolocation = {
             this.markerGroup.visible = false;
             this.isTracking = false;
             this.hasWarnedDistance = false; // Reset warning saat dimatikan
+            
+            // --- RESET MEMORI THROTTLING ---
+            this.lastCalcX = null;
+            this.lastCalcZ = null;
+            this.lastCalcElev = null;
+            // -------------------------------
+            
             return false;
         }
 
@@ -232,6 +297,10 @@ window.AppGeolocation = {
         this.markerGroup.visible = true;
         // Default hadap lurus ke depan (layar atas) jika digunakan di desktop/tanpa sensor
         this.markerGroup.rotation.y = 0;
+
+        // Hitung Titik Tengah (Centroid) dari Area Proyek 
+        const center3D = new THREE.Vector3();
+        bounds.getCenter(center3D);
 
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
             if (!this.compassPermissionGranted) {
@@ -256,16 +325,10 @@ window.AppGeolocation = {
                 const localCoords = this.convertToThreeJS(lat, lon);
                 if (!localCoords) return;
 
-                // Hitung seberapa jauh user dari area pusat tambang (0,0)
-                const distanceToMine = Math.sqrt(localCoords.x * localCoords.x + localCoords.y * localCoords.y);
-                
-                // Jika user lebih dari 50 KM (50.000 unit), kamera 3D Three.js akan men-clip (menyembunyikan) marker.
-                if (distanceToMine > 50000) {
-                    if (!this.hasWarnedDistance) {
-                        alert(`PERHATIAN!\nLokasi Anda saat ini berjarak ${(distanceToMine/1000).toFixed(1)} KM dari tambang.\nMarker tidak akan terlihat karena berada di luar jarak maksimal pandang kamera 3D.`);
-                        this.hasWarnedDistance = true;
-                    }
-                }
+                // Hitung seberapa jauh user dari CENTROID (Titik Tengah) tambang
+                const dxCenter = localCoords.x - center3D.x;
+                const dzCenter = localCoords.y - center3D.z; // localCoords.y adalah sumbu Z ThreeJS
+                const distanceToCentroid = Math.sqrt(dxCenter * dxCenter + dzCenter * dzCenter);
 
                 // Cek Out of bounds bounding box geometri
                 let isOutOfBounds = false;
@@ -274,19 +337,72 @@ window.AppGeolocation = {
                     isOutOfBounds = true;
                 }
 
-                let elevY = this.getSurfaceElevation(localCoords.x, localCoords.y);
+                // ==========================================
+                // LOGIKA THROTTLING ELEVASI (Batas: 5 Meter)
+                // ==========================================
+                let elevY = null;
+                let shouldRecalculate = true;
+
+                // Hitung jarak dari posisi terakhir kalkulasi
+                if (this.lastCalcX !== null && this.lastCalcZ !== null) {
+                    const dx = localCoords.x - this.lastCalcX;
+                    const dz = localCoords.y - this.lastCalcZ; 
+                    const distMoved = Math.sqrt(dx * dx + dz * dz);
+                    
+                    if (distMoved < this.throttleDistance) {
+                        shouldRecalculate = false; // Belum bergeser sejauh throttle distance, skip raycast!
+                        elevY = this.lastCalcElev; // Gunakan elevasi lama
+                    }
+                }
+
+                if (shouldRecalculate) {
+                    // Panggil fungsi raycaster yang berat HANYA jika diperlukan
+                    elevY = this.getSurfaceElevation(localCoords.x, localCoords.y);
+                    
+                    // Simpan posisi dan elevasi terbaru untuk pengecekan berikutnya
+                    this.lastCalcX = localCoords.x;
+                    this.lastCalcZ = localCoords.y;
+                    this.lastCalcElev = elevY;
+                }
+                // ==========================================
                 
+                const isMiss = (elevY === null);
+
+                // --- POP-UP WARNING CUSTOM UI & AUTO SWITCH OFF ---
+                // Jika lokasi lebih dari 50 KM dari centroid data, dan tidak menempel di polymesh manapun
+                if (distanceToCentroid > 50000 && isMiss) {
+                    
+                    // Re-kalkulasi kembali ke Easting/Northing UTM untuk ditampilkan di Pop-up
+                    const projectEasting = center3D.x + window.worldOrigin.x;
+                    const projectNorthing = -center3D.z - window.worldOrigin.z;
+                    
+                    const userEasting = localCoords.x + window.worldOrigin.x;
+                    const userNorthing = -localCoords.y - window.worldOrigin.z;
+
+                    // Panggil pop up UI
+                    this.showWarningModal(distanceToCentroid, projectEasting, projectNorthing, userEasting, userNorthing);
+                    
+                    // Matikan toggle switch di UI
+                    const geoToggleSwitchNode = document.getElementById('geo-location-toggle');
+                    if (geoToggleSwitchNode) geoToggleSwitchNode.checked = false;
+                    
+                    // Matikan Tracking di Background
+                    this.toggleTracking();
+                    return; // Hentikan eksekusi pergerakan marker saat ini
+                }
+
                 // Jika posisi diluar bounds dan raycaster meleset (karena tidak ada mesh di bawah kaki user),
                 // Kita gantung markernya di udara pada posisi elevasi tertinggi polymesh.
-                if (elevY === 0 && isOutOfBounds) {
-                    elevY = bounds.max.y !== -Infinity ? bounds.max.y + 100 : 100;
+                let finalElevY = elevY;
+                if (isMiss && isOutOfBounds) {
+                    finalElevY = bounds.max.y !== -Infinity ? bounds.max.y + 100 : 100;
+                } else if (isMiss) {
+                    finalElevY = 0; // fallback jika meleset tapi masih ada di dalam bounds area
                 }
                 
                 // Animasi pergerakan marker (Offset +6 meter dari ground agar dasar bola tidak tenggelam)
-                this.markerGroup.position.set(localCoords.x, elevY + 6, localCoords.y);
+                this.markerGroup.position.set(localCoords.x, finalElevY + 6, localCoords.y);
 
-                // PERBAIKAN: Pemanggilan renderer.render() secara sinkron dari sini DIHAPUS 
-                // untuk mencegah konflik memori GPU (WebGL Context Lost) ketika render DXF.
                 // Main.js secara otomatis akan me-render pergerakan marker ini di frame berikutnya.
             },
             (error) => {

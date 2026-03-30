@@ -54,8 +54,10 @@ function initLayout() {
         geoState ? containerGeo.classList.remove('hidden') : containerGeo.classList.add('hidden');
         geoState ? containerGeo.classList.add('flex') : containerGeo.classList.remove('flex');
         
-        containerGeo.style.maxHeight = '';
-        containerGeo.style.height = '';
+        // Memastikan tinggi panel geometry visible & menyesuaikan isinya
+        containerGeo.classList.remove('flex-1', 'min-h-0');
+        containerGeo.style.maxHeight = 'none';
+        containerGeo.style.height = 'auto';
     }
     
     if (containerLayerList) {
@@ -156,30 +158,24 @@ if (toggleOrbit) {
 // GEOLOCATION UI LOGIC & VALIDATION
 // ==========================================
 
-// Fungsi untuk memvalidasi Ketersediaan Data dan Mengunci/Membuka Switch "ENABLE LOCATION"
 window.updateGeolocationState = function() {
     let hasData = false;
 
-    // Cek ketersediaan data (Pit/Disposal/DXF)
     if (typeof window.AppGeolocation !== 'undefined' && typeof window.AppGeolocation.checkActiveBounds === 'function') {
         hasData = window.AppGeolocation.checkActiveBounds().hasData;
     } else if (typeof appLayers !== 'undefined') {
         hasData = appLayers.some(l => (l.type === 'csv' || l.type === 'dxf') && l.visible && l.threeObject);
     }
 
-    // Target Switch "ENABLE LOCATION" yang telah disesuaikan ID-nya dengan index.html
     const geoToggleSwitch = document.getElementById('geo-location-toggle');
     if (geoToggleSwitch) {
         geoToggleSwitch.disabled = !hasData;
-        
-        // Memburamkan (opacity-50) container parent agar keseluruhan terlihat mati/disabled
         const wrapper = geoToggleSwitch.closest('.bg-slate-900\\/50') || geoToggleSwitch.parentElement.parentElement;
         
         if (!hasData) {
             if (wrapper) wrapper.classList.add('opacity-50', 'pointer-events-none');
             geoToggleSwitch.classList.add('cursor-not-allowed');
             
-            // Jika statusnya terlanjur ON, paksa matikan (OFF) karena datanya hilang
             if (geoToggleSwitch.checked) {
                 geoToggleSwitch.checked = false;
                 if (typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
@@ -192,7 +188,6 @@ window.updateGeolocationState = function() {
         }
     }
 
-    // Fallback jika masih menggunakan Button biasa (bukan toggle)
     const btnTrack = document.getElementById('btn-start-tracking');
     if (btnTrack) {
         btnTrack.disabled = !hasData;
@@ -210,7 +205,6 @@ window.updateGeolocationState = function() {
     }
 };
 
-// Event Listener saat User mengklik Switch "ENABLE LOCATION"
 const geoToggleSwitchNode = document.getElementById('geo-location-toggle');
 if (geoToggleSwitchNode) {
     geoToggleSwitchNode.addEventListener('change', (e) => {
@@ -226,15 +220,11 @@ if (geoToggleSwitchNode) {
             return;
         }
 
-        // Jalankan fungsi toggle tracking
         const isActive = window.AppGeolocation.toggleTracking();
-        
-        // Sinkronisasi status checked dengan balikan dari fungsi
         e.target.checked = isActive;
     });
 }
 
-// Fallback logic untuk tombol biasa (jika masih digunakan)
 const btnTrackNode = document.getElementById('btn-start-tracking');
 if (btnTrackNode) {
     btnTrackNode.addEventListener('click', () => {
@@ -273,7 +263,6 @@ window.pitResourceOpacity = 1.0;
 window.dispWasteOpacity = 1.0;
 window.labelOpacity = 1.0;
 
-// State Expand/Collapse per group
 window.isPitExpanded = typeof window.isPitExpanded !== 'undefined' ? window.isPitExpanded : true;
 window.isDispExpanded = typeof window.isDispExpanded !== 'undefined' ? window.isDispExpanded : true;
 
@@ -312,7 +301,6 @@ window.changeSublayerOpacity = function(type, value) {
     if (type === 'DispWaste') window.dispWasteOpacity = opacity;
     if (type === 'Label') {
         window.labelOpacity = opacity;
-        // Sinkronisasi seluruh slider opacity label (di Pit dan Disp)
         document.querySelectorAll('.label-opacity-slider').forEach(el => el.value = opacity);
     }
 
@@ -351,130 +339,144 @@ window.updateLayerUI = function() {
     const gl = document.getElementById('geometry-list');
     if (!gl) return;
     
-    gl.style.maxHeight = '';
-    gl.style.overflow = '';
-    gl.style.height = '';
+    gl.style.maxHeight = 'none';
+    gl.style.overflow = 'visible';
+    gl.style.height = 'auto';
     
     gl.innerHTML = '';
-    let hasGeometryData = false;
     
+    let hasPit = false;
+    let hasDisp = false;
+    let pitLayerId = 'layer_pit_reserve';
+    let dispLayerId = 'layer_disp_reserve';
+    
+    // [PERBAIKAN] Deteksi HasPit & HasDisp menggunakan Set dari geometry.js (Sangat Akurat)
+    if (typeof window.renderedPits !== 'undefined' && typeof window.renderedDisposals !== 'undefined') {
+        hasPit = window.renderedPits.size > 0;
+        hasDisp = window.renderedDisposals.size > 0;
+    } 
+    // Fallback deteksi via meshes (Jika Set gagal dibaca)
+    else if (typeof meshes !== 'undefined') {
+        Object.values(meshes).forEach(mesh => {
+            if (mesh.userData && mesh.userData.type === 'pit') hasPit = true;
+            if (mesh.userData && mesh.userData.type === 'disp') hasDisp = true;
+        });
+    }
+
+    // Mengambil Layer ID untuk fungsi Zooming dari appLayers (Hanya mencari ID, tidak mengubah status hasPit/hasDisp)
     if (typeof appLayers !== 'undefined') {
         appLayers.forEach(layer => {
             if (layer.type === 'csv') {
-                hasGeometryData = true;
-                
-                const pitWasteEye = window.isPitWasteVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
-                const pitResourceEye = window.isPitResourceVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
-                const dispWasteEye = window.isDispWasteVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
-                const labelEye = window.isLabelLayerVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
-
-                const pitChevron = window.isPitExpanded ? 'fa-chevron-down' : 'fa-chevron-right';
-                const dispChevron = window.isDispExpanded ? 'fa-chevron-down' : 'fa-chevron-right';
-
-                // --- 1. DROPDOWN PIT DATA ---
-                const pitHeader = document.createElement('div');
-                pitHeader.className = `flex shrink-0 items-center justify-between bg-slate-800/80 border border-slate-700 py-1.5 px-2 rounded hover:border-slate-500 transition-colors`;
-                pitHeader.innerHTML = `
-                   <div class="flex-1 flex items-center gap-2 cursor-pointer overflow-hidden pr-2" onclick="window.zoomToLayer('${layer.id}')" title="Zoom to Pit Data">
-                      <div class="w-4 h-4 rounded-full shrink-0 flex items-center justify-center">
-                          <div class="w-2.5 h-2.5 rounded-full color-dot bg-blue-500"></div>
-                      </div>
-                      <span class="text-[10px] text-blue-400 font-bold truncate mt-[1px] tracking-wider uppercase">Pit Data</span>
-                   </div>
-                   <div class="flex items-center shrink-0">
-                       <button onclick="window.togglePitExpand()" class="text-slate-400 hover:text-white flex items-center justify-center w-5 h-5 shrink-0">
-                           <i class="fa-solid ${pitChevron} text-[10px]"></i>
-                       </button>
-                   </div>
-                `;
-
-                const pitContent = document.createElement('div');
-                pitContent.className = "flex flex-col gap-0.5 mb-2 transition-all duration-300";
-                if (!window.isPitExpanded) pitContent.classList.add('hidden');
-                pitContent.innerHTML = `
-                    <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600">
-                        <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-truck-moving text-slate-500 text-[9px] w-3 text-center"></i> Waste</span>
-                        <div class="flex items-center shrink-0">
-                            <input type="range" min="0" max="1" step="0.1" value="${window.pitWasteOpacity}" oninput="window.changeSublayerOpacity('PitWaste', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider" title="Opacity Pit Waste">
-                            <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
-                                <button onclick="window.toggleSublayer('PitWaste')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${pitWasteEye} text-[10px]"></i></button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600">
-                        <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-gem text-slate-500 text-[9px] w-3 text-center"></i> Resource</span>
-                        <div class="flex items-center shrink-0">
-                            <input type="range" min="0" max="1" step="0.1" value="${window.pitResourceOpacity}" oninput="window.changeSublayerOpacity('PitResource', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider" title="Opacity Pit Resource">
-                            <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
-                                <button onclick="window.toggleSublayer('PitResource')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${pitResourceEye} text-[10px]"></i></button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600 rounded-br">
-                        <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-tag text-slate-500 text-[9px] w-3 text-center"></i> Labels</span>
-                        <div class="flex items-center shrink-0">
-                            <input type="range" min="0" max="1" step="0.1" value="${window.labelOpacity}" oninput="window.changeSublayerOpacity('Label', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider label-opacity-slider" title="Opacity Labels">
-                            <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
-                                <button onclick="window.toggleSublayer('Label')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${labelEye} text-[10px]"></i></button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                // --- 2. DROPDOWN DISPOSAL DATA (EMERALD) ---
-                const dispHeader = document.createElement('div');
-                dispHeader.className = `flex shrink-0 items-center justify-between bg-slate-800/80 border border-slate-700 py-1.5 px-2 rounded hover:border-slate-500 transition-colors`;
-                dispHeader.innerHTML = `
-                   <div class="flex-1 flex items-center gap-2 cursor-pointer overflow-hidden pr-2" onclick="window.zoomToLayer('${layer.id}')" title="Zoom to Disposal Data">
-                      <div class="w-4 h-4 rounded-full shrink-0 flex items-center justify-center">
-                          <div class="w-2.5 h-2.5 rounded-full color-dot bg-emerald-500"></div>
-                      </div>
-                      <span class="text-[10px] text-emerald-400 font-bold truncate mt-[1px] tracking-wider uppercase">Disposal Data</span>
-                   </div>
-                   <div class="flex items-center shrink-0">
-                       <button onclick="window.toggleDispExpand()" class="text-slate-400 hover:text-white flex items-center justify-center w-5 h-5 shrink-0">
-                           <i class="fa-solid ${dispChevron} text-[10px]"></i>
-                       </button>
-                   </div>
-                `;
-
-                const dispContent = document.createElement('div');
-                dispContent.className = "flex flex-col gap-0.5 mb-2 transition-all duration-300";
-                if (!window.isDispExpanded) dispContent.classList.add('hidden');
-                dispContent.innerHTML = `
-                    <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600">
-                        <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-mountain text-slate-500 text-[9px] w-3 text-center"></i> Waste</span>
-                        <div class="flex items-center shrink-0">
-                            <input type="range" min="0" max="1" step="0.1" value="${window.dispWasteOpacity}" oninput="window.changeSublayerOpacity('DispWaste', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider" title="Opacity Disposal Waste">
-                            <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
-                                <button onclick="window.toggleSublayer('DispWaste')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${dispWasteEye} text-[10px]"></i></button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600 rounded-br">
-                        <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-tag text-slate-500 text-[9px] w-3 text-center"></i> Labels</span>
-                        <div class="flex items-center shrink-0">
-                            <input type="range" min="0" max="1" step="0.1" value="${window.labelOpacity}" oninput="window.changeSublayerOpacity('Label', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider label-opacity-slider" title="Opacity Labels">
-                            <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
-                                <button onclick="window.toggleSublayer('Label')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${labelEye} text-[10px]"></i></button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                gl.appendChild(pitHeader);
-                gl.appendChild(pitContent);
-                gl.appendChild(dispHeader);
-                gl.appendChild(dispContent);
+                if (layer.id && layer.id.toLowerCase().includes('disp')) dispLayerId = layer.id;
+                else if (layer.id && layer.id.toLowerCase().includes('pit')) pitLayerId = layer.id;
             }
         });
     }
 
-    if (!hasGeometryData) {
-        gl.innerHTML = '<div class="text-[9px] text-slate-500 italic text-center py-1 flex-1">Belum ada Geometri</div>';
-    }
+    const pitWasteEye = window.isPitWasteVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
+    const pitResourceEye = window.isPitResourceVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
+    const dispWasteEye = window.isDispWasteVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
+    const labelEye = window.isLabelLayerVisible ? 'fa-eye' : 'fa-eye-slash text-slate-500';
 
-    // Panggil Validasi Geolocation setiap kali list Layer/Geometry berubah
+    const pitChevron = window.isPitExpanded ? 'fa-chevron-down' : 'fa-chevron-right';
+    const dispChevron = window.isDispExpanded ? 'fa-chevron-down' : 'fa-chevron-right';
+
+    // Kelas khusus saat data kosong: transparan (redup) dan unclickable
+    const pitEmptyClass = !hasPit ? 'opacity-40 grayscale pointer-events-none' : '';
+    const dispEmptyClass = !hasDisp ? 'opacity-40 grayscale pointer-events-none' : '';
+
+    // ==========================================
+    // 1. DROPDOWN PIT DATA
+    // ==========================================
+    const pitHeader = document.createElement('div');
+    pitHeader.className = `flex shrink-0 items-center justify-between bg-slate-800/80 border border-slate-700 py-1.5 px-2 rounded hover:border-slate-500 transition-colors ${pitEmptyClass}`;
+    pitHeader.innerHTML = `
+       <div class="flex-1 flex items-center gap-2 cursor-pointer overflow-hidden pr-2" onclick="window.zoomToLayer('${pitLayerId}')" title="Zoom to Pit Data">
+          <div class="w-4 h-4 rounded-full shrink-0 flex items-center justify-center">
+              <div class="w-2.5 h-2.5 rounded-full color-dot bg-blue-500"></div>
+          </div>
+          <span class="text-[10px] text-blue-400 font-bold truncate mt-[1px] tracking-wider uppercase">Pit Data</span>
+       </div>
+       <div class="flex items-center shrink-0 pointer-events-auto">
+           <button onclick="window.togglePitExpand()" class="text-slate-400 hover:text-white flex items-center justify-center w-5 h-5 shrink-0" title="Toggle Pit Detail">
+               <i class="fa-solid ${pitChevron} text-[10px]"></i>
+           </button>
+       </div>
+    `;
+
+    const pitContent = document.createElement('div');
+    pitContent.className = `flex flex-col gap-0.5 mb-2 transition-all duration-300 ${pitEmptyClass}`;
+    if (!window.isPitExpanded) pitContent.classList.add('hidden');
+    pitContent.innerHTML = `
+        <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600">
+            <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-truck-moving text-slate-500 text-[9px] w-3 text-center"></i> Waste</span>
+            <div class="flex items-center shrink-0">
+                <input type="range" min="0" max="1" step="0.1" value="${window.pitWasteOpacity}" oninput="window.changeSublayerOpacity('PitWaste', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider" title="Opacity Pit Waste">
+                <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
+                    <button onclick="window.toggleSublayer('PitWaste')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${pitWasteEye} text-[10px]"></i></button>
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600">
+            <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-gem text-slate-500 text-[9px] w-3 text-center"></i> Resource</span>
+            <div class="flex items-center shrink-0">
+                <input type="range" min="0" max="1" step="0.1" value="${window.pitResourceOpacity}" oninput="window.changeSublayerOpacity('PitResource', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider" title="Opacity Pit Resource">
+                <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
+                    <button onclick="window.toggleSublayer('PitResource')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${pitResourceEye} text-[10px]"></i></button>
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600 rounded-br">
+            <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-tag text-slate-500 text-[9px] w-3 text-center"></i> Labels</span>
+            <div class="flex items-center shrink-0">
+                <input type="range" min="0" max="1" step="0.1" value="${window.labelOpacity}" oninput="window.changeSublayerOpacity('Label', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider label-opacity-slider" title="Opacity Labels">
+                <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
+                    <button onclick="window.toggleSublayer('Label')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${labelEye} text-[10px]"></i></button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // ==========================================
+    // 2. DROPDOWN DISPOSAL DATA
+    // ==========================================
+    const dispHeader = document.createElement('div');
+    dispHeader.className = `flex shrink-0 items-center justify-between bg-slate-800/80 border border-slate-700 py-1.5 px-2 rounded hover:border-slate-500 transition-colors ${dispEmptyClass}`;
+    dispHeader.innerHTML = `
+       <div class="flex-1 flex items-center gap-2 cursor-pointer overflow-hidden pr-2" onclick="window.zoomToLayer('${dispLayerId}')" title="Zoom to Disposal Data">
+          <div class="w-4 h-4 rounded-full shrink-0 flex items-center justify-center">
+              <div class="w-2.5 h-2.5 rounded-full color-dot bg-emerald-500"></div>
+          </div>
+          <span class="text-[10px] text-emerald-400 font-bold truncate mt-[1px] tracking-wider uppercase">Disposal Data</span>
+       </div>
+       <div class="flex items-center shrink-0 pointer-events-auto">
+           <button onclick="window.toggleDispExpand()" class="text-slate-400 hover:text-white flex items-center justify-center w-5 h-5 shrink-0" title="Toggle Disposal Detail">
+               <i class="fa-solid ${dispChevron} text-[10px]"></i>
+           </button>
+       </div>
+    `;
+
+    const dispContent = document.createElement('div');
+    dispContent.className = `flex flex-col gap-0.5 mb-2 transition-all duration-300 ${dispEmptyClass}`;
+    if (!window.isDispExpanded) dispContent.classList.add('hidden');
+    
+    dispContent.innerHTML = `
+        <div class="flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600 rounded-br">
+            <span class="text-[9px] text-slate-400 font-medium flex items-center gap-2 mt-[1px]"><i class="fa-solid fa-mountain text-slate-500 text-[9px] w-3 text-center"></i> Waste</span>
+            <div class="flex items-center shrink-0">
+                <input type="range" min="0" max="1" step="0.1" value="${window.dispWasteOpacity}" oninput="window.changeSublayerOpacity('DispWaste', this.value)" class="w-12 h-1 bg-slate-600 appearance-none cursor-pointer mr-3 rounded opacity-slider" title="Opacity Disposal Waste">
+                <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
+                    <button onclick="window.toggleSublayer('DispWaste')" class="text-slate-400 hover:text-white flex items-center justify-center w-4 h-4 shrink-0"><i class="fa-solid ${dispWasteEye} text-[10px]"></i></button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    gl.appendChild(pitHeader);
+    gl.appendChild(pitContent);
+    gl.appendChild(dispHeader);
+    gl.appendChild(dispContent);
+
     if (typeof window.updateGeolocationState === 'function') {
         window.updateGeolocationState();
     }

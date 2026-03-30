@@ -31,6 +31,15 @@
         .tool-btn { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(30, 41, 59, 0.5); color: #94a3b8; font-size: 14px; transition: all 0.2s; border: 1px solid transparent; outline: none; }
         .tool-btn:hover { background: rgba(51, 65, 85, 0.8); color: #fff; }
         .tool-btn.active-tool { background: rgba(59, 130, 246, 0.3); color: #60a5fa; border-color: rgba(59, 130, 246, 0.5); }
+        
+        /* Auto-Record Button Fix */
+        .btn-record { color: #34d399 !important; /* selalu emerald-400 */ }
+        .btn-record.is-active, .btn-record.is-active:hover { 
+            background: rgba(16, 185, 129, 0.25) !important; 
+            border-color: rgba(16, 185, 129, 0.5) !important; 
+            /* tidak ada efek hover (perubahan bg) saat sedang ON */
+        }
+
         .action-btn { flex: 1; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 6px; background: rgba(30, 41, 59, 0.5); color: #94a3b8; font-size: 14px; transition: all 0.2s; outline: none; border: 1px solid transparent; }
         .action-btn:hover { background: rgba(51, 65, 85, 0.8); color: #fff; }
 
@@ -89,7 +98,7 @@
                         <input type="checkbox" id="cb-layout-geo" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Geometry
                     </label>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
-                        <input type="checkbox" id="cb-layout-layer" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Layer List
+                        <input type="checkbox" id="cb-layout-layer" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Drawings
                     </label>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
                         <input type="checkbox" id="cb-layout-helper" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Control
@@ -875,31 +884,30 @@
 
                         <!-- MIDDLE SECTION: FLEX CONTAINER UNTUK MEMENUHI TINGGI -->
                         <div class="flex-1 flex flex-col gap-2 min-h-0 w-full">
-                            <!-- Panel Geometry (Expandable) -->
-                            <div id="container-geometry" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0 hidden">
+                            <!-- Panel Geometry -->
+                            <div id="container-geometry" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col hidden h-auto max-h-none shrink-0">
                                 <div class="p-2.5 lg:p-2 border-b border-slate-700 flex items-center justify-between bg-slate-800/30 rounded-t shrink-0">
                                     <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                                         <i class="fa-solid fa-cube text-green-400"></i> Geometry
                                     </h3>
                                 </div>
-                                <div class="p-2.5 lg:p-2 flex-1 flex flex-col gap-2 lg:gap-1.5 min-h-0">
-                                    <div id="geometry-list" class="flex flex-col gap-1.5 lg:gap-1 flex-1 overflow-y-auto pr-1 h-full">
+                                <div class="p-2.5 lg:p-2 flex flex-col gap-2 lg:gap-1.5">
+                                    <div id="geometry-list" class="flex flex-col gap-1.5 lg:gap-1 pr-1 h-auto">
                                         <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada Geometri</div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- Panel Layer List (Expandable) -->
-                            <div id="container-layerlist" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex-1 flex flex-col min-h-0 hidden">
+                            <!-- Panel Drawings (Menjadi flex-1 agar merenggang sampai container control) -->
+                            <div id="container-layerlist" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col hidden flex-1 min-h-0 overflow-hidden">
                                 <div class="p-2.5 lg:p-2 border-b border-slate-700 flex items-center justify-between rounded-t bg-slate-800/30 shrink-0">
                                     <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                                        <i class="fa-solid fa-layer-group text-blue-400"></i> Layer List
+                                        <i class="fa-solid fa-pen-ruler text-amber-400"></i> Drawings
                                     </h3>
-                                    <span class="text-[10px] lg:text-[9px] font-mono text-slate-400"><span id="layer-count">0</span>/5</span>
                                 </div>
-                                <div class="p-2.5 lg:p-2 flex-1 flex flex-col gap-2 lg:gap-1.5 min-h-0">
-                                    <div id="layer-list" class="flex flex-col gap-1.5 lg:gap-1 flex-1 overflow-y-auto pr-1 h-full">
-                                        <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada DXF Layer</div>
+                                <div class="p-2.5 lg:p-2 flex flex-col gap-2 lg:gap-1.5 flex-1 overflow-y-auto">
+                                    <div id="drawing-list" class="flex flex-col gap-1.5 lg:gap-1 pr-1 h-auto">
+                                        <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada Drawing</div>
                                     </div>
                                 </div>
                             </div>
@@ -922,16 +930,8 @@
                                             <button class="tool-btn" data-mode="select_block" title="Seleksi 1 Block Utuh (Shift+Klik)"><i class="fa-solid fa-cube"></i></button>
                                             <button class="tool-btn" data-mode="box_select" title="Seleksi Kotak (Shift+Drag)"><i class="fa-solid fa-vector-square"></i></button>
                                             <button class="tool-btn" data-mode="poly_select" title="Seleksi Poligon (Alt+Klik) -> Enter"><i class="fa-solid fa-draw-polygon"></i></button>
-                                            <button class="tool-btn text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20" onclick="window.recordSelectedMeshes()" title="Record by Selection"><i class="fa-solid fa-check-double"></i></button>
-                                        </div>
-                                    </div>
-
-                                    <!-- Draw Row -->
-                                    <div class="flex items-center px-1">
-                                        <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Draw</span>
-                                        <div class="flex gap-1.5 lg:gap-1 flex-wrap">
-                                            <button class="tool-btn" data-mode="draw_line" title="Draw Line (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-pen"></i></button>
-                                            <button class="tool-btn" data-mode="draw_area" title="Draw Area (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-draw-polygon"></i></button>
+                                            <!-- PERUBAHAN: Kelas tombol auto record diatur lebih simpel menggunakan .btn-record -->
+                                            <button id="btn-toggle-record" class="tool-btn btn-record" onclick="window.toggleAutoRecord()" title="Auto-Record: OFF"><i class="fa-solid fa-check-double"></i></button>
                                         </div>
                                     </div>
 
@@ -939,8 +939,10 @@
                                     <div class="flex items-center px-1">
                                         <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Action</span>
                                         <div class="flex gap-1.5 lg:gap-1 flex-wrap">
-                                            <button class="tool-btn" onclick="window.undoLastRecord()" title="Undo Record (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
-                                            <button class="tool-btn" onclick="window.redoLastUndo()" title="Redo Record (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
+                                            <button class="tool-btn" data-mode="draw_line" title="Draw Line (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-pen"></i></button>
+                                            <button class="tool-btn" data-mode="draw_area" title="Draw Area (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-draw-polygon"></i></button>
+                                            <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.undoLastRecord()" title="Undo Record (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
+                                            <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.redoLastUndo()" title="Redo Record (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
                                             <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.resetSequenceAndView()" title="Reset & Unhide (X / Esc)"><i class="fa-solid fa-xmark"></i></button>
                                         </div>
                                     </div>
@@ -957,14 +959,19 @@
                                     <div id="orbit-trackpad" class="flex-1 h-44 lg:h-40 bg-slate-900/80 rounded border border-slate-700 flex items-center justify-center cursor-move shadow-inner relative overflow-hidden select-none group touch-none">
                                     </div>
                                     
-                                    <!-- Orbit Tools (Vertical) -->
-                                    <div class="flex flex-col gap-1.5 lg:gap-1 shrink-0">
-                                        <button class="tool-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 shadow backdrop-blur-sm text-blue-400 hover:text-blue-300 transition-colors" data-mode="center_pivot" title="Set Center Pivot (C)">
+                                    <!-- Orbit Tools (Vertical) - Dibuat sejajar tingginya dengan trackpad -->
+                                    <div class="flex flex-col gap-1.5 lg:gap-1 shrink-0 h-44 lg:h-40 w-[34px] lg:w-[28px]">
+                                        <!-- Tombol Center Pivot -->
+                                        <button class="tool-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 shadow backdrop-blur-sm text-blue-400 hover:text-blue-300 transition-colors shrink-0" data-mode="center_pivot" title="Set Center Pivot (C)">
                                             <i class="fa-solid fa-crosshairs"></i>
                                         </button>
-                                        <button class="tool-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 shadow backdrop-blur-sm text-slate-400 hover:text-slate-300 transition-colors" data-mode="pan_camera" title="Pan Camera">
-                                            <i class="fa-solid fa-hand"></i>
-                                        </button>
+                                        
+                                        <!-- Vertical Smooth Zoom Slider - Lebih rapi dan pas ukurannya -->
+                                        <div class="flex-1 bg-slate-900/80 border border-slate-700 rounded flex flex-col items-center justify-center py-1.5 shadow-inner w-full min-h-0">
+                                            <i class="fa-solid fa-plus text-[9px] text-slate-500 shrink-0 mb-0.5"></i>
+                                            <input type="range" id="zoom-slider" orient="vertical" min="0" max="100" value="50" step="0.01" style="-webkit-appearance: slider-vertical; width: 6px;" class="flex-1 cursor-ns-resize accent-slate-400 bg-slate-700 outline-none rounded-full transition-colors min-h-0" title="Smooth Zoom">
+                                            <i class="fa-solid fa-minus text-[9px] text-slate-500 shrink-0 mt-0.5"></i>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

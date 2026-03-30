@@ -41,6 +41,23 @@ var activeLabels = [];
 window.is3DRenderingActive = false;
 window.animationFrameId = null;
 
+// ==========================================
+// [PERBAIKAN GC THRESHING]: PRE-ALLOCATED MATH OBJECTS
+// Objek-objek ini didaur ulang dalam loop untuk mencegah Tablet membuat ratusan objek baru per detik (Jank/Stutter Free)
+// ==========================================
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
+const _v5 = new THREE.Vector3();
+const _v6 = new THREE.Vector3();
+const _v2D = new THREE.Vector2();
+const _q1 = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _q3 = new THREE.Quaternion();
+const _axisY = new THREE.Vector3(0, 1, 0);
+// ==========================================
+
 window.pause3D = function() {
     if (!window.is3DRenderingActive) return;
     window.is3DRenderingActive = false;
@@ -93,6 +110,10 @@ const COLOR_SELECTED = 0x2b5b84;
 // 3D & INTERACTION INITIALIZATION
 // ==========================================
 function init3D() {
+    // GUARD: Cegah multi-inisialisasi yang menumpuk memory listener pada tab switching
+    if (window._is3DInitialized) return;
+    window._is3DInitialized = true;
+
     const container = document.getElementById('canvas-container');
 
     scene = new THREE.Scene();
@@ -119,8 +140,6 @@ function init3D() {
 
     renderer.domElement.addEventListener('webglcontextrestored', function(e) {
         console.log("WEBGL CONTEXT RESTORED");
-        // Kita tidak bisa auto-resume dengan mudah karena data scene harus dikompilasi ulang oleh GPU, 
-        // lebih aman meminta user refresh halaman setelah context lost.
     }, false);
     
     renderer.setSize(container.clientWidth, container.clientHeight);
@@ -132,18 +151,89 @@ function init3D() {
     
     container.appendChild(renderer.domElement);
 
+    // ==========================================
+    // SETUP KONTROL KANVAS UTAMA
+    // ==========================================
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     
-    controls.zoomSpeed = 3.5;
+    controls.zoomSpeed = 3.5; 
     controls.panSpeed = 1.5;
-
-    controls.enableDamping = false;
+    controls.enableDamping = false; // Damping dimatikan baik untuk performa CPU tablet
     
     controls.mouseButtons = {
         LEFT: THREE.MOUSE.PAN,
         MIDDLE: null, 
         RIGHT: null   
     };
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+        if (e.ctrlKey && typeof controls !== 'undefined') {
+            controls.enabled = false;
+        }
+    }, true);
+
+    // ==========================================
+    // SMOOTH VERTICAL ZOOM SLIDER LOGIC
+    // ==========================================
+    const zoomSlider = document.getElementById('zoom-slider');
+    if (zoomSlider) {
+        const MIN_DIST = 10;
+        const MAX_DIST = 20000;
+        
+        const minLog = Math.log(MIN_DIST);
+        const maxLog = Math.log(MAX_DIST);
+
+        let isSliderDragging = false;
+        zoomSlider.addEventListener('pointerdown', () => isSliderDragging = true);
+        zoomSlider.addEventListener('pointerup', () => isSliderDragging = false);
+
+        const updateZoomSlider = () => {
+            if (isSliderDragging) return;
+            const dist = camera.position.distanceTo(controls.target);
+            const clampedDist = Math.max(MIN_DIST, Math.min(MAX_DIST, dist));
+            const logDist = Math.log(clampedDist);
+            
+            const percentage = 100 - ((logDist - minLog) / (maxLog - minLog)) * 100;
+            zoomSlider.value = percentage;
+        };
+
+        controls.addEventListener('change', updateZoomSlider);
+
+        zoomSlider.addEventListener('input', (e) => {
+            const percentage = 100 - parseFloat(e.target.value);
+            const logDist = minLog + (percentage / 100) * (maxLog - minLog);
+            const targetDist = Math.exp(logDist);
+
+            // [OPTIMASI] Gunakan memori daur ulang _v1
+            _v1.copy(camera.position).sub(controls.target).normalize();
+            if (_v1.lengthSq() === 0) _v1.set(0, 1, 0); 
+
+            _v1.multiplyScalar(targetDist);
+            camera.position.copy(controls.target).add(_v1);
+            
+            controls.update(); 
+        });
+
+        zoomSlider.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            e.stopPropagation(); 
+            
+            const scrollStep = 0.2; 
+            let currentVal = parseFloat(zoomSlider.value);
+            
+            if (e.deltaY < 0) {
+                currentVal += scrollStep;
+            } else if (e.deltaY > 0) {
+                currentVal -= scrollStep;
+            }
+            
+            zoomSlider.value = Math.max(0, Math.min(100, currentVal));
+            zoomSlider.dispatchEvent(new Event('input')); 
+        }, { passive: false });
+        
+        updateZoomSlider();
+    }
+    // ==========================================
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -261,8 +351,8 @@ function init3D() {
 
         if (!hasObj || box.isEmpty()) return;
 
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(_v1);
+        const size = box.getSize(_v2);
         const maxDim = Math.max(size.x, size.z) || 100;
         
         const fov = camera.fov * (Math.PI / 180);
@@ -285,7 +375,9 @@ function init3D() {
         camera.aspect = container.clientWidth / container.clientHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(container.clientWidth, container.clientHeight);
-        if(!document.getElementById('gcp-modal').classList.contains('hidden')) {
+        
+        const gcpModal = document.getElementById('gcp-modal');
+        if(gcpModal && !gcpModal.classList.contains('hidden')) {
             if(typeof resizeLeftCanvas === 'function') resizeLeftCanvas();
             if(typeof resizeRightCanvas === 'function') resizeRightCanvas();
         }
@@ -301,10 +393,10 @@ function init3D() {
     container.addEventListener('contextmenu', (e) => { e.preventDefault(); });
 
     container.addEventListener('pointerdown', (e) => {
-        if (e.button === 0) window.onPointerDown(e);
+        if (e.button === 0 && typeof window.onPointerDown === 'function') window.onPointerDown(e);
     });
-    container.addEventListener('pointermove', window.onPointerMove);
-    container.addEventListener('pointerup', window.onPointerUp);
+    if (typeof window.onPointerMove === 'function') container.addEventListener('pointermove', window.onPointerMove);
+    if (typeof window.onPointerUp === 'function') container.addEventListener('pointerup', window.onPointerUp);
 
     container.addEventListener('pointerdown', (e) => {
         if (e.button === 1) { 
@@ -312,11 +404,12 @@ function init3D() {
             if (!window.is3DRenderingActive) return; 
             
             const rect = container.getBoundingClientRect();
-            const nMouse = new THREE.Vector2();
-            nMouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-            nMouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            // [OPTIMASI]: Gunakan memori vektor daur ulang
+            _v2D.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            _v2D.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-            raycaster.setFromCamera(nMouse, camera);
+            raycaster.setFromCamera(_v2D, camera);
 
             const intersectable = [];
             if (pitReserveGroup && pitReserveGroup.visible) {
@@ -336,7 +429,8 @@ function init3D() {
             }
 
             isCustomOrbiting = true;
-            lastMousePos = { x: e.clientX, y: e.clientY };
+            lastMousePos.x = e.clientX;
+            lastMousePos.y = e.clientY;
             controls.enabled = false; 
         }
     });
@@ -345,43 +439,48 @@ function init3D() {
         if (isCustomOrbiting && window.is3DRenderingActive) {
             const deltaX = e.clientX - lastMousePos.x;
             const deltaY = e.clientY - lastMousePos.y;
-            lastMousePos = { x: e.clientX, y: e.clientY };
+            lastMousePos.x = e.clientX;
+            lastMousePos.y = e.clientY;
 
             const rotationSpeed = 0.005; 
             const angleX = -deltaX * rotationSpeed;
             const angleY = -deltaY * rotationSpeed;
 
-            const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angleX);
+            // [OPTIMASI MEMORI EKSTREM]: Zero Allocation per frame drag
+            _q1.setFromAxisAngle(_axisY, angleX); 
 
-            const camDir = new THREE.Vector3();
-            camera.getWorldDirection(camDir);
-            const right = new THREE.Vector3().crossVectors(camera.up, camDir.negate()).normalize();
+            camera.getWorldDirection(_v1); 
+            _v2.crossVectors(camera.up, _v1.negate()).normalize(); 
             
-            let qX = new THREE.Quaternion();
-            if (right.lengthSq() > 0.001) {
-                qX.setFromAxisAngle(right, angleY);
+            _q2.identity(); 
+            if (_v2.lengthSq() > 0.001) {
+                _q2.setFromAxisAngle(_v2, angleY);
             }
 
-            const q = new THREE.Quaternion().multiplyQuaternions(qY, qX);
+            _q3.multiplyQuaternions(_q1, _q2); 
 
-            const camOffset = camera.position.clone().sub(orbitPivot);
-            camOffset.applyQuaternion(q);
-            const newCamPos = orbitPivot.clone().add(camOffset);
+            // Kalkulasi Camera Pos
+            _v3.copy(camera.position).sub(orbitPivot); 
+            _v3.applyQuaternion(_q3);
+            _v4.copy(orbitPivot).add(_v3); 
 
-            const targetOffset = controls.target.clone().sub(orbitPivot);
-            targetOffset.applyQuaternion(q);
-            const newTarget = orbitPivot.clone().add(targetOffset);
+            // Kalkulasi Target Pos
+            _v5.copy(controls.target).sub(orbitPivot); 
+            _v5.applyQuaternion(_q3);
+            _v6.copy(orbitPivot).add(_v5); 
 
-            const newDir = newTarget.clone().sub(newCamPos).normalize();
-            if (Math.abs(newDir.y) < 0.99) {
-                camera.position.copy(newCamPos);
-                controls.target.copy(newTarget);
+            // Fallback Cek Sudut Putaran
+            _v1.copy(_v6).sub(_v4).normalize(); 
+            
+            if (Math.abs(_v1.y) < 0.99) {
+                camera.position.copy(_v4);
+                controls.target.copy(_v6);
             } else {
-                camOffset.copy(camera.position).sub(orbitPivot).applyQuaternion(qY);
-                camera.position.copy(orbitPivot).add(camOffset);
+                _v3.copy(camera.position).sub(orbitPivot).applyQuaternion(_q1);
+                camera.position.copy(orbitPivot).add(_v3);
 
-                targetOffset.copy(controls.target).sub(orbitPivot).applyQuaternion(qY);
-                controls.target.copy(orbitPivot).add(targetOffset);
+                _v5.copy(controls.target).sub(orbitPivot).applyQuaternion(_q1);
+                controls.target.copy(orbitPivot).add(_v5);
             }
 
             camera.lookAt(controls.target);
@@ -474,24 +573,25 @@ function init3D() {
             const angleX = -deltaX * rotationSpeed;
             const angleY = deltaY * rotationSpeed; 
 
-            const offset = camera.position.clone().sub(controls.target);
-            
-            const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angleX);
-            offset.applyQuaternion(qY);
+            // [OPTIMASI MEMORI]: Gunakan Vektor Global (Zero allocation)
+            _v1.copy(camera.position).sub(controls.target); 
+            _q1.setFromAxisAngle(_axisY, angleX); 
+            _v1.applyQuaternion(_q1);
 
-            const camDir = new THREE.Vector3().copy(offset).negate().normalize();
-            const right = new THREE.Vector3().crossVectors(camera.up, camDir).normalize();
+            _v2.copy(_v1).negate().normalize(); 
+            _v3.crossVectors(camera.up, _v2).normalize(); 
             
-            if (right.lengthSq() > 0.001) {
-                const qX = new THREE.Quaternion().setFromAxisAngle(right, angleY);
-                const testOffset = offset.clone().applyQuaternion(qX);
+            if (_v3.lengthSq() > 0.001) {
+                _q2.setFromAxisAngle(_v3, angleY);
+                _v4.copy(_v1).applyQuaternion(_q2); 
                 
-                if (Math.abs(testOffset.clone().normalize().y) < 0.99) {
-                    offset.copy(testOffset);
+                _v5.copy(_v4).normalize();
+                if (Math.abs(_v5.y) < 0.99) {
+                    _v1.copy(_v4);
                 }
             }
 
-            camera.position.copy(controls.target).add(offset);
+            camera.position.copy(controls.target).add(_v1);
             camera.lookAt(controls.target);
             controls.update();
         });
@@ -594,8 +694,9 @@ function animate() {
         }
 
         if (trackpad && trackpad.clientWidth > 0) {
-            const offset = camera.position.clone().sub(controls.target).normalize().multiplyScalar(2.5);
-            padCamera.position.copy(offset);
+            // [OPTIMASI MEMORI]: Gunakan objek Vektor daur ulang agar tidak tercipta 60x per detik (.clone())
+            _v1.copy(camera.position).sub(controls.target).normalize().multiplyScalar(2.5);
+            padCamera.position.copy(_v1);
             padCamera.quaternion.copy(camera.quaternion);
             
             padRenderer.render(padScene, padCamera);

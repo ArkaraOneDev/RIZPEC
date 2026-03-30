@@ -1,5 +1,6 @@
 // ==============================================================
 // UI STATE MANAGEMENT (Pit Data Subfolders & CSV Setting)
+// OPTIMIZED FOR MEMORY LEAK PREVENTION (HUAWEI MATEPAD)
 // ==============================================================
 
 window.pitStates = {};
@@ -8,6 +9,7 @@ window.lastActivePitId = null;
 window._lastSelectedFolderName = null; 
 window.hasUnsavedColorChanges = false; 
 window.hasUnsavedPitConfigChanges = false; 
+window.pitColorModes = JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {};
 
 window.discardUnsavedPitConfigChanges = async function() {
     if (window.hasUnsavedPitConfigChanges && window.activePitId) {
@@ -55,6 +57,133 @@ window.applyPitSafetyDisable = function() {
         }
     });
 };
+
+// ==============================================================
+// [PERBAIKAN MEMORY LEAK]: GLOBAL EVENT DELEGATION
+// Mengganti listener di dalam loop (innerHTML) menjadi terpusat 
+// ==============================================================
+document.addEventListener('change', async (e) => {
+    // 1. Checkbox Pit Geometry
+    if (e.target && e.target.classList.contains('pit-checkbox')) {
+        const pit = e.target.getAttribute('data-pit');
+        const containerDiv = e.target.closest('.group');
+        const textSpan = containerDiv.querySelector('span.font-bold');
+        const customCb = containerDiv.querySelector('.checkbox-box');
+        const checkIcon = customCb.querySelector('i');
+
+        if(e.target.checked) {
+            customCb.className = "checkbox-box w-5 h-5 rounded-sm border bg-blue-500 border-blue-500 flex items-center justify-center transition-colors shrink-0";
+            checkIcon.className = "fa-solid fa-check text-white text-[10px] opacity-100 transition-opacity";
+            textSpan.className = "text-blue-400 transition-colors font-bold text-[11px] truncate";
+            containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-blue-500/50 shadow-sm p-2 rounded-md transition-all hover:bg-slate-800 group";
+            
+            window.loadedPits.add(pit);
+            
+            const geoTab = document.getElementById('panel-geometry');
+            const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
+            
+            if (isGeoTabActive) {
+                if (typeof window.renderPendingPits === 'function') await window.renderPendingPits();
+            } else {
+                const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
+                if (tabBtn) {
+                    tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
+                    setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
+                }
+            }
+        } else {
+            customCb.className = "checkbox-box w-5 h-5 rounded-sm border bg-slate-800 border-slate-600 group-hover:border-blue-400 flex items-center justify-center transition-colors shrink-0";
+            checkIcon.className = "fa-solid fa-check text-white text-[10px] opacity-0 transition-opacity";
+            textSpan.className = "text-slate-300 transition-colors font-bold text-[11px] truncate";
+            containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-slate-700/80 p-2 rounded-md transition-all hover:bg-slate-800 group";
+            
+            window.loadedPits.delete(pit);
+            window.renderedPits.delete(pit);
+            if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
+        }
+    }
+
+    // 2. Select Color Mode (Burden/Subset)
+    if (e.target && e.target.classList.contains('pit-color-mode-select')) {
+        const pit = e.target.getAttribute('data-pit');
+        const newMode = e.target.value;
+        if (window.pitColorModes[pit] !== newMode) {
+            window.pitColorModes[pit] = newMode;
+            localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
+            
+            if (window.loadedPits.has(pit)) {
+                if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
+                if (window.renderedPits) window.renderedPits.delete(pit);
+                
+                const geoTab = document.getElementById('panel-geometry');
+                const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
+                
+                if (isGeoTabActive) {
+                    if (typeof window.renderPendingPits === 'function') window.renderPendingPits();
+                } else {
+                    const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
+                    if (tabBtn) {
+                        tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
+                        setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Palette Color Input (Burden)
+    if (e.target && e.target.classList.contains('color-input-burden')) {
+        const index = parseInt(e.target.getAttribute('data-index'));
+        const oldColor = window.burdenPalette[index].color;
+        if (oldColor !== e.target.value) {
+            window.burdenPalette[index].color = e.target.value;
+            window.hasUnsavedColorChanges = true;
+            if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
+        }
+    }
+
+    // 4. Palette Color Input (Subset)
+    if (e.target && e.target.classList.contains('color-input-subset')) {
+        const index = parseInt(e.target.getAttribute('data-index'));
+        const oldColor = window.subsetPalette[index].color;
+        if (oldColor !== e.target.value) {
+            window.subsetPalette[index].color = e.target.value;
+            window.hasUnsavedColorChanges = true;
+            if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
+        }
+    }
+});
+
+document.addEventListener('click', (e) => {
+    // Tombol Naikkan Subset
+    const btnUp = e.target.closest('.btn-up-subset');
+    if (btnUp) {
+        const index = parseInt(btnUp.getAttribute('data-index'));
+        if (index > 0) {
+            const temp = window.subsetPalette[index];
+            window.subsetPalette[index] = window.subsetPalette[index - 1];
+            window.subsetPalette[index - 1] = temp;
+            window.hasUnsavedColorChanges = true;
+            if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
+            if (typeof window.renderPitPaletteUI === 'function') window.renderPitPaletteUI();
+        }
+    }
+
+    // Tombol Turunkan Subset
+    const btnDown = e.target.closest('.btn-down-subset');
+    if (btnDown) {
+        const index = parseInt(btnDown.getAttribute('data-index'));
+        if (index < window.subsetPalette.length - 1) {
+            const temp = window.subsetPalette[index];
+            window.subsetPalette[index] = window.subsetPalette[index + 1];
+            window.subsetPalette[index + 1] = temp;
+            window.hasUnsavedColorChanges = true;
+            if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
+            if (typeof window.renderPitPaletteUI === 'function') window.renderPitPaletteUI();
+        }
+    }
+});
+// ==============================================================
 
 window.getPitFolderBadgeHTML = function(name, rootName) {
     if (rootName === 'Pit Data') {
@@ -458,11 +587,10 @@ window.aggregateAllPitData = async function() {
 window.onPitFolderSelected = async function(name, type, rootName) {
     if (rootName !== 'Pit Data') {
         window.activePitId = null;
-	window._lastSelectedFolderName = null; // Tambahkan reset tracker
+        window._lastSelectedFolderName = null; 
         return; 
     }
     
-    // Tampilkan Wrapper Kanan Khusus Pit, Sembunyikan Disposal
     const pitWrap = document.getElementById('pit-summary-wrapper');
     const dispWrap = document.getElementById('disp-summary-wrapper');
     const dxfWrap = document.getElementById('dxf-summary-wrapper');
@@ -470,7 +598,6 @@ window.onPitFolderSelected = async function(name, type, rootName) {
     if (dispWrap) { dispWrap.classList.add('hidden'); dispWrap.classList.remove('flex'); }
     if (dxfWrap) { dxfWrap.classList.add('hidden'); dxfWrap.classList.remove('flex'); }
 
-    // --- FIX UI HILANG SAAT DOUBLE CLICK ---
     const container = document.getElementById('geometry-pit-manager');
     if (container) {
         if (type === 'Root Folder') {
@@ -578,7 +705,6 @@ window.onPitFolderRenamed = async function(oldName, newName, rootName) {
                 window.renderedPits.delete(oldName);
                 window.renderedPits.delete(oldNormalized);
             }
-            // FIX BUGS: Menambahkan spesifik tipe 'pit'
             if (typeof window.unloadPitGeometry === 'function') {
                 window.unloadPitGeometry(oldName, 'pit');
                 if (oldName !== oldNormalized) window.unloadPitGeometry(oldNormalized, 'pit');
@@ -616,7 +742,6 @@ window.onPitFolderDeleted = async function(name, rootName) {
             window.renderedPits.delete(normalizedPitName);
         }
         
-        // FIX BUGS: Menambahkan spesifik tipe 'pit'
         if (typeof window.unloadPitGeometry === 'function') {
             window.unloadPitGeometry(name, 'pit');
             if (name !== normalizedPitName) window.unloadPitGeometry(normalizedPitName, 'pit');
@@ -824,7 +949,7 @@ async function updatePitFileStats(file, type) {
 }
 
 // ==============================================================
-// EVENT LISTENERS (Dibungkus dalam IIFE agar terhindar dari bentrok global)
+// EVENT LISTENERS 
 // ==============================================================
 (() => {
     const pitReserveInput = document.getElementById('pit-mr-file');
@@ -924,7 +1049,6 @@ async function updatePitFileStats(file, type) {
 
             if (typeof window.renderPitGeometryPreview === 'function') window.renderPitGeometryPreview(null, null);
             
-            // FIX BUGS: Menambahkan spesifik tipe 'pit'
             if (typeof window.unloadPitGeometry === 'function') {
                 window.unloadPitGeometry(window.activePitId, 'pit');
                 if (window.activePitId !== normalizedPitName) window.unloadPitGeometry(normalizedPitName, 'pit');
@@ -970,7 +1094,7 @@ async function updatePitFileStats(file, type) {
     }
 
     // ==============================================================
-    // BUILD GEOMETRY PROCESSING LOGIC
+    // BUILD GEOMETRY PROCESSING LOGIC DENGAN WEB WORKER
     // ==============================================================
     const btnBuildGeometry = document.getElementById('pit-btn-build-geometry');
     const statNewEntity = document.getElementById('pit-stat-ne');
@@ -1242,12 +1366,11 @@ async function updatePitFileStats(file, type) {
                                     
                                     const burdenType = isResourceTriangle ? 'RESOURCE' : 'WASTE';
                                     
-                                    // Pengecekan Dropdown Subset
                                     if (mrIdxSubset !== -1) {
                                         if (isResourceTriangle) {
-                                            rawSubset = 'Resource'; // Timpa jika resource
+                                            rawSubset = 'Resource'; 
                                         } else if (rawSubset) {
-                                            rawSubset = toProperCase(rawSubset); // Pertahankan asli jika waste
+                                            rawSubset = toProperCase(rawSubset); 
                                         }
                                         if (rawSubset) subsetsSet.add(rawSubset);
                                     }
@@ -1257,7 +1380,6 @@ async function updatePitFileStats(file, type) {
                                     const idStrip = delimStrip ? getSubstr(rawBlock, delimStrip) : rawBlock;
                                     const idBench = delimBench ? getSubstr(rawBench, delimBench) : rawBench;
 
-                                    // [UPDATE]: Menyesuaikan Composite ID berdasarkan kondisi dropdown Subset dan Burden
                                     const compositeId = idPit + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + rawSeam + (mrIdxSubset !== -1 ? (rawSubset ? '/' + rawSubset : '') : '/' + burdenType);
 
                                     if (!blocksMap.has(compositeId)) {
@@ -1371,7 +1493,6 @@ async function updatePitFileStats(file, type) {
 
                                 const newHeaders = [];
                                 mrKeepIndices.forEach(i => newHeaders.push(mrHeaders[i]));
-                                // MENGUBAH URUTAN DAN NAMA HEADER CSV SESUAI PERMINTAAN
                                 newHeaders.push("ID P-Composite", "ID P-Name", "ID P-Block", "ID P-Strip", "ID P-Bench", "ID P-Seam", "ID P-Subset");
                                 newHeaders.push("Waste Thickness", "Resource Thickness");
                                 qualityIndices.forEach(qIdx => newHeaders.push(mrHeaders[qIdx]));
@@ -1396,12 +1517,11 @@ async function updatePitFileStats(file, type) {
                                     
                                     const burdenType = isResourceTriangle ? 'RESOURCE' : 'WASTE';
                                     
-                                    // Pengecekan Dropdown Subset
                                     if (mrIdxSubset !== -1) {
                                         if (isResourceTriangle) {
-                                            rawSubset = 'Resource'; // Timpa jika resource
+                                            rawSubset = 'Resource'; 
                                         } else if (rawSubset) {
-                                            rawSubset = toProperCase(rawSubset); // Pertahankan asli jika waste
+                                            rawSubset = toProperCase(rawSubset); 
                                         }
                                     }
 
@@ -1410,7 +1530,6 @@ async function updatePitFileStats(file, type) {
                                     const idStrip = delimStrip ? getSubstr(rawBlock, delimStrip) : rawBlock;
                                     const idBench = delimBench ? getSubstr(rawBench, delimBench) : rawBench;
                                     
-                                    // [UPDATE]: Menyesuaikan Composite ID berdasarkan kondisi dropdown Subset dan Burden
                                     const compositeId = idPit + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + rawSeam + (mrIdxSubset !== -1 ? (rawSubset ? '/' + rawSubset : '') : '/' + burdenType);
                                     
                                     const b = blocksMap.get(compositeId);
@@ -1421,7 +1540,6 @@ async function updatePitFileStats(file, type) {
                                     const originalSeam = mrIdxSeam !== -1 && mrCols[mrIdxSeam] !== undefined ? mrCols[mrIdxSeam] : '';
                                     const originalSubset = rawSubset;
                                     
-                                    // PUSH DATA SESUAI URUTAN HEADER BARU
                                     row.push(compositeId, idPit, idBlock, idStrip, idBench, originalSeam, originalSubset);
 
                                     if (b) {
@@ -1470,6 +1588,8 @@ async function updatePitFileStats(file, type) {
 
                 worker.onmessage = async (e) => {
                     URL.revokeObjectURL(workerUrl);
+                    // [FIX] HARUS SEGERA DIBUNUH AGAR THREAD & RAM BENAR-BENAR BERSIH 
+                    worker.terminate();
 
                     if (e.data.error) {
                         throwError(e.data.error);
@@ -1536,7 +1656,6 @@ async function updatePitFileStats(file, type) {
 
                     if (window.loadedPits && window.loadedPits.has(window.activePitId)) {
                         if (window.renderedPits) window.renderedPits.delete(window.activePitId);
-                        // FIX BUGS: Menambahkan spesifik tipe 'pit'
                         if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(window.activePitId, 'pit');
                         window.loadedPits.add(window.activePitId); 
                         
@@ -1573,6 +1692,8 @@ async function updatePitFileStats(file, type) {
 
                 worker.onerror = (err) => {
                     URL.revokeObjectURL(workerUrl);
+                    // [FIX] HARUS DIBUNUH KETIKA ERROR
+                    worker.terminate();
                     throwError(err.message);
                 };
 
@@ -1711,7 +1832,6 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
     } else if (csvData) {
         const lines = csvData.split(/\r?\n/);
         const headers = lines[0].split(',').map(h => h.trim().toUpperCase());
-        // MENGUBAH IDENTIFIER UNTUK PREVIEW MENJADI HEADER BARU
         const idIdx = headers.indexOf('ID P-COMPOSITE'); 
         
         const e1 = headers.indexOf('EASTING_1'), n1 = headers.indexOf('NORTHING_1');
@@ -1882,11 +2002,9 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
 // ==============================================================
 // GLOBAL PALETTE COLORS APPLIER
 // ==============================================================
-window.applyPitPaletteColors = function() {
-};
+window.applyPitPaletteColors = function() {};
 
-window.markPitsForRebuildOnColorChange = function(type, changedName) {
-};
+window.markPitsForRebuildOnColorChange = function(type, changedName) {};
 
 window.updatePitApplyColorButton = function() {
     const btn = document.getElementById('pit-btn-apply-colors');
@@ -1986,7 +2104,6 @@ window.initGeometryPitListUI = function() {
 
             if (window.loadedPits && window.loadedPits.size > 0) {
                 window.loadedPits.forEach(pit => {
-                    // FIX BUGS: Menambahkan spesifik tipe 'pit'
                     if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
                     if (window.renderedPits) window.renderedPits.delete(pit);
                 });
@@ -2074,6 +2191,8 @@ window.updateGeometryPitListUI = async function() {
             
             div.className = `flex items-center gap-2.5 bg-slate-900/80 border ${isLoaded ? 'border-blue-500/50 shadow-sm' : 'border-slate-700/80'} p-2 rounded-md transition-all hover:bg-slate-800 group`;
             
+            // [PERBAIKAN]: Menghapus event listener murni di dalam sini, menggunakan pendekatan 'data-*' attribut 
+            // agar bisa dikontrol oleh Event Delegation Global di atas.
             div.innerHTML = `
                 <label class="relative flex items-center justify-center w-5 h-5 cursor-pointer m-0 shrink-0" title="Check/Uncheck untuk menampilkan Geometri">
                     <input type="checkbox" class="pit-checkbox peer absolute opacity-0 w-full h-full cursor-pointer" data-pit="${pit}" ${isLoaded ? 'checked' : ''}>
@@ -2088,74 +2207,6 @@ window.updateGeometryPitListUI = async function() {
                     ${optionsHtml}
                 </select>
             `;
-            
-            const cb = div.querySelector('.pit-checkbox');
-            cb.addEventListener('change', async (e) => {
-                const containerDiv = e.target.closest('.group');
-                const textSpan = containerDiv.querySelector('span.font-bold');
-                const customCb = containerDiv.querySelector('.checkbox-box');
-                const checkIcon = customCb.querySelector('i');
-
-                if(e.target.checked) {
-                    customCb.className = "checkbox-box w-5 h-5 rounded-sm border bg-blue-500 border-blue-500 flex items-center justify-center transition-colors shrink-0";
-                    checkIcon.className = "fa-solid fa-check text-white text-[10px] opacity-100 transition-opacity";
-                    textSpan.className = "text-blue-400 transition-colors font-bold text-[11px] truncate";
-                    containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-blue-500/50 shadow-sm p-2 rounded-md transition-all hover:bg-slate-800 group";
-                    
-                    window.loadedPits.add(pit);
-                    
-                    const geoTab = document.getElementById('panel-geometry');
-                    const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
-                    
-                    if (isGeoTabActive) {
-                        if (typeof window.renderPendingPits === 'function') await window.renderPendingPits();
-                    } else {
-                        const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
-                        if (tabBtn) {
-                            tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
-                            setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
-                        }
-                    }
-                } else {
-                    customCb.className = "checkbox-box w-5 h-5 rounded-sm border bg-slate-800 border-slate-600 group-hover:border-blue-400 flex items-center justify-center transition-colors shrink-0";
-                    checkIcon.className = "fa-solid fa-check text-white text-[10px] opacity-0 transition-opacity";
-                    textSpan.className = "text-slate-300 transition-colors font-bold text-[11px] truncate";
-                    containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-slate-700/80 p-2 rounded-md transition-all hover:bg-slate-800 group";
-                    
-                    window.loadedPits.delete(pit);
-                    window.renderedPits.delete(pit);
-                    // FIX BUGS: Menambahkan spesifik tipe 'pit'
-                    if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
-                }
-            });
-
-            const modeSelect = div.querySelector('.pit-color-mode-select');
-            modeSelect.addEventListener('change', async (e) => {
-                const newMode = e.target.value;
-                if (window.pitColorModes[pit] !== newMode) {
-                    window.pitColorModes[pit] = newMode;
-                    localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
-                    
-                    if (window.loadedPits.has(pit)) {
-                        // FIX BUGS: Menambahkan spesifik tipe 'pit'
-                        if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
-                        if (window.renderedPits) window.renderedPits.delete(pit);
-                        
-                        const geoTab = document.getElementById('panel-geometry');
-                        const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
-                        
-                        if (isGeoTabActive) {
-                            if (typeof window.renderPendingPits === 'function') window.renderPendingPits();
-                        } else {
-                            const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
-                            if (tabBtn) {
-                                tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
-                                setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
-                            }
-                        }
-                    }
-                }
-            });
             
             listEl.appendChild(div);
         });
@@ -2276,6 +2327,7 @@ window.renderPitPaletteUI = function(isEmpty = false) {
         return;
     }
 
+    // [PERBAIKAN]: Menambahkan penanda Class untuk diolah Global Event Delegation
     if (burdenListEl && window.burdenPalette) {
         burdenListEl.innerHTML = '';
         window.burdenPalette.forEach((item, index) => {
@@ -2285,21 +2337,12 @@ window.renderPitPaletteUI = function(isEmpty = false) {
             div.innerHTML = `
                 <div class="flex items-center justify-center w-[24px]">
                     <div class="relative w-5 h-5 rounded overflow-hidden border border-slate-600 hover:border-slate-400 transition-colors shadow-sm cursor-pointer shrink-0">
-                        <input type="color" class="absolute top-[-10px] left-[-10px] w-10 h-10 cursor-pointer outline-none p-0 border-0 color-input" value="${item.color}">
+                        <input type="color" class="absolute top-[-10px] left-[-10px] w-10 h-10 cursor-pointer outline-none p-0 border-0 color-input color-input-burden" data-index="${index}" value="${item.color}">
                     </div>
                 </div>
                 <div class="truncate text-slate-300 text-[10px] font-bold" title="${item.name}">${item.name}</div>
             `;
             
-            div.querySelector('.color-input').addEventListener('change', (e) => {
-                const oldColor = window.burdenPalette[index].color;
-                if (oldColor !== e.target.value) {
-                    window.burdenPalette[index].color = e.target.value;
-                    window.hasUnsavedColorChanges = true;
-                    if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
-                }
-            });
-
             burdenListEl.appendChild(div);
         });
     }
@@ -2313,6 +2356,7 @@ window.renderPitPaletteUI = function(isEmpty = false) {
             return;
         }
 
+        // [PERBAIKAN]: Menambahkan penanda Class (btn-up-subset / btn-down-subset) untuk global delegate
         palette.forEach((item, index) => {
             const div = document.createElement('div');
             div.className = "grid grid-cols-[24px_1fr_16px] gap-2 items-center bg-slate-900/80 border border-slate-700/80 p-2 rounded-md hover:bg-slate-800 transition-colors group";
@@ -2320,46 +2364,15 @@ window.renderPitPaletteUI = function(isEmpty = false) {
             div.innerHTML = `
                 <div class="flex items-center justify-center w-[24px]">
                     <div class="relative w-5 h-5 rounded overflow-hidden border border-slate-600 group-hover:border-slate-400 transition-colors shadow-sm cursor-pointer shrink-0">
-                        <input type="color" class="absolute top-[-10px] left-[-10px] w-10 h-10 cursor-pointer outline-none p-0 border-0 color-input" value="${item.color}">
+                        <input type="color" class="absolute top-[-10px] left-[-10px] w-10 h-10 cursor-pointer outline-none p-0 border-0 color-input color-input-subset" data-index="${index}" value="${item.color}">
                     </div>
                 </div>
                 <div class="truncate text-slate-300 text-[10px] font-bold" title="${item.name}">${item.name}</div>
                 <div class="flex flex-col gap-0 items-center justify-center shrink-0 w-[16px]">
-                    <button class="text-slate-600 hover:text-blue-400 transition-colors btn-up h-3 flex items-center" title="Naikkan"><i class="fa-solid fa-caret-up text-[10px]"></i></button>
-                    <button class="text-slate-600 hover:text-blue-400 transition-colors btn-down h-3 flex items-center" title="Turunkan"><i class="fa-solid fa-caret-down text-[10px]"></i></button>
+                    <button class="text-slate-600 hover:text-blue-400 transition-colors btn-up btn-up-subset h-3 flex items-center" data-index="${index}" title="Naikkan"><i class="fa-solid fa-caret-up text-[10px]"></i></button>
+                    <button class="text-slate-600 hover:text-blue-400 transition-colors btn-down btn-down-subset h-3 flex items-center" data-index="${index}" title="Turunkan"><i class="fa-solid fa-caret-down text-[10px]"></i></button>
                 </div>
             `;
-            
-            div.querySelector('.color-input').addEventListener('change', (e) => {
-                const oldColor = window.subsetPalette[index].color;
-                if (oldColor !== e.target.value) {
-                    window.subsetPalette[index].color = e.target.value;
-                    window.hasUnsavedColorChanges = true;
-                    if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
-                }
-            });
-
-            div.querySelector('.btn-up').addEventListener('click', () => {
-                if (index > 0) {
-                    const temp = window.subsetPalette[index];
-                    window.subsetPalette[index] = window.subsetPalette[index - 1];
-                    window.subsetPalette[index - 1] = temp;
-                    window.hasUnsavedColorChanges = true;
-                    if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
-                    window.renderPitPaletteUI();
-                }
-            });
-
-            div.querySelector('.btn-down').addEventListener('click', () => {
-                if (index < window.subsetPalette.length - 1) {
-                    const temp = window.subsetPalette[index];
-                    window.subsetPalette[index] = window.subsetPalette[index + 1];
-                    window.subsetPalette[index + 1] = temp;
-                    window.hasUnsavedColorChanges = true;
-                    if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
-                    window.renderPitPaletteUI();
-                }
-            });
 
             subsetListEl.appendChild(div);
         });

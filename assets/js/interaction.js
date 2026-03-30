@@ -13,6 +13,12 @@ window.dragStartPos = { x: 0, y: 0 };
 window.isDrawingPolygon = false;
 window.polygonPoints = []; 
 
+// STATE KEYBOARD
+window.isShiftDown = false; // Murni untuk Append Seleksi
+
+// STATE AUTO RECORD
+window.isAutoRecordActive = false; // Default: Toggle tidak aktif
+
 // STATE REKAPAN PIT
 window.pitSequenceRecords = [];
 window.pitTotalWaste = 0;
@@ -36,6 +42,50 @@ window.isPointerDown = false;
 window.rawPointerDownPos = { x: 0, y: 0 }; 
 
 // ==========================================
+// OPTIMASI VRAM: MATERIAL STATE POOLING
+// Mencegah Memory Leak saat Record ribuan block
+// ==========================================
+window.applyMaterialState = function(mesh, stateType) {
+    if (!mesh.userData.originalMaterial) {
+        mesh.userData.originalMaterial = mesh.material;
+    }
+    
+    const baseMat = mesh.userData.originalMaterial;
+    
+    // [UPDATE]: Menghilangkan efek hover sepenuhnya.
+    // Jika state adalah 'hover', blok tetap menggunakan material aslinya.
+    if (stateType === 'default' || stateType === 'hover') {
+        mesh.material = baseMat;
+        return;
+    }
+    
+    let hex = 0x000000;
+    if (stateType === 'selected') hex = typeof COLOR_SELECTED !== 'undefined' ? COLOR_SELECTED : 0xffaa00;
+    else if (stateType === 'recorded_pit') hex = 0x1d4ed8;
+    else if (stateType === 'recorded_disp') hex = 0x059669;
+    
+    if (!window.sharedStateMaterials) window.sharedStateMaterials = {};
+    const key = baseMat.uuid + '_' + stateType;
+    
+    // Hanya buat SATU clone material per kondisi, dipakai ramai-ramai oleh ribuan blok
+    if (!window.sharedStateMaterials[key]) {
+        const clone = baseMat.clone();
+        clone.emissive.setHex(hex);
+        
+        // DIUBAH: Menghapus transparansi pada "Show Record" karena bikin berat/Overdraw GPU
+        // Sekarang blok yang di-record akan menjadi solid, yang jauh lebih ringan bagi HP/Tablet
+        if (stateType === 'recorded_pit' || stateType === 'recorded_disp') {
+            clone.transparent = false;
+            clone.opacity = 1.0; 
+        }
+        
+        window.sharedStateMaterials[key] = clone;
+    }
+    
+    mesh.material = window.sharedStateMaterials[key];
+};
+
+// ==========================================
 // PENTING: PARSER ID P-COMPOSITE BARU
 // Format Asumsi: NAME/BLOCK/STRIP/BENCH/SEAM/SUBSET
 // ==========================================
@@ -55,7 +105,7 @@ window.parseCompositeId = function(userData) {
     const seam = parts[4] ? parts[4].trim() : (userData.seam || "-");
     const subset = parts[5] ? parts[5].trim() : (userData.subset || "-");
 
-    // base: ID P-NAME/ID P-BLOCK/ID P-STRIP (Untuk Shift + Click / Block utuh)
+    // base: ID P-NAME/ID P-BLOCK/ID P-STRIP (Untuk Block utuh)
     const baseBlock = `${name}/${block}/${strip}`;
     
     // record: ID P-NAME/ID P-BLOCK/ID P-STRIP/ID P-BENCH (Untuk Record & Penamaan & Hover 1 Bench)
@@ -87,9 +137,25 @@ if (hoverBar) hoverBar.classList.add('hidden');
 // ==========================================
 // PENGENDALI ACARA UMUM & LOD
 // ==========================================
+
+if (container) {
+    container.addEventListener('pointerdown', (e) => {
+        const mode = window.activeInteractionMode;
+        // Hanya matikan orbit jika mode Box atau Polygon atau Draw benar-benar AKTIF dari UI
+        const isBox = mode === 'box_select';
+        const isPoly = mode === 'poly_select';
+        if ((isBox || isPoly || mode === 'draw_line' || mode === 'draw_area') && typeof controls !== 'undefined') {
+            controls.enabled = false;
+        }
+    }, true); 
+}
+
 window.addEventListener('keydown', (e) => {
-    // Abaikan jika user sedang mengetik di input text
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (e.key === 'Shift') {
+        window.isShiftDown = true;
+    }
 
     if (e.key === 'Enter') {
         if (window.activeInteractionMode === 'draw_line' || window.activeInteractionMode === 'draw_area') {
@@ -100,7 +166,6 @@ window.addEventListener('keydown', (e) => {
     }
     
     if (e.key === 'Escape') {
-        // Cegah event 'Escape' ditangkap oleh file lain (misal resetSequenceAndView di main.js)
         e.stopPropagation();
         e.stopImmediatePropagation();
 
@@ -109,9 +174,14 @@ window.addEventListener('keydown', (e) => {
         } else if (window.isDrawingPolygon) {
             window.cancelPolygon();
         } else {
-            // Jika tidak sedang menggambar, Esc HANYA membatalkan pilihan/highlight (Clear Selection)
             window.clearSelection();
         }
+
+        const defaultBtn = document.querySelector('.tool-btn[data-mode="select_bench"]');
+        if (defaultBtn) {
+            defaultBtn.click();
+        }
+        container.style.cursor = 'default';
     }
 
     if ((e.key === 'Delete' || e.key === 'Backspace') && typeof selectedDrawing !== 'undefined' && selectedDrawing) {
@@ -126,7 +196,13 @@ window.addEventListener('keydown', (e) => {
         finishedDrawings = finishedDrawings.filter(d => d !== selectedDrawing);
         selectedDrawing = null;
     }
-}, true); // Menambahkan parameter `true` (Capture phase) agar listener ini dieksekusi lebih dulu
+}, true);
+
+window.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift') {
+        window.isShiftDown = false;
+    }
+});
 
 container.addEventListener('contextmenu', (e) => { 
     if(window.activeInteractionMode === 'draw_line' || window.activeInteractionMode === 'draw_area') { 
@@ -164,18 +240,11 @@ window.getMousePos = function(event) {
 
 window.clearSelection = function() { 
     window.selectedMeshes.forEach(mesh => { 
-        // FIX: Kembalikan warna emisif sesuai status record jika dibatalkan seleksinya
         if (mesh.userData.isRecorded) {
             const isDisp = mesh.userData.recordType === 'disp' || mesh.userData.type === 'disp' || mesh.userData.type === 'disposal';
-            mesh.material.emissive.setHex(isDisp ? 0x059669 : 0x1d4ed8);
+            window.applyMaterialState(mesh, isDisp ? 'recorded_disp' : 'recorded_pit');
         } else {
-            if (mesh.userData.originalMaterial) {
-                mesh.material.dispose(); 
-                mesh.material = mesh.userData.originalMaterial; 
-                delete mesh.userData.originalMaterial;
-            } else if (mesh.material) {
-                mesh.material.emissive.setHex(0x000000); 
-            }
+            window.applyMaterialState(mesh, 'default');
         }
     }); 
     window.selectedMeshes.clear(); 
@@ -188,24 +257,15 @@ window.highlightMesh = function(mesh, isHover) {
     const isSelected = window.selectedMeshes.has(mesh);
 
     if (isSelected) {
-        if (!mesh.userData.originalMaterial) {
-            mesh.userData.originalMaterial = mesh.material;
-            mesh.material = mesh.material.clone();
-        }
-        mesh.material.emissive.setHex(typeof COLOR_SELECTED !== 'undefined' ? COLOR_SELECTED : 0xffaa00); 
+        window.applyMaterialState(mesh, 'selected');
+    } else if (isHover) {
+        window.applyMaterialState(mesh, 'hover');
     } else {
-        // FIX: Jika hover dihilangkan, kembalikan ke warna record (jika ada) dan jangan matikan emisifnya
         if (mesh.userData.isRecorded) {
             const isDisp = mesh.userData.recordType === 'disp' || mesh.userData.type === 'disp' || mesh.userData.type === 'disposal';
-            mesh.material.emissive.setHex(isDisp ? 0x059669 : 0x1d4ed8);
+            window.applyMaterialState(mesh, isDisp ? 'recorded_disp' : 'recorded_pit');
         } else {
-            if (mesh.userData.originalMaterial) {
-                mesh.material.dispose();
-                mesh.material = mesh.userData.originalMaterial;
-                delete mesh.userData.originalMaterial;
-            } else if (mesh.material) {
-                mesh.material.emissive.setHex(0x000000);
-            }
+            window.applyMaterialState(mesh, 'default');
         }
     }
 }
@@ -216,24 +276,13 @@ window.updateSelectionVisuals = function() {
         if (!mesh.isMesh) return;
         
         if (window.selectedMeshes.has(mesh)) {
-            if (!mesh.userData.originalMaterial) {
-                mesh.userData.originalMaterial = mesh.material;
-                mesh.material = mesh.material.clone();
-            }
-            mesh.material.emissive.setHex(typeof COLOR_SELECTED !== 'undefined' ? COLOR_SELECTED : 0xffaa00); 
+            window.applyMaterialState(mesh, 'selected');
         } else {
-            // FIX: Pertahankan warna menyala record jika tidak sedang dipilih
             if (mesh.userData.isRecorded) {
                 const isDisp = mesh.userData.recordType === 'disp' || mesh.userData.type === 'disp' || mesh.userData.type === 'disposal';
-                mesh.material.emissive.setHex(isDisp ? 0x059669 : 0x1d4ed8);
+                window.applyMaterialState(mesh, isDisp ? 'recorded_disp' : 'recorded_pit');
             } else {
-                if (mesh.userData.originalMaterial) {
-                    mesh.material.dispose();
-                    mesh.material = mesh.userData.originalMaterial;
-                    delete mesh.userData.originalMaterial;
-                } else if (mesh.material) {
-                    mesh.material.emissive.setHex(0x000000);
-                }
+                window.applyMaterialState(mesh, 'default');
             }
         }
     }); 
@@ -256,31 +305,14 @@ window.updateRecordedVisibility = function() {
             
             if (isDisp) {
                 m.visible = showDisp;
-                if (showDisp) {
-                    if (!m.userData.originalMaterial) m.userData.originalMaterial = m.material;
-                    if (m.material === m.userData.originalMaterial) m.material = m.material.clone();
-                    // Softer Emerald Color
-                    m.material.emissive.setHex(0x059669); 
-                }
+                if (showDisp) window.applyMaterialState(m, 'recorded_disp');
             } else {
                 m.visible = showPit;
-                if (showPit) {
-                    if (!m.userData.originalMaterial) m.userData.originalMaterial = m.material;
-                    if (m.material === m.userData.originalMaterial) m.material = m.material.clone();
-                    // Softer Blue Color
-                    m.material.emissive.setHex(0x1d4ed8); 
-                }
+                if (showPit) window.applyMaterialState(m, 'recorded_pit');
             }
         } else {
-            // Kembalikan ke normal jika tidak direcord dan tidak diselect
             if (!window.selectedMeshes.has(m)) {
-                if (m.userData.originalMaterial) {
-                    m.material.dispose();
-                    m.material = m.userData.originalMaterial;
-                    delete m.userData.originalMaterial;
-                } else if (m.material) {
-                    m.material.emissive.setHex(0x000000);
-                }
+                window.applyMaterialState(m, 'default');
             }
         }
     });
@@ -289,22 +321,40 @@ window.updateRecordedVisibility = function() {
 // ==========================================
 // LOGIKA HOVER (BLOCK GEOMETRY & DXF)
 // ==========================================
-window.handleHover = function(intersects, isShiftKey, dxfIntersect = null) {
+window.handleHover = function(intersects, param2 = null) {
     if (window.isDraggingRect || window.isDrawingPolygon || (typeof isProcessing !== 'undefined' && isProcessing)) return;
     
+    let dxfIntersect = null;
+    if (param2 !== null && typeof param2 === 'object') {
+        dxfIntersect = param2;
+    }
+
     const mode = window.activeInteractionMode;
-    const isShift = isShiftKey || mode === 'select_block' || mode === 'record_block';
+    const isBlockMode = mode === 'select_block' || mode === 'record_block';
+    
+    const isToolMode = ['box_select', 'poly_select', 'center_pivot', 'draw_line', 'draw_area'].includes(mode);
+
+    const updateCursor = (isHovering) => {
+        if (isToolMode) {
+            container.style.cursor = 'crosshair';
+        } else {
+            container.style.cursor = isHovering ? 'pointer' : 'default';
+        }
+    };
+
+    if (window.selectedMeshes.size > 0) {
+        updateCursor(false);
+        return;
+    }
 
     if (intersects.length > 0) {
-        // --- HOVER UNTUK GEOMETRY (PIT/DISPOSAL) ---
-        container.style.cursor = 'pointer'; 
+        updateCursor(true); 
         const object = intersects[0].object;
         const targetType = object.userData.type || 'pit';
         
         const targetParsed = window.parseCompositeId(object.userData);
-        const currentHoverKey = isShift ? `${targetType}_BLOCK_${targetParsed.base}` : `${targetType}_BENCH_${targetParsed.record}`;
+        const currentHoverKey = isBlockMode ? `${targetType}_BLOCK_${targetParsed.base}` : `${targetType}_BENCH_${targetParsed.record}`;
         
-        // Kalkulasi Koordinat
         const pt = intersects[0].point;
         let ce = pt.x, cn = -pt.z, cz = pt.y;
         if (window.worldOrigin && window.worldOrigin.isSet) {
@@ -328,7 +378,7 @@ window.handleHover = function(intersects, isShiftKey, dxfIntersect = null) {
 
                     const mParsed = window.parseCompositeId(m.userData);
                     let isMatch = false;
-                    if (isShift) { isMatch = (mParsed.base === targetParsed.base); } 
+                    if (isBlockMode) { isMatch = (mParsed.base === targetParsed.base); } 
                     else { isMatch = (mParsed.record === targetParsed.record); }
                     
                     if (isMatch) {
@@ -342,7 +392,7 @@ window.handleHover = function(intersects, isShiftKey, dxfIntersect = null) {
             
             window.currentHoveredData = {
                 type: targetType,
-                isBlockSelection: isShift,
+                isBlockSelection: isBlockMode,
                 parsed: targetParsed,
                 pitWaste: pitWaste,
                 dispWaste: dispWaste,
@@ -351,14 +401,12 @@ window.handleHover = function(intersects, isShiftKey, dxfIntersect = null) {
             };
             window.renderInfoPanel();
         } else {
-            // Update Coordinate Span di DOM secara real-time
             window.currentHoveredData.coordStr = coordStr;
             const coordEl = document.getElementById('info-coord-val');
             if (coordEl) coordEl.textContent = coordStr;
         }
     } else if (dxfIntersect) {
-        // --- HOVER UNTUK DXF (PALING ATAS) ---
-        container.style.cursor = 'crosshair';
+        updateCursor(true);
         
         const pt = dxfIntersect.point;
         let ce = pt.x, cn = -pt.z, cz = pt.y;
@@ -391,8 +439,7 @@ window.handleHover = function(intersects, isShiftKey, dxfIntersect = null) {
             if (coordEl) coordEl.textContent = coordStr;
         }
     } else {
-        // --- TIDAK ADA HOVER ---
-        container.style.cursor = 'default';
+        updateCursor(false);
         
         const coordEl = document.getElementById('info-coord-val');
         if (coordEl) coordEl.textContent = "-";
@@ -402,7 +449,6 @@ window.handleHover = function(intersects, isShiftKey, dxfIntersect = null) {
             window.hoveredMeshes = []; window.hoveredGroupKey = null; window.currentHoveredData = null;
             window.renderInfoPanel();
         } else if (window.selectedMeshes.size === 0) {
-            // Render ulang agar semua baris memunculkan default "-"
             window.renderInfoPanel();
         }
     }
@@ -412,6 +458,9 @@ window.handleHover = function(intersects, isShiftKey, dxfIntersect = null) {
 // POINTER EVENTS
 // ==========================================
 window.onPointerDown = function(event) {
+    // [OPTIMASI UI]: Hentikan kalkulasi 3D jika pengguna mengklik panel UI HTML (Tombol, Menu, dll)
+    if (event.target && event.target.tagName !== 'CANVAS') return;
+
     if (!window.is3DRenderingActive || (typeof isProcessing !== 'undefined' && isProcessing)) return; 
     
     window.isPointerDown = true;
@@ -431,20 +480,48 @@ window.onPointerDown = function(event) {
 
     if (event.button !== 0) return; 
     
-    const isBox = mode === 'box_select' || (event.shiftKey && !event.altKey && !event.ctrlKey);
-    const isPoly = mode === 'poly_select' || (event.altKey && !event.shiftKey && !event.ctrlKey);
+    const isBox = mode === 'box_select';
+    const isPoly = mode === 'poly_select';
     const isCenter = mode === 'center_pivot';
 
     if (isCenter) { window.executeCenterPivot(pos); window._justCentered = true; return; }
 
     if (isBox) {
-        window.isDraggingRect = true; window.dragStartPos = { x: pos.x, y: pos.y }; controls.enabled = false; 
-        selectionRect.style.left = pos.x + 'px'; selectionRect.style.top = pos.y + 'px'; selectionRect.style.width = '0px'; selectionRect.style.height = '0px'; selectionRect.style.display = 'block';
+        window.isDraggingRect = true; 
+        window.dragStartPos = { x: pos.x, y: pos.y }; 
+        controls.enabled = false; 
+        
+        if (event.pointerId !== undefined && container.setPointerCapture) {
+            container.setPointerCapture(event.pointerId);
+        }
+
+        selectionRect.style.left = pos.x + 'px'; 
+        selectionRect.style.top = pos.y + 'px'; 
+        selectionRect.style.width = '0px'; 
+        selectionRect.style.height = '0px'; 
+        selectionRect.style.display = 'block';
     } else if (isPoly) {
-        window.isDrawingPolygon = true; controls.enabled = false; window.polygonPoints.push({ x: pos.x, y: pos.y }); window.updatePolygonSVG();
+        window.isDrawingPolygon = true; 
+        controls.enabled = false; 
+        window.polygonPoints.push({ x: pos.x, y: pos.y }); 
+        window.updatePolygonSVG();
+        
         if (window.polygonPoints.length > 2) {
-            const p1 = window.polygonPoints[window.polygonPoints.length-1]; const p2 = window.polygonPoints[window.polygonPoints.length-2];
-            if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < 5) { window.polygonPoints.pop(); window.finishPolygonSelection(); }
+            const p1 = window.polygonPoints[window.polygonPoints.length-1]; 
+            const p2 = window.polygonPoints[window.polygonPoints.length-2]; 
+            const pFirst = window.polygonPoints[0]; 
+            
+            const isDoubleClick = Math.hypot(p1.x - p2.x, p1.y - p2.y) < 5;
+            const isClickStartPoint = Math.hypot(p1.x - pFirst.x, p1.y - pFirst.y) < 15; 
+            
+            if (isDoubleClick || isClickStartPoint) { 
+                if (isDoubleClick) {
+                    window.polygonPoints.pop(); 
+                } else {
+                    window.polygonPoints.pop(); 
+                }
+                window.finishPolygonSelection(); 
+            }
         }
     } else { window.dragStartPos = { x: pos.x, y: pos.y }; }
 }
@@ -453,8 +530,27 @@ var isDrawVisualUpdatePending = false;
 var lastDrawPos = null;
 
 window.onPointerMove = function(event) {
+    // [OPTIMASI UI]: Hentikan kalkulasi Raycaster 3D saat mouse bergerak di atas panel UI HTML!
+    // Inilah penyebab utama tombol terasa lag/berat sebelumnya.
+    if (event.target && event.target.tagName !== 'CANVAS') {
+        // Jika mouse keluar canvas, pastikan info panel dibersihkan
+        if (!window.isDraggingRect && !window.isDrawingPolygon && window.hoveredGroupKey) {
+            window.hoveredMeshes.forEach(m => window.highlightMesh(m, false)); 
+            window.hoveredMeshes = []; window.hoveredGroupKey = null; window.currentHoveredData = null;
+            window.renderInfoPanel();
+        }
+        // Jika sedang drag, biarkan fungsi berjalan. Jika tidak, hentikan sepenuhnya.
+        if (!window.isDraggingRect && !window.isDrawingPolygon) return;
+    }
+
     if (!window.is3DRenderingActive || (typeof isProcessing !== 'undefined' && isProcessing)) return; 
     const mode = window.activeInteractionMode;
+    
+    const isToolMode = ['box_select', 'poly_select', 'center_pivot', 'draw_line', 'draw_area'].includes(mode);
+
+    if (isToolMode) {
+        container.style.cursor = 'crosshair';
+    }
 
     if (window.isPointerDown && !window.isDraggingRect && !window.isDrawingPolygon && mode !== 'draw_line' && mode !== 'draw_area') {
         const dx = Math.abs(event.clientX - window.rawPointerDownPos.x); const dy = Math.abs(event.clientY - window.rawPointerDownPos.y);
@@ -483,29 +579,33 @@ window.onPointerMove = function(event) {
     } else { if (typeof drawHotspot !== 'undefined' && drawHotspot) drawHotspot.visible = false; }
 
     if (window.isDraggingRect) {
-        selectionRect.style.left = Math.min(pos.x, window.dragStartPos.x) + 'px'; selectionRect.style.top = Math.min(pos.y, window.dragStartPos.y) + 'px';
-        selectionRect.style.width = Math.abs(pos.x - window.dragStartPos.x) + 'px'; selectionRect.style.height = Math.abs(pos.y - window.dragStartPos.y) + 'px'; 
+        selectionRect.style.left = Math.min(pos.x, window.dragStartPos.x) + 'px'; 
+        selectionRect.style.top = Math.min(pos.y, window.dragStartPos.y) + 'px';
+        selectionRect.style.width = Math.abs(pos.x - window.dragStartPos.x) + 'px'; 
+        selectionRect.style.height = Math.abs(pos.y - window.dragStartPos.y) + 'px'; 
         return;
     }
     
-    if (window.isDrawingPolygon && window.polygonPoints.length > 0) { window.updatePolygonSVG(pos); return; }
-    if (mode === 'center_pivot') { container.style.cursor = 'crosshair'; return; }
+    if (window.isDrawingPolygon && window.polygonPoints.length > 0) { 
+        window.updatePolygonSVG(pos); 
+        return; 
+    }
+    
+    if (mode === 'center_pivot') { return; }
     if (window.isCameraMoving) return;
 
     const currentTime = Date.now();
-    if (currentTime - window.lastRaycastTime < 80) return;
+    if (currentTime - window.lastRaycastTime < 40) return;
     window.lastRaycastTime = currentTime;
 
     mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
     
-    // RAYCAST: Prioritas 1 Geometry
     let validIntersects = [];
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup.visible) {
         const rawIntersects = raycaster.intersectObjects(pitReserveGroup.children, false);
         validIntersects = rawIntersects.filter(i => i.object.visible && i.object.isMesh);
     }
     
-    // RAYCAST: Prioritas 2 DXF (Hanya dicek jika tidak mengenai Geometry)
     let dxfIntersect = null;
     if (validIntersects.length === 0 && typeof appLayers !== 'undefined') {
         const dxfObjects = [];
@@ -513,7 +613,6 @@ window.onPointerMove = function(event) {
             if (l.type === 'dxf' && l.visible && l.threeObject) {
                 l.threeObject.traverse(c => {
                     if ((c.isMesh || c.isLineSegments) && c.visible) {
-                        // Tempelan Data untuk dibaca Intersect
                         c.userData.dxfLayerName = l.name;
                         c.userData.dxfType = l.hasFaces ? 'Polymesh' : 'Polyline';
                         dxfObjects.push(c);
@@ -523,25 +622,42 @@ window.onPointerMove = function(event) {
         });
         const rawDxfIntersects = raycaster.intersectObjects(dxfObjects, false).filter(i => i.object.visible);
         if (rawDxfIntersects.length > 0) {
-            dxfIntersect = rawDxfIntersects[0]; // Ambil yang paling atas (index 0)
+            dxfIntersect = rawDxfIntersects[0]; 
         }
     }
     
-    const isShift = event.shiftKey || mode === 'select_block' || mode === 'record_block';
-    window.handleHover(validIntersects, isShift, dxfIntersect);
+    window.handleHover(validIntersects, dxfIntersect);
 }
 
 window.onPointerUp = function(event) {
+    // [OPTIMASI UI]: Biarkan panel HTML merespons klik, keculai saat drag mode berlangsung
+    if (event.target && event.target.tagName !== 'CANVAS' && !window.isDraggingRect && !window.isDrawingPolygon) return;
+
     if (window._justCentered) { window._justCentered = false; return; }
+    
+    if (typeof controls !== 'undefined' && !controls.enabled) {
+        if (!window.isDraggingRect && !window.isDrawingPolygon && (typeof isCustomOrbiting === 'undefined' || !isCustomOrbiting)) {
+            controls.enabled = true;
+        }
+    }
+
     if (!window.is3DRenderingActive || (typeof isProcessing !== 'undefined' && isProcessing) || event.button !== 0) return; 
     const pos = window.getMousePos(event);
     const mode = window.activeInteractionMode;
 
     if (window.isDraggingRect) {
-        window.isDraggingRect = false; controls.enabled = true; selectionRect.style.display = 'none';
-        const w = Math.abs(pos.x - window.dragStartPos.x); const h = Math.abs(pos.y - window.dragStartPos.y);
+        window.isDraggingRect = false; 
+        controls.enabled = true; 
+        selectionRect.style.display = 'none';
+        
+        if (event.pointerId !== undefined && container.releasePointerCapture) {
+            try { container.releasePointerCapture(event.pointerId); } catch(e) {}
+        }
+        
+        const w = Math.abs(pos.x - window.dragStartPos.x); 
+        const h = Math.abs(pos.y - window.dragStartPos.y);
         if (w > 5 || h > 5) { 
-            window.processAreaSelection({ minX: Math.min(pos.x, window.dragStartPos.x), maxX: Math.max(pos.x, window.dragStartPos.x), minY: Math.min(pos.y, window.dragStartPos.y), maxY: Math.max(pos.y, window.dragStartPos.y) }, null); 
+            window.processAreaSelection({ minX: Math.min(pos.x, window.dragStartPos.x), maxX: Math.max(pos.x, window.dragStartPos.x), minY: Math.min(pos.y, window.dragStartPos.y), maxY: Math.max(pos.y, window.dragStartPos.y) }, null, event.shiftKey || window.isShiftDown); 
             return; 
         }
     }
@@ -553,7 +669,7 @@ window.onPointerUp = function(event) {
 }
 
 // ==========================================
-// TINDAKAN KLIK (SELEKSI HANYA 1 BENCH / 1 BLOCK)
+// TINDAKAN KLIK (SELEKSI & APPEND)
 // ==========================================
 window.executeCenterPivot = function(pos) {
     mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
@@ -562,7 +678,15 @@ window.executeCenterPivot = function(pos) {
     appLayers.forEach(l => { if (l.visible && l.threeObject) l.threeObject.traverse(c => { if (c.isMesh) intersectable.push(c); }); });
 
     const intersects = raycaster.intersectObjects(intersectable, false);
-    if (intersects.length > 0) { controls.target.copy(intersects[0].point); controls.update(); }
+    if (intersects.length > 0) { 
+        const newTarget = intersects[0].point;
+        
+        const offset = new THREE.Vector3().subVectors(newTarget, controls.target);
+        camera.position.add(offset);
+        controls.target.copy(newTarget); 
+        
+        controls.update(); 
+    }
 
     if (window.activeInteractionMode === 'center_pivot') {
         const defaultBtn = document.querySelector('.tool-btn[data-mode="select_bench"]');
@@ -575,46 +699,25 @@ window.executeClickAction = function(event, pos) {
     const mode = window.activeInteractionMode;
     mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
     
-    const isCtrl = event.ctrlKey || mode === 'record_bench' || mode === 'record_block';
-    const isShift = event.shiftKey || mode === 'select_block' || mode === 'record_block';
+    const isAppend = event.shiftKey || window.isShiftDown;
+    const isBlockMode = mode === 'select_block' || mode === 'record_block';
+    const isRecordMode = mode === 'record_bench' || mode === 'record_block';
 
     let intersects = [];
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup.visible) {
         intersects = raycaster.intersectObjects(pitReserveGroup.children, false).filter(i => i.object.visible && i.object.isMesh);
     }
 
-    if (isCtrl) {
-        if (window.selectedMeshes.size > 0) window.recordSelectedMeshes();
-        else if (intersects.length > 0) {
-            const target = intersects[0].object; 
-            const targetType = target.userData.type || 'pit';
-            const targetParsed = window.parseCompositeId(target.userData);
-            
-            if (pitReserveGroup) {
-                pitReserveGroup.children.forEach(m => {
-                    if (!m.isMesh || !m.visible) return;
-                    if ((m.userData.type || 'pit') !== targetType) return;
-                    const mParsed = window.parseCompositeId(m.userData);
-
-                    if (isShift) { 
-                        if (mParsed.base === targetParsed.base) window.selectedMeshes.add(m); 
-                    } else {
-                        if (mParsed.record === targetParsed.record) window.selectedMeshes.add(m);
-                    }
-                });
-            }
-            window.recordSelectedMeshes();
-        } 
-        return;
+    if (intersects.length === 0) { 
+        if (!isAppend) window.clearSelection(); 
+        return; 
     }
-
-    if (intersects.length === 0) { window.clearSelection(); return; }
     
     const target = intersects[0].object; 
     const targetType = target.userData.type || 'pit';
     const targetParsed = window.parseCompositeId(target.userData);
     
-    window.clearSelection();
+    if (!isAppend) window.clearSelection();
 
     if (pitReserveGroup) {
         pitReserveGroup.children.forEach(m => {
@@ -622,7 +725,7 @@ window.executeClickAction = function(event, pos) {
             if ((m.userData.type || 'pit') !== targetType) return;
             const mParsed = window.parseCompositeId(m.userData);
 
-            if (isShift) { 
+            if (isBlockMode) { 
                 if (mParsed.base === targetParsed.base) window.selectedMeshes.add(m); 
             } else {
                 if (mParsed.record === targetParsed.record) window.selectedMeshes.add(m);
@@ -630,24 +733,42 @@ window.executeClickAction = function(event, pos) {
         });
     }
 
+    window.hoveredMeshes = [];
+    window.hoveredGroupKey = null;
+    window.currentHoveredData = null;
+    window.currentHoveredName = null;
+
     window.updateSelectionVisuals(); 
-    window.hoveredMeshes.forEach(m => window.highlightMesh(m, true)); 
     window.displaySelectionInfo();
+
+    if (isRecordMode || (window.isAutoRecordActive && window.selectedMeshes.size > 0)) {
+        window.recordSelectedMeshes();
+    }
 }
 
 // ==========================================
-// PEMILIHAN KAWASAN & POLIGON (STRICT INSIDE ONLY)
+// PEMILIHAN KAWASAN & POLIGON (MEMPERTIMBANGKAN OCCLUSION/TERLIHAT MATA)
 // ==========================================
 window.updatePolygonSVG = function(currentPos = null) {
     if (window.polygonPoints.length === 0) return;
-    polygonShape.setAttribute('points', window.polygonPoints.map(p => `${p.x},${p.y}`).join(' '));
-    if (currentPos) polygonLine.setAttribute('points', `${window.polygonPoints[window.polygonPoints.length-1].x},${window.polygonPoints[window.polygonPoints.length-1].y} ${currentPos.x},${currentPos.y}`);
-    else polygonLine.setAttribute('points', '');
+    
+    let pointsForShape = [...window.polygonPoints];
+    if (currentPos) {
+        pointsForShape.push({ x: currentPos.x, y: currentPos.y });
+    }
+    
+    polygonShape.setAttribute('points', pointsForShape.map(p => `${p.x},${p.y}`).join(' '));
+    
+    if (currentPos) {
+        polygonLine.setAttribute('points', `${window.polygonPoints[window.polygonPoints.length-1].x},${window.polygonPoints[window.polygonPoints.length-1].y} ${currentPos.x},${currentPos.y}`);
+    } else {
+        polygonLine.setAttribute('points', '');
+    }
 }
 
 window.finishPolygonSelection = function() {
     window.isDrawingPolygon = false; controls.enabled = true; polygonLine.setAttribute('points', '');
-    if (window.polygonPoints.length > 2) window.processAreaSelection(null, window.polygonPoints);
+    if (window.polygonPoints.length > 2) window.processAreaSelection(null, window.polygonPoints, window.isShiftDown);
     setTimeout(() => { polygonShape.setAttribute('points', ''); window.polygonPoints = []; }, 300);
 }
 
@@ -655,19 +776,30 @@ window.cancelPolygon = function() {
     window.isDrawingPolygon = false; controls.enabled = true; window.polygonPoints = []; polygonShape.setAttribute('points', ''); polygonLine.setAttribute('points', ''); 
 }
 
-window.processAreaSelection = function(rectBounds, polyPoints) {
-    window.clearSelection(); scene.updateMatrixWorld(true);
+window.processAreaSelection = function(rectBounds, polyPoints, isAppend = false) {
+    if (!isAppend) window.clearSelection(); 
+    scene.updateMatrixWorld(true);
+    
     if (!pitReserveGroup || !pitReserveGroup.visible) return;
 
-    // LANGSUNG MEMILIH MESH YANG BERADA DI DALAM KOTAK/POLYGON
+    let targetBases = new Set();
+    let targetTypes = new Set();
+    let checkedRays = new Set();
+    
+    const localRaycaster = new THREE.Raycaster();
+
     pitReserveGroup.children.forEach(mesh => {
         if (!mesh.visible || !mesh.isMesh) return;
         if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
         const center = new THREE.Vector3(); mesh.geometry.boundingBox.getCenter(center);
         const screenPos = center.clone().project(camera);
-        if (screenPos.z > 1) return;
+        if (screenPos.z > 1) return; 
         
-        const sx = (screenPos.x * 0.5 + 0.5) * container.clientWidth; const sy = (screenPos.y * -0.5 + 0.5) * container.clientHeight;
+        const nx = screenPos.x;
+        const ny = screenPos.y;
+        const sx = (nx * 0.5 + 0.5) * container.clientWidth; 
+        const sy = (ny * -0.5 + 0.5) * container.clientHeight;
+        
         let isInside = false;
         
         if (rectBounds) { 
@@ -677,11 +809,48 @@ window.processAreaSelection = function(rectBounds, polyPoints) {
         }
         
         if (isInside) {
-            window.selectedMeshes.add(mesh);
+            const rayKey = `${nx.toFixed(3)},${ny.toFixed(3)}`;
+            
+            if (!checkedRays.has(rayKey)) {
+                checkedRays.add(rayKey);
+                
+                localRaycaster.setFromCamera(new THREE.Vector2(nx, ny), camera);
+                const intersects = localRaycaster.intersectObjects(pitReserveGroup.children, false);
+                const validHits = intersects.filter(i => i.object.visible && i.object.isMesh);
+                
+                if (validHits.length > 0) {
+                    const topHit = validHits[0].object;
+                    const parsed = window.parseCompositeId(topHit.userData);
+                    targetBases.add(parsed.base);
+                    targetTypes.add(topHit.userData.type || 'pit');
+                }
+            }
         }
     });
 
-    window.updateSelectionVisuals(); window.displaySelectionInfo();
+    if (targetBases.size > 0) {
+        pitReserveGroup.children.forEach(mesh => {
+            if (!mesh.visible || !mesh.isMesh) return;
+            const parsed = window.parseCompositeId(mesh.userData);
+            const type = mesh.userData.type || 'pit';
+
+            if (targetBases.has(parsed.base) && targetTypes.has(type)) {
+                window.selectedMeshes.add(mesh);
+            }
+        });
+    }
+
+    window.hoveredMeshes = [];
+    window.hoveredGroupKey = null;
+    window.currentHoveredData = null;
+    window.currentHoveredName = null;
+
+    window.updateSelectionVisuals(); 
+    window.displaySelectionInfo();
+
+    if (window.isAutoRecordActive && window.selectedMeshes.size > 0) {
+        window.recordSelectedMeshes();
+    }
 }
 
 window.pointInPolygon = function(point, vs) {
@@ -702,7 +871,6 @@ window.renderInfoPanel = function() {
     const infoEmpty = document.getElementById('info-empty');
     if (!infoPanel) return;
 
-    // Selalu tampilkan panel, hilangkan kotak statis "Belum ada block..."
     if (infoEmpty) infoEmpty.classList.add('hidden');
     infoPanel.classList.remove('hidden'); 
     infoPanel.classList.add('flex');
@@ -712,7 +880,6 @@ window.renderInfoPanel = function() {
         <div class="flex items-start w-full"><span class="text-slate-400 font-medium w-[65px] shrink-0">${label}</span><span class="text-slate-500 mx-1 shrink-0">:</span><span ${valueId ? `id="${valueId}"` : ''} class="font-semibold ${valueClass} flex-1 text-right break-words" title="${value}">${value}</span></div>
     `;
 
-    // Nilai DEFAULT Jika tidak ada sentuhan atau pilihan
     let dataValue = "-"; 
     let detailData = "-";
     let pitWasteData = "-"; 
@@ -723,12 +890,10 @@ window.renderInfoPanel = function() {
 
     if (window.currentHoveredData) {
         if (window.currentHoveredData.type === 'dxf') {
-            // Render khusus untuk DXF
             dataValue = window.currentHoveredData.name || "-";
             detailData = window.currentHoveredData.dxfType || "-";
             coordData = window.currentHoveredData.coordStr || "-";
         } else {
-            // Render untuk Block Geometry
             dataValue = window.currentHoveredData.parsed.name || "-";
             pitWasteData = Number(window.currentHoveredData.pitWaste.toFixed(2)).toLocaleString();
             dispWasteData = Number(window.currentHoveredData.dispWaste.toFixed(2)).toLocaleString();
@@ -747,6 +912,8 @@ window.renderInfoPanel = function() {
     else if (window.selectedMeshes.size > 0) {
         let uniqueNames = new Set(); let uniqueBases = new Set(); let uniqueFulls = new Set();
         let rawPitWaste = 0; let rawDispWaste = 0; let rawResource = 0;
+        
+        let selBox = new THREE.Box3(); 
 
         window.selectedMeshes.forEach(m => {
             const parsed = window.parseCompositeId(m.userData);
@@ -759,6 +926,13 @@ window.renderInfoPanel = function() {
             } else {
                 rawPitWaste += m.userData.wasteVol || 0; 
                 rawResource += m.userData.resVol || 0;
+            }
+
+            if (m.geometry) {
+                if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                m.updateMatrixWorld(true);
+                const mBox = m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld);
+                selBox.union(mBox);
             }
         });
 
@@ -783,33 +957,61 @@ window.renderInfoPanel = function() {
         dispWasteData = Number(rawDispWaste.toFixed(2)).toLocaleString();
         resourceData = Number(rawResource.toFixed(2)).toLocaleString();
         srData = rawResource > 0 ? (rawPitWaste / rawResource).toFixed(2) : '-';
+
+        const center = new THREE.Vector3();
+        selBox.getCenter(center);
+        let ce = center.x, cn = -center.z, cz = center.y;
+        if (window.worldOrigin && window.worldOrigin.isSet) {
+            ce += window.worldOrigin.x;
+            cn = -(center.z + window.worldOrigin.z);
+            cz += window.worldOrigin.y;
+        }
+        coordData = `${ce.toFixed(1)}, ${cn.toFixed(1)}, ${cz.toFixed(1)}`;
     }
 
-    // 1. Tampilkan Coordinate Di Paling Atas
     html += createRow('Coordinate', coordData, 'text-cyan-300', 'info-coord-val'); 
     html += '<div class="w-full h-px bg-slate-700/50 my-1"></div>'; 
     
-    // 2. Data (Menampilkan ekstrak NAME atau DXF) & Detail (Menampilkan rincian BLOCK/STRIP/dll)
-    html += createRow('Data', dataValue, 'text-yellow-400'); // Telah diubah dari Geometry menjadi Data
+    html += createRow('Data', dataValue, 'text-yellow-400'); 
     html += createRow('Detail', detailData, 'text-yellow-400'); 
     
     html += '<div class="w-full h-px bg-slate-700/50 my-1"></div>'; 
     
-    // 3. Info Matrix
     html += createRow('Waste (bcm)', pitWasteData, 'text-blue-400');
     html += createRow('Resource (t)', resourceData, 'text-orange-400');
     html += createRow('Strip Ratio', srData, 'text-green-400');
     
     html += '<div class="w-full h-px bg-slate-700/50 my-1"></div>'; 
-    html += createRow('Waste (bcm)', dispWasteData, 'text-blue-400'); // Untuk Disposal
+    html += createRow('Waste (bcm)', dispWasteData, 'text-blue-400'); 
 
     html += '</div>';
     
-    // Selalu injeksi HTML walau tidak menyentuh objek (Agar default "-" selalu tampil)
     infoPanel.innerHTML = html;
 }
 
 window.displaySelectionInfo = function() { window.renderInfoPanel(); }
+
+// ==========================================
+// PENGATURAN TOGGLE AUTO-RECORD BARU
+// ==========================================
+window.toggleAutoRecord = function() {
+    window.isAutoRecordActive = !window.isAutoRecordActive;
+    const btn = document.getElementById('btn-toggle-record');
+    
+    if (btn) {
+        if (window.isAutoRecordActive) {
+            btn.classList.add('is-active');
+            btn.title = "Auto-Record: ON";
+            
+            if (window.selectedMeshes && window.selectedMeshes.size > 0) {
+                window.recordSelectedMeshes();
+            }
+        } else {
+            btn.classList.remove('is-active');
+            btn.title = "Auto-Record: OFF";
+        }
+    }
+}
 
 // ==========================================
 // URUTAN & RAKAMAN REKOD (BENCH AND ABOVE LOGIC)
@@ -820,13 +1022,11 @@ window.recordSelectedMeshes = function() {
     window.redoStack = []; 
     let expandedMeshes = new Set();
     
-    // Deteksi tipe selection pertama untuk menentukan tujuan record (Pit atau Disp)
     let isDispAction = false;
     window.selectedMeshes.forEach(target => {
         if(target.userData.type === 'disp' || target.userData.type === 'disposal') isDispAction = true;
     });
 
-    // EKSPANSI OTOMATIS: Ambil Bench yang Sama & Di Atasnya Sebelum Merekam
     window.selectedMeshes.forEach(target => {
         const targetType = target.userData.type || 'pit';
         const targetParsed = window.parseCompositeId(target.userData);
@@ -840,12 +1040,11 @@ window.recordSelectedMeshes = function() {
                 if ((m.userData.type || 'pit') !== targetType) return;
                 
                 const mParsed = window.parseCompositeId(m.userData);
-                if (mParsed.base !== targetParsed.base) return; // Wajib di blok yang sama
+                if (mParsed.base !== targetParsed.base) return; 
 
                 if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
                 const mCenterY = m.geometry.boundingBox.getCenter(new THREE.Vector3()).y;
                 
-                // Kriteria ekspansi: Bench di atasnya, ATAU Bench yang sama persis
                 if (mCenterY >= targetCenterY - 0.5 || mParsed.bench === targetParsed.bench) {
                     expandedMeshes.add(m);
                 }
@@ -853,7 +1052,6 @@ window.recordSelectedMeshes = function() {
         }
     });
 
-    // Berjaga-jaga agar target awal pasti masuk
     window.selectedMeshes.forEach(m => expandedMeshes.add(m));
 
     let combinedWaste = 0, combinedResource = 0; 
@@ -864,21 +1062,13 @@ window.recordSelectedMeshes = function() {
         combinedResource += m.userData.resVol || 0; 
         
         const parsed = window.parseCompositeId(m.userData);
-        uniqueRecordNames.add(parsed.record); // Gunakan format NAME/BLOCK/STRIP/BENCH
+        uniqueRecordNames.add(parsed.record); 
         
         m.userData.isRecorded = true;
-        // Penanda untuk Undo/Redo dan Checkbox
         m.userData.recordType = isDispAction ? 'disp' : 'pit'; 
         
-        // Sembunyikan dan hilangkan material seleksi (Highlight akan diurus updateRecordedVisibility jika dicentang)
         m.visible = false; 
-        if (m.userData.originalMaterial) {
-            m.material.dispose();
-            m.material = m.userData.originalMaterial;
-            delete m.userData.originalMaterial;
-        } else if (m.material) {
-            m.material.emissive.setHex(0x000000); 
-        }
+        window.applyMaterialState(m, 'default');
         
         recordedMeshesInStep.push(m);
     });
@@ -898,7 +1088,6 @@ window.recordSelectedMeshes = function() {
         }
     }
     
-    // MASUKKAN KE ARRAY YANG TEPAT (PIT ATAU DISPOSAL)
     if (isDispAction) {
         window.dispSequenceRecords.push({ name: seqName, waste: combinedWaste });
         window.dispTotalWaste += combinedWaste;
@@ -912,7 +1101,7 @@ window.recordSelectedMeshes = function() {
     if (window.undoStack.length > window.MAX_UNDO_STEPS) window.undoStack.shift();
     
     window.updateSequenceUI(); 
-    window.updateRecordedVisibility(); // Update tampilan checkbox
+    window.updateRecordedVisibility(); 
     
     window.selectedMeshes.clear(); window.hoveredGroupKey = null; 
     window.hoveredMeshes = []; window.currentHoveredName = null; window.currentHoveredData = null;
@@ -938,12 +1127,12 @@ window.undoLastRecord = function() {
     
     lastAction.meshes.forEach(m => {
         m.userData.isRecorded = false; delete m.userData.recordType;
+        window.applyMaterialState(m, 'default');
         
         const isResource = (m.userData.burden || '').toUpperCase() === 'RESOURCE';
         const isPit = m.userData.type === 'pit' || !m.userData.type; // default pit
         const isDisp = m.userData.type === 'disp' || m.userData.type === 'disposal';
 
-        // Terapkan kembali visibilitas berdasar toggle mata di layout.js
         if (isPit && !isResource) {
             m.visible = typeof window.isPitWasteVisible !== 'undefined' ? window.isPitWasteVisible : true;
         } else if (isPit && isResource) {
@@ -966,13 +1155,7 @@ window.redoLastUndo = function() {
     actionToRedo.meshes.forEach(m => { 
         m.userData.isRecorded = true; m.userData.recordType = actionToRedo.type;
         m.visible = false; 
-        if (m.userData.originalMaterial) {
-            m.material.dispose();
-            m.material = m.userData.originalMaterial;
-            delete m.userData.originalMaterial;
-        } else if (m.material) {
-            m.material.emissive.setHex(0x000000); 
-        }
+        window.applyMaterialState(m, 'default');
     });
     
     if (actionToRedo.type === 'disp') {
@@ -980,7 +1163,7 @@ window.redoLastUndo = function() {
         window.dispSequenceRecords.push({ name: actionToRedo.name, waste: actionToRedo.waste });
         window.dispTotalWaste += actionToRedo.waste;
     } else {
-        if (actionToRedo.name.startsWith('Selection #')) window.pitSequenceCounter++;
+        if (actionToRedo.name.startsWith('Selection #')) window.dispSequenceCounter++;
         window.pitSequenceRecords.push({ name: actionToRedo.name, waste: actionToRedo.waste, resource: actionToRedo.resource });
         window.pitTotalWaste += actionToRedo.waste; 
         window.pitTotalResource += actionToRedo.resource;
@@ -1000,7 +1183,6 @@ window.resetSequenceAndView = function() {
             const isPit = mesh.userData.type === 'pit' || !mesh.userData.type; // default pit
             const isDisp = mesh.userData.type === 'disp' || mesh.userData.type === 'disposal';
 
-            // Terapkan kembali visibilitas berdasar toggle mata di layout.js
             if (isPit && !isResource) {
                 mesh.visible = typeof window.isPitWasteVisible !== 'undefined' ? window.isPitWasteVisible : true;
             } else if (isPit && isResource) {
@@ -1011,25 +1193,21 @@ window.resetSequenceAndView = function() {
                 mesh.visible = true;
             }
             
-            // PERBAIKAN: Bersihkan material clone jika masih ada saat direset
-            if (mesh.userData.originalMaterial) {
-                mesh.material.dispose();
-                mesh.material = mesh.userData.originalMaterial;
-                delete mesh.userData.originalMaterial;
-            } else if (mesh.material) {
-                mesh.material.emissive.setHex(0x000000);
-            }
+            window.applyMaterialState(mesh, 'default');
         });
     }
     
-    // Matikan checkbox jika menyala
+    // BERSAKAN CACHE POOL MATERIAL UNTUK GARBAGE COLLECTION RAM/VRAM
+    if (window.sharedStateMaterials) {
+        Object.values(window.sharedStateMaterials).forEach(mat => mat.dispose());
+        window.sharedStateMaterials = {};
+    }
+    
     const cbPit = document.getElementById('cb-show-pit-record'); if(cbPit) cbPit.checked = false;
     const cbDisp = document.getElementById('cb-show-disp-record'); if(cbDisp) cbDisp.checked = false;
     
-    // Reset Array Pit
     window.pitSequenceRecords = []; window.pitTotalWaste = 0; window.pitTotalResource = 0; window.pitSequenceCounter = 1; 
     
-    // Reset Array Disposal
     window.dispSequenceRecords = []; window.dispTotalWaste = 0; window.dispSequenceCounter = 1; 
 
     window.selectedMeshes.clear(); window.undoStack = []; window.redoStack = []; 
@@ -1042,10 +1220,15 @@ window.resetSequenceAndView = function() {
     }
     if (typeof finishedDrawings !== 'undefined') finishedDrawings = [];
     if (typeof selectedDrawing !== 'undefined') selectedDrawing = null;
+
+    const defaultBtn = document.querySelector('.tool-btn[data-mode="select_bench"]');
+    if (defaultBtn) {
+        defaultBtn.click();
+    }
+    container.style.cursor = 'default';
 }
 
 window.updateSequenceUI = function() {
-    // 1. UPDATE PIT RECORD
     const pitTbody = document.getElementById('sequence-tbody'); 
     const pitPlaceholder = document.getElementById('sequence-placeholder');
     if (pitTbody && pitPlaceholder) {
@@ -1078,7 +1261,6 @@ window.updateSequenceUI = function() {
         if (pitScrollContainer && window.pitSequenceRecords.length > 0) { setTimeout(() => { pitScrollContainer.scrollTop = pitScrollContainer.scrollHeight; }, 10); }
     }
 
-    // 2. UPDATE DISPOSAL RECORD
     const dispTbody = document.getElementById('disp-sequence-tbody'); 
     const dispPlaceholder = document.getElementById('disp-sequence-placeholder');
     if (dispTbody && dispPlaceholder) {
@@ -1115,10 +1297,8 @@ window.onload = () => {
     if (typeof initLayout === 'function') initLayout();
     if (typeof init3D === 'function') init3D();
     
-    // Inisialisasi awal panel info agar baris "-" (Kosong statis) sudah tampil saat memuat
     window.renderInfoPanel();
 
-    // Inisialisasi Event Listener untuk Checkbox Visibilitas Record
     const cbPitRecord = document.getElementById('cb-show-pit-record');
     if (cbPitRecord) cbPitRecord.addEventListener('change', window.updateRecordedVisibility);
     

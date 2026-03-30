@@ -1,5 +1,6 @@
 // ==============================================================
 // UI STATE MANAGEMENT (Disposal Data Subfolders & CSV Setting)
+// OPTIMIZED FOR MEMORY LEAK PREVENTION (HUAWEI MATEPAD)
 // ==============================================================
 
 window.disposalStates = {};
@@ -8,6 +9,7 @@ window.lastActiveDisposalId = null;
 window._lastSelectedDisposalFolderName = null; 
 window.hasUnsavedDisposalColorChanges = false; 
 window.hasUnsavedDisposalConfigChanges = false; 
+window.dispColorModes = JSON.parse(localStorage.getItem('rizpec_disp_color_modes')) || {};
 
 // Fungsi helper membatalkan perubahan parameter CSV jika pindah tab tanpa di build
 window.discardUnsavedDisposalConfigChanges = async function() {
@@ -58,6 +60,133 @@ window.applyDisposalSafetyDisable = function() {
         }
     });
 };
+
+// ==============================================================
+// [PERBAIKAN MEMORY LEAK]: GLOBAL EVENT DELEGATION UNTUK DISPOSAL
+// Mengganti listener di dalam loop (innerHTML) menjadi terpusat 
+// ==============================================================
+document.addEventListener('change', async (e) => {
+    // 1. Checkbox Disposal Geometry
+    if (e.target && e.target.classList.contains('disp-checkbox')) {
+        const disp = e.target.getAttribute('data-disp');
+        const containerDiv = e.target.closest('.group');
+        const textSpan = containerDiv.querySelector('span.font-bold');
+        const customCb = containerDiv.querySelector('.checkbox-box');
+        const checkIcon = customCb.querySelector('i');
+
+        if(e.target.checked) {
+            customCb.className = "checkbox-box w-5 h-5 rounded-sm border bg-blue-500 border-blue-500 flex items-center justify-center transition-colors shrink-0";
+            checkIcon.className = "fa-solid fa-check text-white text-[10px] opacity-100 transition-opacity";
+            textSpan.className = "text-blue-400 transition-colors font-bold text-[11px] truncate";
+            containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-blue-500/50 shadow-sm p-2 rounded-md transition-all hover:bg-slate-800 group";
+            
+            window.loadedDisposals.add(disp);
+            
+            const geoTab = document.getElementById('panel-geometry');
+            const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
+            
+            if (isGeoTabActive) {
+                if (typeof window.renderPendingPits === 'function') await window.renderPendingPits();
+            } else {
+                const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
+                if (tabBtn) {
+                    tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
+                    setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
+                }
+            }
+        } else {
+            customCb.className = "checkbox-box w-5 h-5 rounded-sm border bg-slate-800 border-slate-600 group-hover:border-blue-400 flex items-center justify-center transition-colors shrink-0";
+            checkIcon.className = "fa-solid fa-check text-white text-[10px] opacity-0 transition-opacity";
+            textSpan.className = "text-slate-300 transition-colors font-bold text-[11px] truncate";
+            containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-slate-700/80 p-2 rounded-md transition-all hover:bg-slate-800 group";
+            
+            window.loadedDisposals.delete(disp);
+            window.renderedDisposals.delete(disp);
+            if (typeof window.unloadDisposalGeometry === 'function') window.unloadDisposalGeometry(disp);
+        }
+    }
+
+    // 2. Select Color Mode (Burden/Subset)
+    if (e.target && e.target.classList.contains('disp-color-mode-select')) {
+        const disp = e.target.getAttribute('data-disp');
+        const newMode = e.target.value;
+        if (window.dispColorModes[disp] !== newMode) {
+            window.dispColorModes[disp] = newMode;
+            localStorage.setItem('rizpec_disp_color_modes', JSON.stringify(window.dispColorModes));
+            
+            if (window.loadedDisposals.has(disp)) {
+                if (typeof window.unloadDisposalGeometry === 'function') window.unloadDisposalGeometry(disp);
+                if (window.renderedDisposals) window.renderedDisposals.delete(disp);
+                
+                const geoTab = document.getElementById('panel-geometry');
+                const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
+                
+                if (isGeoTabActive) {
+                    if (typeof window.renderPendingPits === 'function') window.renderPendingPits();
+                } else {
+                    const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
+                    if (tabBtn) {
+                        tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
+                        setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Palette Color Input (Burden)
+    if (e.target && e.target.classList.contains('disp-color-input-burden')) {
+        const index = parseInt(e.target.getAttribute('data-index'));
+        const oldColor = window.dispBurdenPalette[index].color;
+        if (oldColor !== e.target.value) {
+            window.dispBurdenPalette[index].color = e.target.value;
+            window.hasUnsavedDisposalColorChanges = true;
+            if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
+        }
+    }
+
+    // 4. Palette Color Input (Subset)
+    if (e.target && e.target.classList.contains('disp-color-input-subset')) {
+        const index = parseInt(e.target.getAttribute('data-index'));
+        const oldColor = window.dispSubsetPalette[index].color;
+        if (oldColor !== e.target.value) {
+            window.dispSubsetPalette[index].color = e.target.value;
+            window.hasUnsavedDisposalColorChanges = true;
+            if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
+        }
+    }
+});
+
+document.addEventListener('click', (e) => {
+    // Tombol Naikkan Subset
+    const btnUp = e.target.closest('.disp-btn-up-subset');
+    if (btnUp) {
+        const index = parseInt(btnUp.getAttribute('data-index'));
+        if (index > 0) {
+            const temp = window.dispSubsetPalette[index];
+            window.dispSubsetPalette[index] = window.dispSubsetPalette[index - 1];
+            window.dispSubsetPalette[index - 1] = temp;
+            window.hasUnsavedDisposalColorChanges = true;
+            if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
+            if (typeof window.renderDisposalPaletteUI === 'function') window.renderDisposalPaletteUI();
+        }
+    }
+
+    // Tombol Turunkan Subset
+    const btnDown = e.target.closest('.disp-btn-down-subset');
+    if (btnDown) {
+        const index = parseInt(btnDown.getAttribute('data-index'));
+        if (index < window.dispSubsetPalette.length - 1) {
+            const temp = window.dispSubsetPalette[index];
+            window.dispSubsetPalette[index] = window.dispSubsetPalette[index + 1];
+            window.dispSubsetPalette[index + 1] = temp;
+            window.hasUnsavedDisposalColorChanges = true;
+            if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
+            if (typeof window.renderDisposalPaletteUI === 'function') window.renderDisposalPaletteUI();
+        }
+    }
+});
+// ==============================================================
 
 // Ekstensi/Hook ke Framework Folder Global (file.js) spesifik untuk Disposal
 window.getDisposalFolderBadgeHTML = function(name, rootName) {
@@ -481,20 +610,17 @@ window.aggregateAllDisposalData = async function() {
 window.onDisposalFolderSelected = async function(name, type, rootName) {
     if (rootName !== 'Disposal Data') {
         window.activeDisposalId = null;
-	window._lastSelectedDisposalFolderName = null; // Tambahkan reset tracker
+        window._lastSelectedDisposalFolderName = null; 
         return; 
     }
     
-    // Tampilkan Wrapper Kanan Khusus Disposal, Sembunyikan Pit
     const pitWrap = document.getElementById('pit-summary-wrapper');
     const dispWrap = document.getElementById('disp-summary-wrapper');
     const dxfWrap = document.getElementById('dxf-summary-wrapper');
-    if (pitWrap) { pitWrap.classList.add('hidden'); pitWrap.classList.remove('flex'); } // FIX: Matikan Pit
-    if (dispWrap) { dispWrap.classList.remove('hidden'); dispWrap.classList.add('flex'); } // FIX: Nyalakan Disposal
+    if (pitWrap) { pitWrap.classList.add('hidden'); pitWrap.classList.remove('flex'); } 
+    if (dispWrap) { dispWrap.classList.remove('hidden'); dispWrap.classList.add('flex'); } 
     if (dxfWrap) { dxfWrap.classList.add('hidden'); dxfWrap.classList.remove('flex'); }
 
-    // PINDAHKAN MANAJEMEN VISIBILITAS UI KE SINI (SEBELUM EARLY RETURN)
-    // Tujuannya agar saat double click, UI Geometry Manager tetap dimunculkan
     const container = document.getElementById('geometry-disp-manager');
     if (container) {
         if (type === 'Root Folder') {
@@ -1338,6 +1464,8 @@ async function updateDisposalFileStats(file, type) {
 
                 worker.onmessage = async (e) => {
                     URL.revokeObjectURL(workerUrl);
+                    // [FIX] HARUS SEGERA DIBUNUH AGAR THREAD & RAM BENAR-BENAR BERSIH 
+                    worker.terminate();
 
                     if (e.data.error) {
                         throwError(e.data.error);
@@ -1431,6 +1559,8 @@ async function updateDisposalFileStats(file, type) {
 
                 worker.onerror = (err) => {
                     URL.revokeObjectURL(workerUrl);
+                    // [FIX] HARUS DIBUNUH KETIKA ERROR
+                    worker.terminate();
                     throwError(err.message);
                 };
 
@@ -1876,7 +2006,6 @@ window.updateGeometryDisposalListUI = async function() {
                 localStorage.setItem('rizpec_disp_color_modes', JSON.stringify(window.dispColorModes));
             }
             
-            // Memaksa kembalikan ke Burden jika tidak ada subset yang valid
             if (!dispObj.hasSubset && currentMode === 'Subset') {
                 currentMode = 'Burden';
                 window.dispColorModes[disp] = currentMode;
@@ -1892,6 +2021,7 @@ window.updateGeometryDisposalListUI = async function() {
             
             div.className = `flex items-center gap-2.5 bg-slate-900/80 border ${isLoaded ? 'border-blue-500/50 shadow-sm' : 'border-slate-700/80'} p-2 rounded-md transition-all hover:bg-slate-800 group`;
             
+            // [PERBAIKAN]: Menghapus event listener spesifik, digantikan oleh atribut 'data-*'
             div.innerHTML = `
                 <label class="relative flex items-center justify-center w-5 h-5 cursor-pointer m-0 shrink-0" title="Check/Uncheck untuk menampilkan Geometri">
                     <input type="checkbox" class="disp-checkbox peer absolute opacity-0 w-full h-full cursor-pointer" data-disp="${disp}" ${isLoaded ? 'checked' : ''}>
@@ -1907,72 +2037,6 @@ window.updateGeometryDisposalListUI = async function() {
                 </select>
             `;
             
-            const cb = div.querySelector('.disp-checkbox');
-            cb.addEventListener('change', async (e) => {
-                const containerDiv = e.target.closest('.group');
-                const textSpan = containerDiv.querySelector('span.font-bold');
-                const customCb = containerDiv.querySelector('.checkbox-box');
-                const checkIcon = customCb.querySelector('i');
-
-                if(e.target.checked) {
-                    customCb.className = "checkbox-box w-5 h-5 rounded-sm border bg-blue-500 border-blue-500 flex items-center justify-center transition-colors shrink-0";
-                    checkIcon.className = "fa-solid fa-check text-white text-[10px] opacity-100 transition-opacity";
-                    textSpan.className = "text-blue-400 transition-colors font-bold text-[11px] truncate";
-                    containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-blue-500/50 shadow-sm p-2 rounded-md transition-all hover:bg-slate-800 group";
-                    
-                    window.loadedDisposals.add(disp);
-                    
-                    const geoTab = document.getElementById('panel-geometry');
-                    const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
-                    
-                    if (isGeoTabActive) {
-                        if (typeof window.renderPendingPits === 'function') await window.renderPendingPits();
-                    } else {
-                        const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
-                        if (tabBtn) {
-                            tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
-                            setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
-                        }
-                    }
-                } else {
-                    customCb.className = "checkbox-box w-5 h-5 rounded-sm border bg-slate-800 border-slate-600 group-hover:border-blue-400 flex items-center justify-center transition-colors shrink-0";
-                    checkIcon.className = "fa-solid fa-check text-white text-[10px] opacity-0 transition-opacity";
-                    textSpan.className = "text-slate-300 transition-colors font-bold text-[11px] truncate";
-                    containerDiv.className = "flex items-center gap-2.5 bg-slate-900/80 border border-slate-700/80 p-2 rounded-md transition-all hover:bg-slate-800 group";
-                    
-                    window.loadedDisposals.delete(disp);
-                    window.renderedDisposals.delete(disp);
-                    if (typeof window.unloadDisposalGeometry === 'function') window.unloadDisposalGeometry(disp);
-                }
-            });
-
-            const modeSelect = div.querySelector('.disp-color-mode-select');
-            modeSelect.addEventListener('change', async (e) => {
-                const newMode = e.target.value;
-                if (window.dispColorModes[disp] !== newMode) {
-                    window.dispColorModes[disp] = newMode;
-                    localStorage.setItem('rizpec_disp_color_modes', JSON.stringify(window.dispColorModes));
-                    
-                    if (window.loadedDisposals.has(disp)) {
-                        if (typeof window.unloadDisposalGeometry === 'function') window.unloadDisposalGeometry(disp);
-                        if (window.renderedDisposals) window.renderedDisposals.delete(disp);
-                        
-                        const geoTab = document.getElementById('panel-geometry');
-                        const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
-                        
-                        if (isGeoTabActive) {
-                            if (typeof window.renderPendingPits === 'function') window.renderPendingPits();
-                        } else {
-                            const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
-                            if (tabBtn) {
-                                tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
-                                setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
-                            }
-                        }
-                    }
-                }
-            });
-            
             listEl.appendChild(div);
         });
     }
@@ -1982,7 +2046,6 @@ window.updateGeometryDisposalListUI = async function() {
         { name: 'Waste', desc: '', color: '#808000' } 
     ];
     
-    // Memaksa update default ke 'Waste' (Olive) jika sebelumnya tersimpan sebagai 'Loose'
     if (dispBurdenPalette.length > 0 && dispBurdenPalette[0].name === 'Loose') {
         dispBurdenPalette[0].name = 'Waste';
         dispBurdenPalette[0].color = '#808000';
@@ -2071,6 +2134,7 @@ window.renderDisposalPaletteUI = function(isEmpty = false) {
         return;
     }
 
+    // [PERBAIKAN]: Menambahkan penanda Class ('disp-color-input-burden') untuk diolah Global Event Delegation
     if (burdenListEl && window.dispBurdenPalette) {
         burdenListEl.innerHTML = '';
         window.dispBurdenPalette.forEach((item, index) => {
@@ -2080,20 +2144,11 @@ window.renderDisposalPaletteUI = function(isEmpty = false) {
             div.innerHTML = `
                 <div class="flex items-center justify-center w-[24px]">
                     <div class="relative w-5 h-5 rounded overflow-hidden border border-slate-600 hover:border-slate-400 transition-colors shadow-sm cursor-pointer shrink-0">
-                        <input type="color" class="absolute top-[-10px] left-[-10px] w-10 h-10 cursor-pointer outline-none p-0 border-0 color-input" value="${item.color}">
+                        <input type="color" class="absolute top-[-10px] left-[-10px] w-10 h-10 cursor-pointer outline-none p-0 border-0 color-input disp-color-input-burden" data-index="${index}" value="${item.color}">
                     </div>
                 </div>
                 <div class="truncate text-slate-300 text-[10px] font-bold" title="${item.name}">${item.name}</div>
             `;
-            
-            div.querySelector('.color-input').addEventListener('change', (e) => {
-                const oldColor = window.dispBurdenPalette[index].color;
-                if (oldColor !== e.target.value) {
-                    window.dispBurdenPalette[index].color = e.target.value;
-                    window.hasUnsavedDisposalColorChanges = true;
-                    if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
-                }
-            });
 
             burdenListEl.appendChild(div);
         });
@@ -2108,6 +2163,7 @@ window.renderDisposalPaletteUI = function(isEmpty = false) {
             return;
         }
 
+        // [PERBAIKAN]: Menambahkan penanda Class ('disp-color-input-subset', 'disp-btn-up-subset', dll) untuk global delegate
         palette.forEach((item, index) => {
             const div = document.createElement('div');
             div.className = "grid grid-cols-[24px_1fr_16px] gap-2 items-center bg-slate-900/80 border border-slate-700/80 p-2 rounded-md hover:bg-slate-800 transition-colors group";
@@ -2115,46 +2171,15 @@ window.renderDisposalPaletteUI = function(isEmpty = false) {
             div.innerHTML = `
                 <div class="flex items-center justify-center w-[24px]">
                     <div class="relative w-5 h-5 rounded overflow-hidden border border-slate-600 group-hover:border-slate-400 transition-colors shadow-sm cursor-pointer shrink-0">
-                        <input type="color" class="absolute top-[-10px] left-[-10px] w-10 h-10 cursor-pointer outline-none p-0 border-0 color-input" value="${item.color}">
+                        <input type="color" class="absolute top-[-10px] left-[-10px] w-10 h-10 cursor-pointer outline-none p-0 border-0 color-input disp-color-input-subset" data-index="${index}" value="${item.color}">
                     </div>
                 </div>
                 <div class="truncate text-slate-300 text-[10px] font-bold" title="${item.name}">${item.name}</div>
                 <div class="flex flex-col gap-0 items-center justify-center shrink-0 w-[16px]">
-                    <button class="text-slate-600 hover:text-blue-400 transition-colors btn-up h-3 flex items-center" title="Naikkan"><i class="fa-solid fa-caret-up text-[10px]"></i></button>
-                    <button class="text-slate-600 hover:text-blue-400 transition-colors btn-down h-3 flex items-center" title="Turunkan"><i class="fa-solid fa-caret-down text-[10px]"></i></button>
+                    <button class="text-slate-600 hover:text-blue-400 transition-colors btn-up disp-btn-up-subset h-3 flex items-center" data-index="${index}" title="Naikkan"><i class="fa-solid fa-caret-up text-[10px]"></i></button>
+                    <button class="text-slate-600 hover:text-blue-400 transition-colors btn-down disp-btn-down-subset h-3 flex items-center" data-index="${index}" title="Turunkan"><i class="fa-solid fa-caret-down text-[10px]"></i></button>
                 </div>
             `;
-            
-            div.querySelector('.color-input').addEventListener('change', (e) => {
-                const oldColor = window.dispSubsetPalette[index].color;
-                if (oldColor !== e.target.value) {
-                    window.dispSubsetPalette[index].color = e.target.value;
-                    window.hasUnsavedDisposalColorChanges = true;
-                    if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
-                }
-            });
-
-            div.querySelector('.btn-up').addEventListener('click', () => {
-                if (index > 0) {
-                    const temp = window.dispSubsetPalette[index];
-                    window.dispSubsetPalette[index] = window.dispSubsetPalette[index - 1];
-                    window.dispSubsetPalette[index - 1] = temp;
-                    window.hasUnsavedDisposalColorChanges = true;
-                    if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
-                    window.renderDisposalPaletteUI();
-                }
-            });
-
-            div.querySelector('.btn-down').addEventListener('click', () => {
-                if (index < window.dispSubsetPalette.length - 1) {
-                    const temp = window.dispSubsetPalette[index];
-                    window.dispSubsetPalette[index] = window.dispSubsetPalette[index + 1];
-                    window.dispSubsetPalette[index + 1] = temp;
-                    window.hasUnsavedDisposalColorChanges = true;
-                    if (typeof window.updateDisposalApplyColorButton === 'function') window.updateDisposalApplyColorButton();
-                    window.renderDisposalPaletteUI();
-                }
-            });
 
             subsetListEl.appendChild(div);
         });
