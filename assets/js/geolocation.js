@@ -1,186 +1,150 @@
 // ==========================================
 // GEOLOCATION & TRACKING SYSTEM
 // Membutuhkan library eksternal: proj4.js (untuk konversi LatLon ke UTM)
+// OPTIMIZED FOR MOBILE/TABLET (ZERO GC ALLOCATION)
 // ==========================================
+
+// [OPTIMASI MEMORI]: Variabel Global Daur Ulang agar tidak membebani RAM (GC Thrashing)
+const _geoV2 = typeof THREE !== 'undefined' ? new THREE.Vector2() : null;
+const _geoRayOrigin = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
+const _geoRayDir = typeof THREE !== 'undefined' ? new THREE.Vector3(0, -1, 0) : null;
+const _geoRaycaster = typeof THREE !== 'undefined' ? new THREE.Raycaster() : null;
+const _geoCenter3D = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
+const _geoBox = typeof THREE !== 'undefined' ? new THREE.Box3() : null;
 
 window.AppGeolocation = {
     isTracking: false,
     watchId: null,
     markerGroup: null,
     headingCone: null,
-    compassPermissionGranted: false, // Mencegah prompt kompas berulang
-    hasWarnedDistance: false, // Mencegah alert out-of-bounds muncul terus-menerus
+    compassPermissionGranted: false, 
+    hasWarnedDistance: false, 
     
-    // --- TAMBAHAN VARIABEL THROTTLING ---
+    // --- VARIABEL THROTTLING ---
     lastCalcX: null,
     lastCalcZ: null,
     lastCalcElev: null,
-    throttleDistance: 5.0, // Batas jarak (meter) diturunkan menjadi 5 meter
+    throttleDistance: 5.0, 
     // ------------------------------------
     
-    // Proyeksi dasar GPS (WGS84 Lat/Lon)
     epsgWgs84: "+proj=longlat +datum=WGS84 +no_defs",
+    cachedRaycastTargets: null, // Cache target agar tidak traverse scene berulang kali
 
     init: function() {
         this.createMarker();
     },
 
-    // 1. Membuat Marker 3D (Bola Biru Glow + Cone)
     createMarker: function() {
         if (this.markerGroup) return;
 
         this.markerGroup = new THREE.Group();
         this.markerGroup.visible = false; 
 
-        // --- BOLA BIRU UTAMA ---
         const sphereGeo = new THREE.SphereGeometry(6, 32, 32);
         const sphereMat = new THREE.MeshBasicMaterial({ 
-            color: 0x2563EB, // Biru pekat
-            depthTest: false, 
-            depthWrite: false, 
-            transparent: true,
-            opacity: 1.0
+            color: 0x2563EB, 
+            depthTest: false, depthWrite: false, transparent: true, opacity: 1.0
         });
         const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
         
-        // --- EFEK GLOW (BOLA LEBIH BESAR DENGAN ADDITIVE BLENDING) ---
         const glowGeo = new THREE.SphereGeometry(9, 32, 32);
         const glowMat = new THREE.MeshBasicMaterial({ 
-            color: 0x60A5FA, // Biru muda terang
-            transparent: true, 
-            opacity: 0.5, 
-            blending: THREE.AdditiveBlending, // Membuat efek cahaya berpendar
-            depthTest: false, 
-            depthWrite: false 
+            color: 0x60A5FA, 
+            transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, 
+            depthTest: false, depthWrite: false 
         });
         const glowMesh = new THREE.Mesh(glowGeo, glowMat);
 
-        // --- CONE PENUNJUK ARAH (DIPERBESAR & DIPERBAIKI) ---
         const coneGeo = new THREE.ConeGeometry(5, 16, 32);
         const coneMat = new THREE.MeshBasicMaterial({ 
             color: 0x3B82F6, 
-            transparent: true, 
-            opacity: 0.9, 
-            depthTest: false, 
-            depthWrite: false 
+            transparent: true, opacity: 0.9, depthTest: false, depthWrite: false 
         });
         this.headingCone = new THREE.Mesh(coneGeo, coneMat);
-        // Putar cone agar ujung lancipnya menunjuk lurus ke arah depan (sumbu -Z)
         this.headingCone.rotation.x = Math.PI / 2; 
-        // Posisikan tepat menempel di depan bola
         this.headingCone.position.set(0, 0, -12);
 
-        // Rangkai marker ke dalam grup utama (Y = 0 karena grup akan diangkat saat update posisi)
         this.markerGroup.add(sphereMesh);
         this.markerGroup.add(glowMesh);
         this.markerGroup.add(this.headingCone);
         
-        // Matikan Culling agar objek glow tidak tiba-tiba menghilang di pinggir kamera
-        this.markerGroup.traverse((child) => {
-            child.frustumCulled = false;
-        });
+        this.markerGroup.traverse((child) => { child.frustumCulled = false; });
         
-        // RenderOrder dipasang ke setiap Mesh agar fungsi tembus pandang (Overlay) bekerja maksimal
         sphereMesh.renderOrder = 1000;
         glowMesh.renderOrder = 999;
         this.headingCone.renderOrder = 1001;
 
-        if (typeof scene !== 'undefined') {
-            scene.add(this.markerGroup);
-        }
+        if (typeof scene !== 'undefined') scene.add(this.markerGroup);
     },
 
-    // 2. Mengecek apakah ada Geometri yang aktif dan mengkalkulasi Bounds
     checkActiveBounds: function() {
-        const globalBox = new THREE.Box3();
+        if (!_geoBox) return { hasData: false, bounds: null };
+        _geoBox.makeEmpty();
         let hasData = false;
+
+        // Caching Target Raycaster saat tracking dimulai (Hemat Performa CPU)
+        this.cachedRaycastTargets = [];
 
         if (typeof meshes !== 'undefined') {
             Object.values(meshes).forEach(m => {
                 if (m.visible) {
                     if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                    // Gunakan fungsi applyMatrix4 ke box yang sudah di clone secara lokal (tidak terhindarkan, tapi dieksekusi 1x saat start tracking)
                     const box = m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld);
-                    globalBox.expandByPoint(box.min);
-                    globalBox.expandByPoint(box.max);
+                    _geoBox.union(box);
                     hasData = true;
+                    this.cachedRaycastTargets.push(m);
                 }
             });
         }
 
         if (typeof appLayers !== 'undefined') {
-            appLayers.filter(l => l.type === 'dxf' && l.visible && l.threeObject).forEach(layer => {
-                const box = new THREE.Box3().setFromObject(layer.threeObject);
-                if (!box.isEmpty()) {
-                    globalBox.expandByPoint(box.min);
-                    globalBox.expandByPoint(box.max);
-                    hasData = true;
+            appLayers.forEach(layer => {
+                if (layer.type === 'dxf' && layer.visible && layer.threeObject) {
+                    const box = new THREE.Box3().setFromObject(layer.threeObject);
+                    if (!box.isEmpty()) {
+                        _geoBox.union(box);
+                        hasData = true;
+                    }
+                    if (layer.hasFaces) {
+                        layer.threeObject.traverse(child => { if (child.isMesh) this.cachedRaycastTargets.push(child); });
+                    }
                 }
             });
         }
 
-        return { hasData, bounds: globalBox };
+        return { hasData, bounds: _geoBox };
     },
 
-    // 3. Konversi Dinamis Lat/Lon GPS ke Titik UTM -> Three.js
     convertToThreeJS: function(lat, lon) {
-        if (!window.worldOrigin || !window.worldOrigin.isSet) {
-            console.error("[Geolocation] World Origin belum diset. Geometry belum dimuat!");
-            return null;
-        }
-        if (typeof proj4 === 'undefined') {
-            console.error("[Geolocation] Library proj4.js belum dimuat!");
-            return null;
-        }
+        if (!window.worldOrigin || !window.worldOrigin.isSet || typeof proj4 === 'undefined' || !_geoV2) return null;
 
-        // --- MENGHITUNG ZONA UTM SECARA DINAMIS ---
-        // Rumus Zona UTM berdasarkan Longitude
         const zone = Math.floor((lon + 180) / 6) + 1;
-        
-        // Cek Hemisphere (Utara atau Selatan)
-        const isSouth = lat < 0;
-        const hemisphere = isSouth ? "+south " : "";
-
-        // Merakit definisi EPSG UTM secara dinamis
+        const hemisphere = lat < 0 ? "+south " : "";
         const dynamicEpsgUtm = `+proj=utm +zone=${zone} ${hemisphere}+datum=WGS84 +units=m +no_defs`;
 
-        // Konversi LatLon ke Easting Northing UTM menggunakan definisi dinamis
         const utmCoords = proj4(this.epsgWgs84, dynamicEpsgUtm, [lon, lat]);
-        const easting = utmCoords[0];
-        const northing = utmCoords[1];
-
-        // Sumbu Z di Three.js adalah -Northing
-        const x = easting - window.worldOrigin.x;
-        const z = -northing - window.worldOrigin.z;
-
-        return new THREE.Vector2(x, z);
-    },
-
-    // 4. Raycaster untuk mencari Elevasi permukaan yang menempel
-    getSurfaceElevation: function(x, z) {
-        const rayOrigin = new THREE.Vector3(x, 5000, z);
-        const rayDirection = new THREE.Vector3(0, -1, 0);
-        const raycaster = new THREE.Raycaster(rayOrigin, rayDirection);
-
-        let targets = [];
         
-        if (typeof meshes !== 'undefined') {
-            Object.values(meshes).forEach(m => { if(m.visible) targets.push(m); });
-        }
-        if (typeof appLayers !== 'undefined') {
-            appLayers.filter(l => l.type === 'dxf' && l.visible && l.threeObject && l.hasFaces).forEach(layer => {
-                layer.threeObject.traverse(child => { if(child.isMesh) targets.push(child); });
-            });
-        }
+        // [OPTIMASI MEMORI]: Gunakan objek Vektor daur ulang
+        _geoV2.x = utmCoords[0] - window.worldOrigin.x;
+        _geoV2.y = -utmCoords[1] - window.worldOrigin.z;
 
-        const intersects = raycaster.intersectObjects(targets, false);
-
-        if (intersects.length > 0) {
-            return intersects[0].point.y; 
-        }
-        return null; // DIUBAH: Return null jika meleset (miss), bukan 0
+        return _geoV2;
     },
 
-    // 5. Menampilkan Pop-up Warning Kustom UI
+    getSurfaceElevation: function(x, z) {
+        if (!_geoRaycaster || !_geoRayOrigin || !_geoRayDir || !this.cachedRaycastTargets || this.cachedRaycastTargets.length === 0) return null;
+
+        // [OPTIMASI MEMORI]: Update nilai Raycaster yang sudah ada di RAM (Zero Allocation)
+        _geoRayOrigin.set(x, 5000, z);
+        _geoRaycaster.set(_geoRayOrigin, _geoRayDir);
+
+        const intersects = _geoRaycaster.intersectObjects(this.cachedRaycastTargets, false);
+
+        if (intersects.length > 0) return intersects[0].point.y; 
+        return null; 
+    },
+
     showWarningModal: function(dist, pEast, pNorth, uEast, uNorth) {
         const existing = document.getElementById('geo-warning-modal');
         if (existing) existing.remove();
@@ -213,9 +177,7 @@ window.AppGeolocation = {
                     </div>
                 </div>
 
-                <div class="text-center font-medium text-slate-300 text-sm mb-4">
-                    Geolocation dibatalkan
-                </div>
+                <div class="text-center font-medium text-slate-300 text-sm mb-4">Geolocation dibatalkan</div>
 
                 <button id="btn-geo-understand" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 px-4 rounded transition-colors flex justify-center items-center gap-2">
                     <i class="fa-solid fa-check"></i> Mengerti
@@ -225,19 +187,19 @@ window.AppGeolocation = {
 
         document.body.appendChild(modal);
 
-        // Hapus modal jika tombol ditekan
-        document.getElementById('btn-geo-understand').addEventListener('click', () => {
+        // [OPTIMASI MEMORI]: Gunakan named function untuk membersihkan event listener dengan rapi
+        const btn = document.getElementById('btn-geo-understand');
+        const cleanupAndClose = () => {
+            btn.removeEventListener('click', cleanupAndClose);
             modal.remove();
-        });
+        };
+        btn.addEventListener('click', cleanupAndClose);
     },
 
-    // Update Arah Kompas (Device Orientation)
     handleOrientation: function(event) {
         if (!window.AppGeolocation.isTracking || !window.AppGeolocation.headingCone) return;
         
         let heading = null;
-
-        // Validasi ketat untuk menghindari nilai null yang membuat angle menjadi 360 (terkunci ke Utara)
         if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
             heading = event.webkitCompassHeading;
         } else if (event.alpha !== null) {
@@ -245,29 +207,26 @@ window.AppGeolocation = {
         }
 
         if (heading !== null) {
-            // --- PERBAIKAN: Kompensasi Orientasi Layar (Portrait/Landscape) ---
             let screenOrientation = 0;
             if (screen.orientation && screen.orientation.angle !== undefined) {
                 screenOrientation = screen.orientation.angle;
             } else if (window.orientation !== undefined) {
-                screenOrientation = window.orientation; // Fallback untuk iPad/iOS lawas
+                screenOrientation = window.orientation; 
             }
             
-            // Tambahkan sudut orientasi layar ke heading aktual perangkat
             heading += screenOrientation;
-
-            const headingRad = THREE.MathUtils.degToRad(heading);
-            window.AppGeolocation.markerGroup.rotation.y = -headingRad;
+            window.AppGeolocation.markerGroup.rotation.y = -THREE.MathUtils.degToRad(heading);
         }
     },
 
-    // Fungsi Utama Toggle Tracking
     toggleTracking: function() {
-        const { hasData, bounds } = this.checkActiveBounds();
-
-        if (!hasData) {
-            alert("Harap muat dan tampilkan Pit Data, Disposal Data, atau Polymesh DXF terlebih dahulu.");
-            return false;
+        if (!this.isTracking) {
+            const check = this.checkActiveBounds(); // Memanggil Caching Mesh Targets
+            if (!check.hasData) {
+                alert("Harap muat dan tampilkan Pit Data, Disposal Data, atau Polymesh DXF terlebih dahulu.");
+                return false;
+            }
+            if (_geoCenter3D) check.bounds.getCenter(_geoCenter3D);
         }
 
         if (this.isTracking) {
@@ -276,14 +235,14 @@ window.AppGeolocation = {
             window.removeEventListener('deviceorientation', this.handleOrientation);
             this.markerGroup.visible = false;
             this.isTracking = false;
-            this.hasWarnedDistance = false; // Reset warning saat dimatikan
+            this.hasWarnedDistance = false; 
             
-            // --- RESET MEMORI THROTTLING ---
+            // Hapus cache array objek
+            this.cachedRaycastTargets = null;
+            
             this.lastCalcX = null;
             this.lastCalcZ = null;
             this.lastCalcElev = null;
-            // -------------------------------
-            
             return false;
         }
 
@@ -295,12 +254,7 @@ window.AppGeolocation = {
         // START TRACKING
         this.isTracking = true;
         this.markerGroup.visible = true;
-        // Default hadap lurus ke depan (layar atas) jika digunakan di desktop/tanpa sensor
         this.markerGroup.rotation.y = 0;
-
-        // Hitung Titik Tengah (Centroid) dari Area Proyek 
-        const center3D = new THREE.Vector3();
-        bounds.getCenter(center3D);
 
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
             if (!this.compassPermissionGranted) {
@@ -319,91 +273,56 @@ window.AppGeolocation = {
 
         this.watchId = navigator.geolocation.watchPosition(
             (position) => {
-                const lat = position.coords.latitude;
-                const lon = position.coords.longitude;
+                const localCoords = this.convertToThreeJS(position.coords.latitude, position.coords.longitude);
+                if (!localCoords || !_geoCenter3D || !_geoBox) return;
 
-                const localCoords = this.convertToThreeJS(lat, lon);
-                if (!localCoords) return;
-
-                // Hitung seberapa jauh user dari CENTROID (Titik Tengah) tambang
-                const dxCenter = localCoords.x - center3D.x;
-                const dzCenter = localCoords.y - center3D.z; // localCoords.y adalah sumbu Z ThreeJS
+                const dxCenter = localCoords.x - _geoCenter3D.x;
+                const dzCenter = localCoords.y - _geoCenter3D.z; 
                 const distanceToCentroid = Math.sqrt(dxCenter * dxCenter + dzCenter * dzCenter);
 
-                // Cek Out of bounds bounding box geometri
-                let isOutOfBounds = false;
-                if (localCoords.x < bounds.min.x || localCoords.x > bounds.max.x ||
-                    localCoords.y < bounds.min.z || localCoords.y > bounds.max.z) {
-                    isOutOfBounds = true;
-                }
+                const isOutOfBounds = (localCoords.x < _geoBox.min.x || localCoords.x > _geoBox.max.x || localCoords.y < _geoBox.min.z || localCoords.y > _geoBox.max.z);
 
-                // ==========================================
-                // LOGIKA THROTTLING ELEVASI (Batas: 5 Meter)
-                // ==========================================
                 let elevY = null;
                 let shouldRecalculate = true;
 
-                // Hitung jarak dari posisi terakhir kalkulasi
                 if (this.lastCalcX !== null && this.lastCalcZ !== null) {
                     const dx = localCoords.x - this.lastCalcX;
                     const dz = localCoords.y - this.lastCalcZ; 
-                    const distMoved = Math.sqrt(dx * dx + dz * dz);
-                    
-                    if (distMoved < this.throttleDistance) {
-                        shouldRecalculate = false; // Belum bergeser sejauh throttle distance, skip raycast!
-                        elevY = this.lastCalcElev; // Gunakan elevasi lama
+                    if (Math.sqrt(dx * dx + dz * dz) < this.throttleDistance) {
+                        shouldRecalculate = false; 
+                        elevY = this.lastCalcElev; 
                     }
                 }
 
                 if (shouldRecalculate) {
-                    // Panggil fungsi raycaster yang berat HANYA jika diperlukan
                     elevY = this.getSurfaceElevation(localCoords.x, localCoords.y);
-                    
-                    // Simpan posisi dan elevasi terbaru untuk pengecekan berikutnya
                     this.lastCalcX = localCoords.x;
                     this.lastCalcZ = localCoords.y;
                     this.lastCalcElev = elevY;
                 }
-                // ==========================================
                 
                 const isMiss = (elevY === null);
 
-                // --- POP-UP WARNING CUSTOM UI & AUTO SWITCH OFF ---
-                // Jika lokasi lebih dari 50 KM dari centroid data, dan tidak menempel di polymesh manapun
                 if (distanceToCentroid > 50000 && isMiss) {
-                    
-                    // Re-kalkulasi kembali ke Easting/Northing UTM untuk ditampilkan di Pop-up
-                    const projectEasting = center3D.x + window.worldOrigin.x;
-                    const projectNorthing = -center3D.z - window.worldOrigin.z;
-                    
+                    const projectEasting = _geoCenter3D.x + window.worldOrigin.x;
+                    const projectNorthing = -_geoCenter3D.z - window.worldOrigin.z;
                     const userEasting = localCoords.x + window.worldOrigin.x;
                     const userNorthing = -localCoords.y - window.worldOrigin.z;
 
-                    // Panggil pop up UI
                     this.showWarningModal(distanceToCentroid, projectEasting, projectNorthing, userEasting, userNorthing);
                     
-                    // Matikan toggle switch di UI
                     const geoToggleSwitchNode = document.getElementById('geo-location-toggle');
                     if (geoToggleSwitchNode) geoToggleSwitchNode.checked = false;
                     
-                    // Matikan Tracking di Background
                     this.toggleTracking();
-                    return; // Hentikan eksekusi pergerakan marker saat ini
+                    return; 
                 }
 
-                // Jika posisi diluar bounds dan raycaster meleset (karena tidak ada mesh di bawah kaki user),
-                // Kita gantung markernya di udara pada posisi elevasi tertinggi polymesh.
                 let finalElevY = elevY;
-                if (isMiss && isOutOfBounds) {
-                    finalElevY = bounds.max.y !== -Infinity ? bounds.max.y + 100 : 100;
-                } else if (isMiss) {
-                    finalElevY = 0; // fallback jika meleset tapi masih ada di dalam bounds area
-                }
+                if (isMiss && isOutOfBounds) finalElevY = _geoBox.max.y !== -Infinity ? _geoBox.max.y + 100 : 100;
+                else if (isMiss) finalElevY = 0; 
                 
-                // Animasi pergerakan marker (Offset +6 meter dari ground agar dasar bola tidak tenggelam)
                 this.markerGroup.position.set(localCoords.x, finalElevY + 6, localCoords.y);
-
-                // Main.js secara otomatis akan me-render pergerakan marker ini di frame berikutnya.
             },
             (error) => {
                 console.error("Geolocation Error:", error.message);
@@ -416,7 +335,6 @@ window.AppGeolocation = {
     }
 };
 
-// Auto Init jika Three.js sudah siap
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => { if(typeof THREE !== 'undefined') window.AppGeolocation.init(); }, 2000);
 });

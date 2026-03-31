@@ -490,23 +490,57 @@ window.zoomToLayer = function(layerId) {
     const box = new THREE.Box3().setFromObject(layer.threeObject);
     if (box.isEmpty()) return;
 
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    
     if (typeof camera !== 'undefined' && typeof controls !== 'undefined') {
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
         const fov = camera.fov * (Math.PI / 180);
-        let cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
+        
+        // Jarak optimal dengan Aspect Ratio
+        let cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+        if (camera.aspect < 1) { 
+            cameraDistance /= camera.aspect;
+        }
+        cameraDistance *= 1.3; // Padding
 
-        const elevation = Math.PI / 4; 
-        const azimuth = Math.PI / 4;   
+        // Perbarui batas jarak pandang
+        if (camera.far < cameraDistance * 3) {
+            camera.far = cameraDistance * 3;
+            camera.updateProjectionMatrix();
+        }
 
+        // Menentukan sudut kamera (Elevation 45, Bearing 315)
+        const elevation = 45 * (Math.PI / 180); 
+        const azimuth = 315 * (Math.PI / 180);   
+
+        // Posisi Matematika Dasar (Tengah Layar Keseluruhan)
         camera.position.x = center.x + cameraDistance * Math.cos(elevation) * Math.sin(azimuth);
         camera.position.y = center.y + cameraDistance * Math.sin(elevation);
         camera.position.z = center.z + cameraDistance * Math.cos(elevation) * Math.cos(azimuth);
         
         camera.lookAt(center);
         controls.target.copy(center);
+
+        // --- KOMPENSASI VISUAL UI (PAN OFFSET) ---
+        // Kanvas tertutup UI di Kanan dan Bawah, jadi kita geser target secara virtual
+        camera.updateMatrix();
+        const vh = 2 * Math.tan(fov / 2) * cameraDistance;
+        const vw = vh * camera.aspect;
+        
+        // Menggeser objek ke Kiri (~8%) dan ke Atas (~12%) untuk kompensasi UI
+        const panRight = vw * 0.08; 
+        const panDown = vh * 0.12;  
+
+        const rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        
+        const offset = new THREE.Vector3();
+        offset.addScaledVector(rightVec, panRight); // Kamera gerak kanan -> Objek seolah ke kiri
+        offset.addScaledVector(upVec, -panDown);    // Kamera gerak bawah -> Objek seolah ke atas
+        
+        camera.position.add(offset);
+        controls.target.add(offset);
+
         controls.update();
     }
 };

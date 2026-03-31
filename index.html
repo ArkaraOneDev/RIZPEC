@@ -211,10 +211,13 @@
                             <h3 class="text-[12px] lg:text-[11px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
                                 <i class="fa-solid fa-list-check"></i> Pit Record
                             </h3>
-                            <label class="flex items-center gap-1.5 cursor-pointer text-[10px] lg:text-[9px] text-slate-400 hover:text-slate-200 transition-colors" title="Tampilkan/Sembunyikan block record di viewport">
-                                <input type="checkbox" id="cb-show-pit-record" class="rounded bg-slate-900 border-slate-600 w-3.5 h-3.5 lg:w-3 lg:h-3 cursor-pointer">
-                                <span>Show</span>
-                            </label>
+                            <div class="flex items-center gap-2">
+                                <label class="flex items-center gap-1.5 cursor-pointer text-[10px] lg:text-[9px] text-slate-400 hover:text-slate-200 transition-colors" title="Tampilkan/Sembunyikan block record di viewport">
+                                    <input type="checkbox" id="cb-show-pit-record" class="rounded bg-slate-900 border-slate-600 w-3.5 h-3.5 lg:w-3 lg:h-3 cursor-pointer">
+                                    <span>Show</span>
+                                </label>
+                                <button id="btn-clear-pit-record" class="text-slate-500 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors" disabled title="Hapus Pit Record"><i class="fa-solid fa-trash-can"></i></button>
+                            </div>
                         </div>
                     </div>
 
@@ -260,10 +263,13 @@
                             <h3 class="text-[12px] lg:text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                                 <i class="fa-solid fa-list-check"></i> Disposal Record
                             </h3>
-                            <label class="flex items-center gap-1.5 cursor-pointer text-[10px] lg:text-[9px] text-slate-400 hover:text-slate-200 transition-colors" title="Tampilkan/Sembunyikan block record di viewport">
-                                <input type="checkbox" id="cb-show-disp-record" class="rounded bg-slate-900 border-slate-600 w-3.5 h-3.5 lg:w-3 lg:h-3 cursor-pointer">
-                                <span>Show</span>
-                            </label>
+                            <div class="flex items-center gap-2">
+                                <label class="flex items-center gap-1.5 cursor-pointer text-[10px] lg:text-[9px] text-slate-400 hover:text-slate-200 transition-colors" title="Tampilkan/Sembunyikan block record di viewport">
+                                    <input type="checkbox" id="cb-show-disp-record" class="rounded bg-slate-900 border-slate-600 w-3.5 h-3.5 lg:w-3 lg:h-3 cursor-pointer">
+                                    <span>Show</span>
+                                </label>
+                                <button id="btn-clear-disp-record" class="text-slate-500 hover:text-rose-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors" disabled title="Hapus Disposal Record"><i class="fa-solid fa-trash-can"></i></button>
+                            </div>
                         </div>
                     </div>
 
@@ -273,8 +279,8 @@
                             <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-b border-slate-700 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] text-slate-400 font-semibold shadow z-10">
                                 <div>Selection Name</div>
                                 <div class="text-right">Waste</div>
-                                <div class="text-right">Resource</div>
-                                <div class="text-right">SR</div>
+                                <div class="text-right text-slate-500">-</div>
+                                <div class="text-right text-slate-500">-</div>
                             </div>
                             
                             <div id="disp-sequence-scroll-container" class="flex-1 overflow-y-auto relative">
@@ -288,8 +294,8 @@
                             <div class="grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 bg-slate-800 border-t border-slate-600 py-2 lg:py-1.5 px-2 shrink-0 text-[10px] lg:text-[9px] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-10">
                                 <div class="font-bold text-white uppercase">Total</div>
                                 <div class="font-bold text-emerald-400 text-right font-mono truncate" id="disp-sequence-waste-total">0</div>
-                                <div class="font-bold text-orange-400 text-right font-mono truncate" id="disp-sequence-resource-total">0</div>
-                                <div class="font-bold text-green-400 text-right font-mono truncate" id="disp-sequence-sr-total">0</div>
+                                <div class="font-bold text-slate-500 text-right font-mono truncate" id="disp-sequence-resource-total">-</div>
+                                <div class="font-bold text-slate-500 text-right font-mono truncate" id="disp-sequence-sr-total">-</div>
                             </div>
                         </div>
 

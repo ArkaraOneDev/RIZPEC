@@ -80,7 +80,6 @@ window.unloadGeometry = function(entityId, type) {
                     // Murni buang dari Memory Kartu Grafis (GPU)
                     if(mesh.geometry) mesh.geometry.dispose();
                     if(mesh.material) {
-                        // [FIX] Tambahkan pengecekan Array untuk material guna cegah leak
                         if (Array.isArray(mesh.material)) {
                             mesh.material.forEach(m => m.dispose());
                         } else {
@@ -89,7 +88,14 @@ window.unloadGeometry = function(entityId, type) {
                     }
                     mesh.children.forEach(child => { 
                         if(child.geometry) child.geometry.dispose(); 
-                        if(child.material) child.material.dispose(); 
+                        if(child.material) {
+                            // [FIX MEMORY LEAK]: Tambahkan validasi Array pada anak material (Garis/Edges)
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
                     });
                     
                     keysToDelete.push(key);
@@ -159,14 +165,20 @@ window.recalculateGlobalSums = function() {
     const elSumBlocks = document.getElementById('sum-blocks');
     if (elSumBlocks) elSumBlocks.textContent = uniqueBlocks.size.toLocaleString();
     
+    // PEMISAHAN LOGIC PIT & DISPOSAL PADA SIDEBAR UI
+    // Rekap PIT
     const elSumWaste = document.getElementById('sequence-waste-total') || document.getElementById('sequence-ob-total');
-    if (elSumWaste) elSumWaste.textContent = Number((totalWaste + totalDisp).toFixed(2)).toLocaleString();
+    if (elSumWaste) elSumWaste.textContent = Number(totalWaste.toFixed(2)).toLocaleString();
     
     const elSumResource = document.getElementById('sequence-resource-total') || document.getElementById('sequence-coal-total');
     if (elSumResource) elSumResource.textContent = Number(totalResource.toFixed(2)).toLocaleString();
     
     const elSumSr = document.getElementById('sequence-sr-total');
     if (elSumSr) elSumSr.textContent = totalResource > 0 ? (totalWaste / totalResource).toFixed(2) : "0.00";
+
+    // Rekap DISPOSAL
+    const elSumDispWaste = document.getElementById('disp-sequence-waste-total');
+    if (elSumDispWaste) elSumDispWaste.textContent = Number(totalDisp.toFixed(2)).toLocaleString();
 };
 
 // 3. Poller untuk Mengeksekusi Mesh Loading (Menangani Pit & Disposal)
@@ -253,7 +265,9 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
 
             const dbPrefix = type === 'pit' ? 'rizpec_pit_entity_' : 'rizpec_disp_entity_';
             const key = `${dbPrefix}${entityId.replace(/\s+/g, '_')}`;
-            const csvDataDB = await RizpecDB.get(key); 
+            
+            // [FIX MEMORY LEAK]: Ubah dari const menjadi let agar bisa di-null-kan secepatnya di main thread
+            let csvDataDB = await RizpecDB.get(key); 
             
             if (!csvDataDB) throw new Error(`Data CSV (${type}) tidak ditemukan di database cache.`);
 
@@ -400,6 +414,7 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
 
                         // --- OPTIMASI EKSTREM 1: Bersihkan string mentah raksasa dari Memori/RAM seketika!
                         csvData = null; 
+                        if (e.data) e.data.csvData = null; // [FIX MEMORY LEAK]: Pastikan event object melepas referensi string
 
                         const bounds = { minX, maxX, minY, maxY, minZ, maxZ };
                         
@@ -459,6 +474,17 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
             const workerUrl = URL.createObjectURL(blob);
             const worker = new Worker(workerUrl);
 
+            const globalCenter = window.worldOrigin.isSet
+                ? { x: window.worldOrigin.x, y: window.worldOrigin.y, z: window.worldOrigin.z }
+                : null;
+
+            // Panggil Worker
+            worker.postMessage({ csvData: csvDataDB, entityId, type, stupaMode, extrusionHeight, globalCenter });
+            
+            // [FIX MEMORY LEAK]: Bebaskan RAM string ratusan MB di Main Thread seketika setelah masuk Worker!
+            // Jika tidak, closure dari fungsi Promise ini akan terus menyandera CSV di RAM hingga proses render selesai.
+            csvDataDB = null; 
+
             worker.onmessage = (e) => {
                 URL.revokeObjectURL(workerUrl); 
                 // [FIX] HARUS SEGERA DIBUNUH AGAR THREAD & RAM BENAR-BENAR BERSIH (MENCEGAH ZOMBIE WORKER)
@@ -496,6 +522,85 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                 window.unloadGeometry(entityId, type);
                 if (typeof clearLabels === 'function') clearLabels();
 
+                // =======================================================
+                // 1. PERHITUNGAN RUANG OBJEK SEBELUM RENDER (Fit to Bounds via Sphere)
+                // 2. SESUAIKAN KAMERA (Elevation 45°, Bearing 315° + Kompensasi UI)
+                // =======================================================
+                if (bounds && typeof camera !== 'undefined' && typeof controls !== 'undefined') {
+                    const box = new THREE.Box3();
+                    
+                    // a. Masukkan ukuran objek-objek yang sebelumnya sudah dirender (jika ada)
+                    if (typeof meshes !== 'undefined') {
+                        Object.values(meshes).forEach(mesh => box.expandByObject(mesh));
+                    }
+
+                    // b. Tambahkan ukuran dari entitas data yang *akan* dirender saat ini
+                    const boxMin = new THREE.Vector3(bounds.minX - centerUsed.x, bounds.minY - centerUsed.y, bounds.minZ - centerUsed.z);
+                    const boxMax = new THREE.Vector3(bounds.maxX - centerUsed.x, bounds.maxY - centerUsed.y, bounds.maxZ - centerUsed.z);
+                    box.expandByPoint(boxMin);
+                    box.expandByPoint(boxMax);
+
+                    if (!box.isEmpty()) {
+                        const center = box.getCenter(new THREE.Vector3()); 
+                        const sphere = box.getBoundingSphere(new THREE.Sphere());
+                        const radius = sphere.radius;
+                        const fov = camera.fov * (Math.PI / 180); 
+                        
+                        let cameraDistance = Math.abs(radius / Math.sin(fov / 2));
+                        if (camera.aspect < 1) { 
+                            cameraDistance /= camera.aspect;
+                        }
+                        cameraDistance *= 1.1; // Padding agar tidak mepet
+
+                        if (camera.far < cameraDistance * 3) {
+                            camera.far = cameraDistance * 3;
+                            camera.updateProjectionMatrix();
+                        }
+
+                        // Aturan Kamera 45° & 315°
+                        const elevation = 45 * (Math.PI / 180); 
+                        const azimuth = 315 * (Math.PI / 180);
+
+                        camera.up.set(0, 1, 0);
+
+                        camera.position.x = center.x + cameraDistance * Math.cos(elevation) * Math.sin(azimuth);
+                        camera.position.y = center.y + cameraDistance * Math.sin(elevation);
+                        camera.position.z = center.z + cameraDistance * Math.cos(elevation) * Math.cos(azimuth);
+                        
+                        camera.lookAt(center); 
+                        controls.target.copy(center); 
+
+                        // Kompensasi layar UI
+                        camera.updateMatrix();
+                        const vh = 2 * Math.tan(fov / 2) * cameraDistance;
+                        const vw = vh * camera.aspect;
+                        
+                        const panRight = vw * 0.08; 
+                        const panDown = vh * 0.12;  
+
+                        const rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+                        const upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+                        
+                        const offset = new THREE.Vector3();
+                        offset.addScaledVector(rightVec, panRight);
+                        offset.addScaledVector(upVec, -panDown);
+                        
+                        camera.position.add(offset);
+                        controls.target.add(offset);
+
+                        controls.update();
+
+                        // [PENTING] Render scene secara instan agar frame awal langsung berpindah 
+                        // ke posisi kamera yang benar SEBELUM blok pertama muncul!
+                        if (typeof renderer !== 'undefined' && typeof scene !== 'undefined') {
+                            renderer.render(scene, camera);
+                        }
+                    }
+                }
+
+                // =======================================================
+                // 3. LAKUKAN RENDER (Membangun blok 3D Chunk per Chunk)
+                // =======================================================
                 const opacResource = typeof resourceOpacity !== 'undefined' ? resourceOpacity : 1;
                 const opacWaste = typeof wasteOpacity !== 'undefined' ? wasteOpacity : 1;
 
@@ -621,7 +726,10 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             meshes[b.blockKey] = mesh;
                         }
                         
+                        // [FIX MEMORY LEAK]: Hancurkan buffer & referensi objek blok SETELAH dirender ke layer
+                        // agar Garbage Collector (GC) dapat langsung membuangnya di sela-sela frame!
                         b.positions = null;
+                        blocks[currentIndex] = null; 
                         
                         currentIndex++;
                     }
@@ -660,36 +768,10 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             if (typeof updateLayerUI === 'function') updateLayerUI();
                         }
 
-                        if (typeof meshes !== 'undefined' && Object.keys(meshes).length > 0) {
-                            const box = new THREE.Box3();
-                            Object.values(meshes).forEach(mesh => box.expandByObject(mesh));
-
-                            if (!box.isEmpty() && typeof camera !== 'undefined' && typeof controls !== 'undefined') {
-                                const center = box.getCenter(new THREE.Vector3()); 
-                                const size = box.getSize(new THREE.Vector3());
-                                const maxDim = Math.max(size.x, size.y, size.z);
-                                const fov = camera.fov * (Math.PI / 180); 
-                                let cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
-                                
-                                if (camera.far < cameraDistance * 3) {
-                                    camera.far = cameraDistance * 3;
-                                    camera.updateProjectionMatrix();
-                                }
-
-                                const elevation = 45 * (Math.PI / 180); 
-                                const azimuth = 315 * (Math.PI / 180);
-
-                                camera.position.x = center.x + cameraDistance * Math.cos(elevation) * Math.sin(azimuth);
-                                camera.position.y = center.y + cameraDistance * Math.sin(elevation);
-                                camera.position.z = center.z + cameraDistance * Math.cos(elevation) * Math.cos(azimuth);
-                                camera.lookAt(center); 
-                                controls.target.copy(center); 
-                                controls.update();
-                            }
-                        }
-
                         if (typeof isProcessing !== 'undefined') isProcessing = false;
                         
+                        // Perhitungan sudut kamera SUDAH dipindah ke atas (sebelum process chunk).
+                        // Jadi di sini kita tinggal pastikan scene ter-render saja setelah seluruh 100% data selesai di-push.
                         if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
                             requestAnimationFrame(() => renderer.render(scene, camera));
                         }
@@ -710,12 +792,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                 console.error("Fatal Web Worker Error:", err);
                 reject(new Error("Memori Perangkat Penuh saat mengekstrak titik koordinat. (Data terlalu besar untuk RAM device)"));
             };
-
-            const globalCenter = window.worldOrigin.isSet
-                ? { x: window.worldOrigin.x, y: window.worldOrigin.y, z: window.worldOrigin.z }
-                : null;
-
-            worker.postMessage({ csvData: csvDataDB, entityId, type, stupaMode, extrusionHeight, globalCenter });
 
         } catch (err) {
             if (type === 'pit') {
