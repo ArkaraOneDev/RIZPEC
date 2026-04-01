@@ -35,7 +35,9 @@ function processDXF(dxfText, fileName) {
 
     const group = new THREE.Group();
     group.name = fileName;
+    group.visible = false; // [PERBAIKAN 1]: Sembunyikan objek 3D secara default saat awal import
     
+    // [OPTIMASI RAM MATEPAD]: Gunakan FLAT ARRAY ketimbang Array of Objects (Vector3)
     const colorLineGroups = {};
     const colorFaceGroups = {};
 
@@ -67,16 +69,17 @@ function processDXF(dxfText, fileName) {
                 let z1 = v[1].z !== undefined ? v[1].z : (ent.elevation || 0);
                 let z2 = v[2].z !== undefined ? v[2].z : (ent.elevation || 0);
 
-                let p0 = new THREE.Vector3(v[0].x - worldOrigin.x, z0 - worldOrigin.y, -v[0].y - worldOrigin.z);
-                let p1 = new THREE.Vector3(v[1].x - worldOrigin.x, z1 - worldOrigin.y, -v[1].y - worldOrigin.z);
-                let p2 = new THREE.Vector3(v[2].x - worldOrigin.x, z2 - worldOrigin.y, -v[2].y - worldOrigin.z);
+                // Ekstraksi langsung ke flat variables tanpa membuat instansiasi Vector3 Object
+                let vx0 = v[0].x - worldOrigin.x, vy0 = z0 - worldOrigin.y, vz0 = -v[0].y - worldOrigin.z;
+                let vx1 = v[1].x - worldOrigin.x, vy1 = z1 - worldOrigin.y, vz1 = -v[1].y - worldOrigin.z;
+                let vx2 = v[2].x - worldOrigin.x, vy2 = z2 - worldOrigin.y, vz2 = -v[2].y - worldOrigin.z;
 
-                colorFaceGroups[hexValue].push(p0, p1, p2);
+                colorFaceGroups[hexValue].push(vx0, vy0, vz0, vx1, vy1, vz1, vx2, vy2, vz2);
 
-                if (v.length >= 4 && (v[2].x !== v[3].x || v[2].y !== v[3].y || v[2].z !== v[3].z)) {
+                if (v.length >= 4 && (v[2].x !== v[3].x || v[2].y !== v[3].y)) {
                     let z3 = v[3].z !== undefined ? v[3].z : (ent.elevation || 0);
-                    let p3 = new THREE.Vector3(v[3].x - worldOrigin.x, z3 - worldOrigin.y, -v[3].y - worldOrigin.z);
-                    colorFaceGroups[hexValue].push(p0, p2, p3);
+                    let vx3 = v[3].x - worldOrigin.x, vy3 = z3 - worldOrigin.y, vz3 = -v[3].y - worldOrigin.z;
+                    colorFaceGroups[hexValue].push(vx0, vy0, vz0, vx2, vy2, vz2, vx3, vy3, vz3);
                 }
             }
         } 
@@ -100,10 +103,11 @@ function processDXF(dxfText, fileName) {
                     if(v1 && v2) {
                         let z1 = v1.z !== undefined ? v1.z : (ent.elevation || 0);
                         let z2 = v2.z !== undefined ? v2.z : (ent.elevation || 0);
-                        colorLineGroups[hexValue].push(
-                            new THREE.Vector3(v1.x - worldOrigin.x, z1 - worldOrigin.y, -v1.y - worldOrigin.z),
-                            new THREE.Vector3(v2.x - worldOrigin.x, z2 - worldOrigin.y, -v2.y - worldOrigin.z)
-                        );
+                        
+                        let vx1 = v1.x - worldOrigin.x, vy1 = z1 - worldOrigin.y, vz1 = -v1.y - worldOrigin.z;
+                        let vx2 = v2.x - worldOrigin.x, vy2 = z2 - worldOrigin.y, vz2 = -v2.y - worldOrigin.z;
+                        
+                        colorLineGroups[hexValue].push(vx1, vy1, vz1, vx2, vy2, vz2);
                     }
                 }
             }
@@ -133,7 +137,8 @@ function processDXF(dxfText, fileName) {
     Object.keys(colorFaceGroups).forEach(hexKey => {
         const points = colorFaceGroups[hexKey];
         if (points.length > 0) {
-            const geo = new THREE.BufferGeometry().setFromPoints(points);
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
             geo.computeVertexNormals(); 
 
             const finalColor = filenameColorOverride !== null ? filenameColorOverride : parseInt(hexKey);
@@ -153,14 +158,14 @@ function processDXF(dxfText, fileName) {
             mesh.userData.originalMaterial = mat; 
             group.add(mesh);
         }
-        // Bersihkan array sementara untuk bantu GC
         colorFaceGroups[hexKey].length = 0; 
     });
 
     Object.keys(colorLineGroups).forEach(hexKey => {
         const points = colorLineGroups[hexKey];
         if (points.length > 0) {
-            const geo = new THREE.BufferGeometry().setFromPoints(points);
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
             const mat = new THREE.LineBasicMaterial({ color: parseInt(hexKey) });
             const lines = new THREE.LineSegments(geo, mat);
             lines.userData.originalColor = parseInt(hexKey);
@@ -169,9 +174,7 @@ function processDXF(dxfText, fileName) {
         colorLineGroups[hexKey].length = 0;
     });
 
-    // --- [PERBAIKAN MEMORI EKSTREM] ---
-    // Segera putuskan referensi ke objek DxfData raksasa agar RAM perangkat Anda kembali lega!
-    dxfData = null;
+    dxfData = null; // Putuskan referensi untuk mencegah OOM
 
     if (typeof scene !== 'undefined') scene.add(group);
     const layerId = 'layer_' + Date.now();
@@ -183,7 +186,7 @@ function processDXF(dxfText, fileName) {
         appLayers.push({ 
             id: layerId, 
             name: fileName, 
-            visible: true, 
+            visible: false, // [PERBAIKAN 1]: Pastikan list UI Dxf Manager awalnya tidak tercentang
             threeObject: group, 
             colorHex: uiColorHex,
             defaultColorHex: uiColorHex,
@@ -237,6 +240,11 @@ function processDXF(dxfText, fileName) {
                 if (typeof updateDxfSummaryUI === 'function') updateDxfSummaryUI(fileName);
             }
         }
+
+        // [PERBAIKAN 2]: Update layar scene 3D secara paksa setelah UI diperbarui 
+        if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
+            requestAnimationFrame(() => renderer.render(scene, camera));
+        }
     }, 100);
 }
 
@@ -253,7 +261,7 @@ window.dxfTempState = null;
 // GLOBAL CACHE UNTUK RENDERER 2D PREVIEW (Mencegah Context Lost & Memory Leak)
 window._dxfPreviewSystem = null;
 
-// --- [PERBAIKAN MEMORY LEAK]: GLOBAL EVENT DELEGATION UNTUK CHECKBOX DXF ---
+// --- GLOBAL EVENT DELEGATION UNTUK CHECKBOX DXF ---
 document.addEventListener('change', (e) => {
     if (e.target && e.target.classList.contains('dxf-visibility-cb')) {
         const layerId = e.target.getAttribute('data-id');
@@ -261,10 +269,54 @@ document.addEventListener('change', (e) => {
         
         if (layer) {
             layer.visible = e.target.checked;
-            if (layer.threeObject) layer.threeObject.visible = layer.visible;
+            
+            if (layer.threeObject) {
+                layer.threeObject.visible = layer.visible;
+
+                // [SOLUSI PENAMBAHAN]: Pindahkan kamera agar fokus ke DXF jika dicentang (Hanya jika objek lain belum ada)
+                if (layer.visible && typeof camera !== 'undefined' && typeof controls !== 'undefined') {
+                    const box = new THREE.Box3().setFromObject(layer.threeObject);
+                    if (!box.isEmpty()) {
+                        const center = box.getCenter(new THREE.Vector3());
+                        const sphere = box.getBoundingSphere(new THREE.Sphere());
+                        const radius = sphere.radius;
+                        const fov = camera.fov * (Math.PI / 180);
+
+                        let cameraDistance = Math.abs(radius / Math.sin(fov / 2));
+                        if (camera.aspect < 1) { 
+                            cameraDistance /= camera.aspect;
+                        }
+                        cameraDistance *= 1.1; // Padding agar tidak mepet
+
+                        if (camera.far < cameraDistance * 3) {
+                            camera.far = cameraDistance * 3;
+                            camera.updateProjectionMatrix();
+                        }
+
+                        // Set posisi kamera jika pengguna mengaktifkan DXF saat canvas kosong
+                        // (Mencegah kamera nyasar)
+                        const elevation = 45 * (Math.PI / 180); 
+                        const azimuth = 315 * (Math.PI / 180);
+
+                        // Transisi kamera yang smooth dapat diganti dengan langsung pindah
+                        camera.position.x = center.x + cameraDistance * Math.cos(elevation) * Math.sin(azimuth);
+                        camera.position.y = center.y + cameraDistance * Math.sin(elevation);
+                        camera.position.z = center.z + cameraDistance * Math.cos(elevation) * Math.cos(azimuth);
+                        
+                        camera.lookAt(center);
+                        controls.target.copy(center);
+                        controls.update();
+                    }
+                }
+            }
             
             window.updateDxfListUI();
             if (typeof updateLayerUI === 'function') updateLayerUI();
+
+            // [PERBAIKAN 2]: Paksa render layar secara langsung saat dicentang
+            if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
+                requestAnimationFrame(() => renderer.render(scene, camera));
+            }
 
             // Geolocation Validation
             if (!layer.visible && typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
@@ -496,7 +548,6 @@ window.updateDxfListUI = function() {
             const div = document.createElement('div');
             div.className = `flex items-center justify-between gap-2.5 bg-slate-900/80 border ${layer.visible ? 'border-rose-500/50 shadow-sm' : 'border-slate-700/80'} p-2 rounded-md transition-all hover:bg-slate-800 group`;
             
-            // Perbaikan: Hapus event listener di dalam loop, sekarang ditangani oleh Event Delegation Document
             div.innerHTML = `
                 <div class="flex items-center gap-2.5 overflow-hidden">
                     <label class="relative flex items-center justify-center w-5 h-5 cursor-pointer m-0 shrink-0">
@@ -609,7 +660,6 @@ window.onDxfFolderDeleted = async function(name, rootName) {
             if (index !== -1) {
                 const layer = appLayers[index];
                 
-                // PERBAIKAN MEMORY LEAK: Hapus seluruh Mask & Clip Material dari GPU sepenuhnya!
                 if (layer.maskRenderTarget) layer.maskRenderTarget.dispose();
                 if (layer.maskMat) layer.maskMat.dispose(); 
                 if (layer.clipInterval) clearInterval(layer.clipInterval);
@@ -643,6 +693,11 @@ window.onDxfFolderDeleted = async function(name, rootName) {
                 
                 appLayers.splice(index, 1);
                 if (typeof updateLayerUI === 'function') updateLayerUI();
+
+                // [PERBAIKAN 2]: Update layar untuk menghapus DXF yang baru didelete
+                if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
+                    requestAnimationFrame(() => renderer.render(scene, camera));
+                }
             }
         }
         
@@ -664,9 +719,6 @@ window.onDxfFolderDeleted = async function(name, rootName) {
             aggregateAllDxfData();
         }
 
-        // =========================================================================
-        // GEOLOCATION VALIDATION
-        // =========================================================================
         if (typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
             const geoCheck = window.AppGeolocation.checkActiveBounds();
             if (!geoCheck.hasData) {
@@ -680,7 +732,6 @@ window.onDxfFolderDeleted = async function(name, rootName) {
                 }
             }
         }
-        // =========================================================================
     }
 };
 
@@ -1006,7 +1057,6 @@ window.executeDxfFootprintClipping = function(layer) {
     const maskScene = new THREE.Scene();
     maskScene.background = new THREE.Color(0x000000); 
     
-    // --- [PERBAIKAN MEMORI]: Simpan Material Mask ke dalam Cache Layer agar bisa di-dispose
     if (layer.maskMat) layer.maskMat.dispose();
     layer.maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }); 
 
@@ -1014,7 +1064,6 @@ window.executeDxfFootprintClipping = function(layer) {
         layer.maskRenderTarget.dispose(); 
     }
 
-    // 3. OPTIMASI VRAM GPU: Resolusi render target dibuat 1024 (cukup untuk footprint tanpa over-consume VRAM)
     const rtRes = 1024;
     const rt = new THREE.WebGLRenderTarget(rtRes, rtRes, {
         format: THREE.RedFormat,
@@ -1420,6 +1469,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     applyBtn.disabled = true;
                     updateDxfSummaryUI(window.activeDxfId); 
 
+                    // [PERBAIKAN 2]: Update layar scene 3D secara paksa setelah klik apply shader
+                    if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
+                        requestAnimationFrame(() => renderer.render(scene, camera));
+                    }
+
                     if (typeof hideFullscreenLoading === 'function') hideFullscreenLoading();
                 };
 
@@ -1758,6 +1812,12 @@ window.initGcpModal = function(img, file, layerTarget) {
     scene.add(dirLight);
     
     const visibleDxfs = typeof appLayers !== 'undefined' ? appLayers.filter(l => l.type === 'dxf' && l.visible) : [];
+    
+    // [PERBAIKAN]: Pastikan layer target SELALU muncul di panel GCP meskipun belum dicentang
+    if (layerTarget && !visibleDxfs.includes(layerTarget)) {
+        visibleDxfs.push(layerTarget);
+    }
+
     const previewGroup = new THREE.Group();
     
     visibleDxfs.forEach(l => {

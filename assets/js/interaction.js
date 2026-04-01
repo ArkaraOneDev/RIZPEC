@@ -483,12 +483,9 @@ window.onPointerDown = function(event) {
         return;
     }
 
-    // [PERBAIKAN] AUTO-CENTER PIVOT SAAT KLIK TENGAH (SCROLL)
-    // Event.button === 1 artinya tombol scroll wheel ditekan.
-    // Memaksa pivot untuk menancap otomatis di kursor sebelum OrbitControls mulai memutar!
     if (event.button === 1) {
         window.executeCenterPivot(pos);
-        return; // Return langsung agar OrbitControls bisa memproses drag/orbit dengan natural
+        return; 
     }
 
     if (event.button !== 0) return; 
@@ -499,7 +496,6 @@ window.onPointerDown = function(event) {
 
     if (isCenter) { window.executeCenterPivot(pos); window._justCentered = true; return; }
 
-    // [PERBAIKAN] Mencegah orbit jika menekan Shift (untuk mode Append Selection)
     if (event.shiftKey || window.isShiftDown) {
         if (typeof controls !== 'undefined') controls.enabled = false;
     }
@@ -654,7 +650,6 @@ window.onPointerUp = function(event) {
 
     if (window._justCentered) { window._justCentered = false; return; }
     
-    // [PERBAIKAN] Pastikan kawalan (controls) diaktifkan semula apabila pointer (klik) dilepaskan.
     if (typeof controls !== 'undefined' && !controls.enabled) {
         if (!window.isDraggingRect && !window.isDrawingPolygon && (typeof isCustomOrbiting === 'undefined' || !isCustomOrbiting)) {
             controls.enabled = true;
@@ -697,10 +692,6 @@ window.executeCenterPivot = function(pos) {
     mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
     const intersectable = [];
     
-    // [PERBAIKAN SANGAT PENTING] 
-    // Hanya masukkan mesh yang benar-benar TERLIHAT (visible = true).
-    // Ini mengabaikan mesh yang disembunyikan karena sudah di-record,
-    // sehingga Center Pivot benar-benar menancap pada permukaan yang terlihat.
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
         pitReserveGroup.traverse(c => { 
             if (c.isMesh && c.visible) intersectable.push(c); 
@@ -716,12 +707,10 @@ window.executeCenterPivot = function(pos) {
         });
     }
 
-    // Ekstra pengamanan: filter hasil intersectObjects juga memastikan .visible
     const intersects = raycaster.intersectObjects(intersectable, false).filter(i => i.object.visible);
     
     if (intersects.length > 0) { 
         const newTarget = intersects[0].point;
-        // Gunakan variable sementara jika bisa, tapi karena ini tidak dlm loop, tidak apa-apa
         const offset = new THREE.Vector3().subVectors(newTarget, controls.target);
         camera.position.add(offset);
         controls.target.copy(newTarget); 
@@ -844,6 +833,11 @@ window.processAreaSelection = function(rectBounds, polyPoints, isAppend = false)
         
         if(_tempVector3 && _tempScreenPos) {
             mesh.geometry.boundingBox.getCenter(_tempVector3);
+            mesh.updateMatrixWorld(true);
+            _tempVector3.applyMatrix4(mesh.matrixWorld); // Pastikan pusat bounding box ada di world space
+            
+            const worldCenter = _tempVector3.clone(); // Simpan untuk kalkulasi jarak 3D
+            
             _tempScreenPos.copy(_tempVector3).project(camera);
             
             if (_tempScreenPos.z > 1) return; 
@@ -862,7 +856,8 @@ window.processAreaSelection = function(rectBounds, polyPoints, isAppend = false)
             }
             
             if (isInside) {
-                const rayKey = `${nx.toFixed(3)},${ny.toFixed(3)}`;
+                // [PERBAIKAN] Presisi raykey dinaikkan agar tidak mengabaikan block kecil yang berdekatan
+                const rayKey = `${nx.toFixed(4)},${ny.toFixed(4)}`; 
                 
                 if (!checkedRays.has(rayKey)) {
                     checkedRays.add(rayKey);
@@ -876,7 +871,30 @@ window.processAreaSelection = function(rectBounds, polyPoints, isAppend = false)
                         const parsed = window.parseCompositeId(topHit.userData);
                         targetBases.add(parsed.base);
                         targetTypes.add(topHit.userData.type || 'pit');
+
+                        // [PERBAIKAN] Cek jarak Z-Depth. Jika bounding box meleset saat diraycast, 
+                        // tapi mesh ini sebenarnya ada di depan/sekitar area yang sama, tetap tambahkan!
+                        const distToMeshCenter = camera.position.distanceTo(worldCenter);
+                        const distToHit = validHits[0].distance;
+                        
+                        // Margin toleransi 2.5 unit jika ray tembus melewati block kecil (misal stupa)
+                        if (distToMeshCenter <= distToHit + 2.5) { 
+                            const parsedMesh = window.parseCompositeId(mesh.userData);
+                            targetBases.add(parsedMesh.base);
+                            targetTypes.add(mesh.userData.type || 'pit');
+                        }
+                    } else {
+                        // Jika meleset total (kosong), berarti celah terbuka dan tetap terlihat
+                        const parsedMesh = window.parseCompositeId(mesh.userData);
+                        targetBases.add(parsedMesh.base);
+                        targetTypes.add(mesh.userData.type || 'pit');
                     }
+                } else {
+                    // [PERBAIKAN] RayKey ini pernah ditelusuri.
+                    // Block kecil menumpuk di pixel layar yang sama. Langsung tambahkan ke seleksi.
+                    const parsedMesh = window.parseCompositeId(mesh.userData);
+                    targetBases.add(parsedMesh.base);
+                    targetTypes.add(mesh.userData.type || 'pit');
                 }
             }
         }
@@ -1086,32 +1104,39 @@ window.recordSelectedMeshes = function() {
         const targetType = target.userData.type || 'pit';
         const targetParsed = window.parseCompositeId(target.userData);
         
-        if (!target.geometry.boundingBox) target.geometry.computeBoundingBox();
-        
-        let targetCenterY = 0;
-        if(_tempVector3) {
-            targetCenterY = target.geometry.boundingBox.getCenter(_tempVector3).y;
-        }
+        // [PERBAIKAN] Disposal Data mengabaikan 'Bench Dependency'
+        // Hanya Pit Data yang akan mengekspansi seleksi ke bench di atasnya
+        if (!isDispAction) {
+            if (!target.geometry.boundingBox) target.geometry.computeBoundingBox();
+            
+            let targetCenterY = 0;
+            if(_tempVector3) {
+                target.updateMatrixWorld(true);
+                targetCenterY = target.geometry.boundingBox.getCenter(_tempVector3).applyMatrix4(target.matrixWorld).y;
+            }
 
-        if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
-            pitReserveGroup.children.forEach(m => {
-                if (!m.isMesh || !m.visible) return;
-                if ((m.userData.type || 'pit') !== targetType) return;
-                
-                const mParsed = window.parseCompositeId(m.userData);
-                if (mParsed.base !== targetParsed.base) return; 
+            if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
+                pitReserveGroup.children.forEach(m => {
+                    if (!m.isMesh || !m.visible) return;
+                    if ((m.userData.type || 'pit') !== targetType) return;
+                    
+                    const mParsed = window.parseCompositeId(m.userData);
+                    if (mParsed.base !== targetParsed.base) return; 
 
-                if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
-                
-                let mCenterY = 0;
-                if(_tempVector3) {
-                    mCenterY = m.geometry.boundingBox.getCenter(_tempVector3).y;
-                }
-                
-                if (mCenterY >= targetCenterY - 0.5 || mParsed.bench === targetParsed.bench) {
-                    expandedMeshes.add(m);
-                }
-            });
+                    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                    
+                    let mCenterY = 0;
+                    if(_tempVector3) {
+                        m.updateMatrixWorld(true);
+                        mCenterY = m.geometry.boundingBox.getCenter(_tempVector3).applyMatrix4(m.matrixWorld).y;
+                    }
+                    
+                    // Pit Data: Elevasi Atas (Unburden) harus terekam jika elevasi Bawah dipilih
+                    if (mCenterY >= targetCenterY - 0.5 || mParsed.bench === targetParsed.bench) {
+                        expandedMeshes.add(m);
+                    }
+                });
+            }
         }
     });
 
@@ -1360,7 +1385,81 @@ window.updateSequenceUI = function() {
         const dispScrollContainer = document.getElementById('disp-sequence-scroll-container');
         if (dispScrollContainer && window.dispSequenceRecords.length > 0) { setTimeout(() => { dispScrollContainer.scrollTop = dispScrollContainer.scrollHeight; }, 10); }
     }
+
+    // Update state ketersediaan tombol Bin (Hapus)
+    const btnClearPit = document.getElementById('btn-clear-pit-record');
+    if (btnClearPit) btnClearPit.disabled = window.pitSequenceRecords.length === 0;
+
+    const btnClearDisp = document.getElementById('btn-clear-disp-record');
+    if (btnClearDisp) btnClearDisp.disabled = window.dispSequenceRecords.length === 0;
 }
+
+window.clearPitRecord = function() {
+    if (window.pitSequenceRecords.length === 0) return;
+    
+    window.pitSequenceRecords = [];
+    window.pitTotalWaste = 0;
+    window.pitTotalResource = 0;
+    window.pitSequenceCounter = 1;
+
+    if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup) {
+        pitReserveGroup.children.forEach(mesh => {
+            if (!mesh.isMesh) return;
+            if ((mesh.userData.type === 'pit' || !mesh.userData.type) && mesh.userData.isRecorded) {
+                mesh.userData.isRecorded = false; delete mesh.userData.recordType;
+
+                const isResource = (mesh.userData.burden || '').toUpperCase() === 'RESOURCE';
+
+                if (!isResource) {
+                    mesh.visible = typeof window.isPitWasteVisible !== 'undefined' ? window.isPitWasteVisible : true;
+                } else {
+                    mesh.visible = typeof window.isPitResourceVisible !== 'undefined' ? window.isPitResourceVisible : true;
+                }
+
+                // Kembalikan warna asli hanya jika sedang tidak dalam mode diseleksi
+                if (!window.selectedMeshes.has(mesh)) {
+                    window.applyMaterialState(mesh, 'default');
+                }
+            }
+        });
+    }
+    
+    // Bersihkan history undo/redo yang berkaitan dengan pit
+    window.undoStack = window.undoStack.filter(action => action.type !== 'pit');
+    window.redoStack = window.redoStack.filter(action => action.type !== 'pit');
+    
+    window.updateSequenceUI();
+};
+
+window.clearDispRecord = function() {
+    if (window.dispSequenceRecords.length === 0) return;
+    
+    window.dispSequenceRecords = [];
+    window.dispTotalWaste = 0;
+    window.dispSequenceCounter = 1;
+
+    if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup) {
+        pitReserveGroup.children.forEach(mesh => {
+            if (!mesh.isMesh) return;
+            if ((mesh.userData.type === 'disp' || mesh.userData.type === 'disposal') && mesh.userData.isRecorded) {
+                mesh.userData.isRecorded = false; delete mesh.userData.recordType;
+
+                mesh.visible = typeof window.isDispWasteVisible !== 'undefined' ? window.isDispWasteVisible : true;
+
+                // Kembalikan warna asli hanya jika sedang tidak dalam mode diseleksi
+                if (!window.selectedMeshes.has(mesh)) {
+                    window.applyMaterialState(mesh, 'default');
+                }
+            }
+        });
+    }
+
+    // Bersihkan history undo/redo yang berkaitan dengan disp
+    window.undoStack = window.undoStack.filter(action => action.type !== 'disp');
+    window.redoStack = window.redoStack.filter(action => action.type !== 'disp');
+    
+    window.updateSequenceUI();
+};
 
 window.onload = () => {
     if (typeof initLayout === 'function') initLayout();
@@ -1373,4 +1472,10 @@ window.onload = () => {
     
     const cbDispRecord = document.getElementById('cb-show-disp-record');
     if (cbDispRecord) cbDispRecord.addEventListener('change', window.updateRecordedVisibility);
+
+    const btnClearPit = document.getElementById('btn-clear-pit-record');
+    if (btnClearPit) btnClearPit.addEventListener('click', window.clearPitRecord);
+
+    const btnClearDisp = document.getElementById('btn-clear-disp-record');
+    if (btnClearDisp) btnClearDisp.addEventListener('click', window.clearDispRecord);
 };

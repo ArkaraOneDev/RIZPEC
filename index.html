@@ -420,9 +420,7 @@
                                     <input type="text" id="pit-delim-bench" class="col-select" placeholder="From,To" pattern="^\d+,\d+$">
                                 </div>
                                 
-                                <div class="w-full border-t border-slate-700/50 my-1"></div>
-
-                                <div class="flex items-center justify-between">
+                                <div class="flex items-center justify-between mt-1">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Subset</span>
                                     <select id="pit-col-subset" class="col-select"><option value="">None</option></select>
                                 </div>
@@ -438,12 +436,15 @@
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Resource</span>
                                     <select id="pit-col-resource" class="col-select"><option value="">None</option></select>
                                 </div>
+
+                                <div class="w-full border-t border-slate-700/50 my-1"></div>
+
                                 <div class="flex items-center justify-between">
                                     <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Waste Thick</span>
                                     <select id="pit-col-waste-thickness" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
-                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Res. Thick</span>
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Resource Thick</span>
                                     <select id="pit-col-resource-thickness" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
@@ -496,13 +497,13 @@
                         <div id="settings-disp" class="hidden flex-col gap-5 lg:gap-4 pt-2">
                             <!-- Geometry Header -->
                             <div class="flex flex-col gap-2">
-                                <h4 class="text-[12px] lg:text-[11px] font-bold text-blue-400">Non-Centeroid Table (Disposal)</h4>
+                                <h4 class="text-[12px] lg:text-[11px] font-bold text-blue-400">Non-Centeroid</h4>
                             </div>
                             
                             <!-- Upload Input Mining Reserve -->
                             <div class="flex flex-col gap-2 lg:gap-1.5">
                                 <div class="flex flex-wrap items-center justify-between gap-2">
-                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Mining Reserve</span>
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Reserve Sample</span>
                                     <div class="flex items-center gap-2 lg:gap-1.5">
                                         <label class="cursor-pointer bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 lg:px-2.5 lg:py-1 rounded text-[11px] lg:text-[10px] font-semibold transition-all border border-slate-600 flex items-center gap-1.5 m-0 shadow-sm">
                                             <i class="fa-solid fa-upload text-blue-400"></i> Choose File
@@ -544,11 +545,11 @@
                                     <select id="disp-col-subset" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
-                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Loose Capacity</span>
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Capacity</span>
                                     <select id="disp-col-waste" class="col-select"><option value="">None</option></select>
                                 </div>
                                 <div class="flex items-center justify-between">
-                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Bank Condition</span>
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Factor</span>
                                     <input type="number" id="disp-col-bank" class="col-select" value="1.0" min="0" max="1" step="0.01" placeholder="Max 1">
                                 </div>
                             </div>
@@ -571,7 +572,7 @@
                                 <div id="disp-ref-filename" class="text-[11px] lg:text-[10px] text-slate-500 italic truncate bg-slate-900/80 p-2 lg:p-1.5 rounded border border-slate-700/50 shadow-inner">Tidak ada file...</div>
                                 
                                 <div class="flex items-center justify-between mt-1">
-                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Loose Capacity</span>
+                                    <span class="text-[12px] lg:text-[11px] text-slate-400 font-semibold w-28 whitespace-nowrap">Capacity</span>
                                     <select id="disp-col-recon-waste" class="col-select"><option value="">None</option></select>
                                 </div>
                             </div>

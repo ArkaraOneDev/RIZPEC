@@ -2391,15 +2391,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        const wasteEl = document.getElementById('pit-col-waste');
-        if (wasteEl) {
-            const wasteContainer = wasteEl.parentElement;
-            const spacer = document.querySelector('.border-t.border-slate-700\\/50.my-1');
-            if (spacer && wasteContainer && wasteContainer.parentElement) {
-                wasteContainer.parentElement.insertBefore(spacer, wasteContainer);
-            }
-        }
-
         const mandatoryIds = ['pit-col-blockname', 'pit-col-bench', 'pit-delim-block', 'pit-delim-strip', 'pit-delim-bench'];
         mandatoryIds.forEach(id => {
             const el = document.getElementById(id);

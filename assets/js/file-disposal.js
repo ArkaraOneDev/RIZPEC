@@ -1343,25 +1343,21 @@ async function updateDisposalFileStats(file, type) {
                                     const rawBlock = mrIdxBlock !== -1 ? (mrCols[mrIdxBlock] || '').trim() : '';
                                     const rawBench = mrIdxBench !== -1 ? (mrCols[mrIdxBench] || '').trim() : '';
                                     
-                                    let cellSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
-                                    
-                                    let resolvedSubset = '';
-                                    if (!cellSubset) {
-                                        resolvedSubset = 'Waste'; // Jika Subset None, ubah ke Waste
-                                    } else {
-                                        resolvedSubset = toProperCase(cellSubset);
-                                    }
+                                    let rawSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
+                                    let resolvedSubset = rawSubset ? toProperCase(rawSubset) : '';
 
                                     // Hanya tambahkan ke palet subset JIKA subset beneran didefinisikan
-                                    if (cellSubset) subsetsSet.add(resolvedSubset);
+                                    if (resolvedSubset) subsetsSet.add(resolvedSubset);
 
                                     const idDisp = dispId || '';
                                     const idBlock = delimBlock ? getSubstr(rawBlock, delimBlock) : rawBlock;
                                     const idStrip = delimStrip ? getSubstr(rawBlock, delimStrip) : rawBlock;
                                     const idBench = delimBench ? getSubstr(rawBench, delimBench) : rawBench;
                                     
-                                    // Komposit ID Format (Disposal/Block/Strip/Bench/Subset)
-                                    const compositeId = idDisp + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + resolvedSubset;
+                                    const burdenType = 'WASTE';
+                                    
+                                    // Komposit ID Format (Disposal/Block/Strip/Bench/[Subset|Burden])
+                                    const compositeId = idDisp + '/' + idBlock + '/' + idStrip + '/' + idBench + (mrIdxSubset !== -1 ? (resolvedSubset ? '/' + resolvedSubset : '') : '/' + burdenType);
 
                                     if (!blocksMap.has(compositeId)) {
                                         blocksMap.set(compositeId, { sumWasteWeight: 0, count: 0 });
@@ -1411,27 +1407,24 @@ async function updateDisposalFileStats(file, type) {
                                     const rawBlock = mrIdxBlock !== -1 ? (mrCols[mrIdxBlock] || '').trim() : '';
                                     const rawBench = mrIdxBench !== -1 ? (mrCols[mrIdxBench] || '').trim() : '';
                                     
-                                    let cellSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
-                                    
-                                    let resolvedSubset = '';
-                                    if (!cellSubset) {
-                                        resolvedSubset = 'Waste'; // Jika Subset None, ubah ke Waste
-                                    } else {
-                                        resolvedSubset = toProperCase(cellSubset);
-                                    }
+                                    let rawSubset = mrIdxSubset !== -1 ? (mrCols[mrIdxSubset] || '').trim() : '';
+                                    let resolvedSubset = rawSubset ? toProperCase(rawSubset) : '';
 
                                     const idDisp = dispId || '';
                                     const idBlock = delimBlock ? getSubstr(rawBlock, delimBlock) : rawBlock;
                                     const idStrip = delimStrip ? getSubstr(rawBlock, delimStrip) : rawBlock;
                                     const idBench = delimBench ? getSubstr(rawBench, delimBench) : rawBench;
                                     
-                                    // Komposit ID Format (Disposal/Block/Strip/Bench/Subset)
-                                    const compositeId = idDisp + '/' + idBlock + '/' + idStrip + '/' + idBench + '/' + resolvedSubset;
+                                    const burdenType = 'WASTE';
+                                    
+                                    // Komposit ID Format (Disposal/Block/Strip/Bench/[Subset|Burden])
+                                    const compositeId = idDisp + '/' + idBlock + '/' + idStrip + '/' + idBench + (mrIdxSubset !== -1 ? (resolvedSubset ? '/' + resolvedSubset : '') : '/' + burdenType);
                                     
                                     const row = [];
 
                                     mrKeepIndices.forEach(idx => row.push(mrCols[idx] !== undefined ? mrCols[idx] : ''));
 
+                                    // push ke baris CSV
                                     row.push(compositeId, idDisp, idBlock, idStrip, idBench, resolvedSubset);
 
                                     let wVal = mrIdxWaste !== -1 ? cleanNum(mrCols[mrIdxWaste]) : 0;
