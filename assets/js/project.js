@@ -119,11 +119,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 2. Ekstrak Hanya Data Konfigurasi (Tanpa Geometri yang Berat)
 function getBaseProjectData() {
+    // [FIX 3] Merekam Block Key yang sudah terekam (Hide/Show state) menggunakan blockKey yang akurat
     const recKeys = [];
     if (typeof meshes !== 'undefined') {
         Object.values(meshes).forEach(m => {
             if (m.userData && m.userData.isRecorded) {
-                recKeys.push(`${m.userData.blockName}_${m.userData.bench}`);
+                recKeys.push(m.userData.blockKey);
             }
         });
     }
@@ -134,18 +135,6 @@ function getBaseProjectData() {
         const text = filenameUI.textContent.trim();
         if (text !== 'Upload CSV' && !text.includes('Merakit Geometri')) currentFileName = text;
     }
-
-    const safeRecords = (window.sequenceRecords || []).map(r => {
-        const clean = {};
-        for (const k in r) {
-            const v = r[k];
-            if (v !== null && typeof v === 'object') {
-                if (v.isObject3D || v instanceof HTMLElement || v.isMaterial || v.isBufferGeometry) continue;
-            }
-            clean[k] = v;
-        }
-        return clean;
-    });
 
     const getVal = (id, def) => document.getElementById(id) ? document.getElementById(id).value : def;
     const getCheck = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
@@ -162,7 +151,7 @@ function getBaseProjectData() {
                 mrFilePlaceholder: state.mrFile ? { name: state.mrFile.name } : null,
                 refFilePlaceholder: state.refFile ? { name: state.refFile.name } : null,
                 summaryObj: state.summaryObj,
-                originalSummaryObj: state.originalSummaryObj, // FIX: Simpan nilai original
+                originalSummaryObj: state.originalSummaryObj,
                 mrStats: state.mrStats,
                 refStats: state.refStats,
                 neStats: state.neStats,
@@ -186,7 +175,7 @@ function getBaseProjectData() {
                 mrFilePlaceholder: state.mrFile ? { name: state.mrFile.name } : null,
                 refFilePlaceholder: state.refFile ? { name: state.refFile.name } : null,
                 summaryObj: state.summaryObj,
-                originalSummaryObj: state.originalSummaryObj, // FIX: Simpan nilai original
+                originalSummaryObj: state.originalSummaryObj,
                 mrStats: state.mrStats,
                 refStats: state.refStats,
                 neStats: state.neStats,
@@ -199,7 +188,7 @@ function getBaseProjectData() {
     }
 
     return {
-        version: "1.8", // Versi baru dengan GCP Meta Transform
+        version: "1.9", // Versi update untuk Record State terpisah
         csvFileName: currentFileName,
         csvHeaders: typeof csvHeaders !== 'undefined' ? csvHeaders : [], 
         pitStates: cleanPitStates,
@@ -221,7 +210,9 @@ function getBaseProjectData() {
         },
         visualization: {
             isStupaMode: typeof isStupaMode !== 'undefined' ? isStupaMode : false,
-            currentExtrusion: typeof currentExtrusion !== 'undefined' ? currentExtrusion : 5
+            currentExtrusion: typeof currentExtrusion !== 'undefined' ? currentExtrusion : 5,
+            isLabelLayerVisible: typeof window.isLabelLayerVisible !== 'undefined' ? window.isLabelLayerVisible : false,
+            labelOpacity: typeof window.labelOpacity !== 'undefined' ? window.labelOpacity : 1.0
         },
         
         // Rekam Konfigurasi Tab Geometry (Processing)
@@ -237,13 +228,21 @@ function getBaseProjectData() {
             qualityWeight: getVal('quality-weight', 'resource'),
             qualityType: getVal('quality-type', 'maximize')
         },
-        sequences: {
-            records: safeRecords,
-            totalWaste: window.sequenceTotalWaste || 0,
-            totalResource: window.sequenceTotalResource || 0,
-            counter: window.sequenceCounter || 1,
-            recordedKeys: recKeys 
+        
+        // [FIX 3] MEREKAM SEQUENCE SECARA SPESIFIK PIT DAN DISPOSAL (TIDAK LAGI BERCAMPUR)
+        pitSequences: {
+            records: window.pitSequenceRecords || [],
+            totalWaste: window.pitTotalWaste || 0,
+            totalResource: window.pitTotalResource || 0,
+            counter: window.pitSequenceCounter || 1
         },
+        dispSequences: {
+            records: window.dispSequenceRecords || [],
+            totalWaste: window.dispTotalWaste || 0,
+            counter: window.dispSequenceCounter || 1
+        },
+        recordedKeys: recKeys,
+
         layout: {
             vis: getCheck('cb-layout-vis'),
             geo: getCheck('cb-layout-geo'),
@@ -255,6 +254,10 @@ function getBaseProjectData() {
         pitColorModes: JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {},
         burdenPalette: JSON.parse(localStorage.getItem('rizpec_burden_palette')) || null,
         subsetPalette: JSON.parse(localStorage.getItem('rizpec_subset_palette')) || null,
+        
+        // [UPDATE PRO FEATURES] - Menambahkan penyimpanan parameter Res. Incremental, Cumulative & Zone
+        pitProConfigs: JSON.parse(localStorage.getItem('rizpec_pit_pro_configs')) || {},
+
         dispColorModes: JSON.parse(localStorage.getItem('rizpec_disp_color_modes')) || {},
         dispBurdenPalette: JSON.parse(localStorage.getItem('rizpec_disp_burden_palette')) || null,
         dispSubsetPalette: JSON.parse(localStorage.getItem('rizpec_disp_subset_palette')) || null
@@ -302,8 +305,8 @@ async function extractSingleDxfLayer(layer) {
             size: layer.textureMeta.size,
             width: layer.textureMeta.width,
             height: layer.textureMeta.height,
-            gcpPoints: layer.textureMeta.gcpPoints || null,  // Tambahkan Metadata Titik GCP (Affine Transform)
-            transform: layer.textureMeta.transform || null   // Matrix Transformation
+            gcpPoints: layer.textureMeta.gcpPoints || null,  
+            transform: layer.textureMeta.transform || null   
         } : null,
         
         meshes: [], lines: [], textureBase64: null
@@ -374,12 +377,10 @@ if (btnSaveProj) {
                     fileHandle = await window.showSaveFilePicker({
                         id: 'rk-project-dir', 
                         startIn: 'documents',
-                        suggestedName: defaultName + ".riz", // FIX 1: Secara eksplisit menambahkan .riz agar Mac/Linux tahu ekstensi yang diminta
+                        suggestedName: defaultName + ".riz",
                         types: [{ 
                             description: 'RIZPEC Project File', 
                             accept: {
-                                // FIX 2: Menggunakan MIME type binary kustom, bukan 'application/json' 
-                                // agar OS tidak merubah paksanya kembali menjadi .json
                                 'application/octet-stream': ['.riz'],
                                 'application/x-rizpec': ['.riz']
                             } 
@@ -610,7 +611,16 @@ function resetFullProject() {
         }
     }
     if (typeof meshes !== 'undefined') meshes = {};
-    if (typeof clearLabels === 'function') clearLabels();
+    
+    // [FIX LABEL LEAK]: Hapus DOM element label secara menyeluruh
+    if (window.activeLabels) {
+        window.activeLabels.forEach(lbl => {
+            if (lbl.element && lbl.element.parentNode) {
+                lbl.element.parentNode.removeChild(lbl.element);
+            }
+        });
+        window.activeLabels = [];
+    }
     
     // 3. Reset Posisi Kamera ke Default
     if (typeof camera !== 'undefined' && typeof controls !== 'undefined') {
@@ -621,20 +631,52 @@ function resetFullProject() {
         controls.update();
     }
 
-    // 4. Reset Variabel State Sequences
+    // 4. Reset Variabel State Sequences (TERMASUK FIX 1 & 3: Reset Set Loaded & Pisahkan State Sequence)
     window.worldOrigin = { x: 0, y: 0, z: 0, isSet: false }; 
     window.currentCsvFileName = null;
     
-    window.sequenceRecords = [];
-    window.sequenceTotalWaste = 0;
-    window.sequenceTotalResource = 0;
-    window.sequenceCounter = 1;
+    // [FIX 1] Kosongkan SET Cache Pit & Disposal agar tidak terjadi GHOST MESH / Double render
+    if (window.loadedPits) window.loadedPits.clear();
+    if (window.renderedPits) window.renderedPits.clear();
+    if (window.loadedDisposals) window.loadedDisposals.clear();
+    if (window.renderedDisposals) window.renderedDisposals.clear();
+    
+    // [FIX 3] Pisahkan reset state Pit dan Disposal
+    window.pitSequenceRecords = [];
+    window.pitTotalWaste = 0;
+    window.pitTotalResource = 0;
+    window.pitSequenceCounter = 1;
+    
+    window.dispSequenceRecords = [];
+    window.dispTotalWaste = 0;
+    window.dispSequenceCounter = 1;
+
     window.undoStack = [];
     window.redoStack = [];
+
+    // [UPDATE PRO FEATURES] - Reset konfigurasi memori
+    window.pitProConfigs = {};
+    localStorage.removeItem('rizpec_pit_pro_configs');
+
+    // [FIX KEBOCORAN LOCAL STORAGE] - Pastikan warna & palet dari project sebelumnya dihapus total
+    window.pitColorModes = {};
+    window.burdenPalette = null;
+    window.subsetPalette = null;
+    window.dispColorModes = {};
+    window.dispBurdenPalette = null;
+    window.dispSubsetPalette = null;
+    
+    const lsKeysToRemove = [
+        'rizpec_pit_color_modes', 'rizpec_burden_palette', 'rizpec_subset_palette',
+        'rizpec_disp_color_modes', 'rizpec_disp_burden_palette', 'rizpec_disp_subset_palette'
+    ];
+    lsKeysToRemove.forEach(k => localStorage.removeItem(k));
+
     if (typeof window.updateSequenceUI === 'function') window.updateSequenceUI();
     
     const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     setTxt('sequence-waste-total', "0"); setTxt('sequence-resource-total', "0"); setTxt('sequence-sr-total', "0.00");
+    setTxt('disp-sequence-waste-total', "0");
     
     const fileInput = document.getElementById('file-input');
     if (fileInput) fileInput.value = '';
@@ -805,9 +847,7 @@ async function processLoadedData(data, fileName) {
         return;
     }
 
-    // =========================================================
-    // REQUIREMENT 3: PEMBERSIHAN TOTAL AGAR TIDAK ADA KETERGANTUNGAN
-    // =========================================================
+    // PEMBERSIHAN TOTAL AGAR TIDAK ADA KETERGANTUNGAN
     if (typeof window.resetFileTabForNewProject === 'function') {
         await window.resetFileTabForNewProject();
     }
@@ -837,28 +877,60 @@ async function processLoadedData(data, fileName) {
     if (data.pitColorModes) {
         localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(data.pitColorModes));
         window.pitColorModes = data.pitColorModes;
+    } else {
+        window.pitColorModes = {};
+        localStorage.removeItem('rizpec_pit_color_modes');
     }
+    
     if (data.burdenPalette) {
         localStorage.setItem('rizpec_burden_palette', JSON.stringify(data.burdenPalette));
         window.burdenPalette = data.burdenPalette;
+    } else {
+        window.burdenPalette = null;
+        localStorage.removeItem('rizpec_burden_palette');
     }
+    
     if (data.subsetPalette) {
         localStorage.setItem('rizpec_subset_palette', JSON.stringify(data.subsetPalette));
         window.subsetPalette = data.subsetPalette;
+    } else {
+        window.subsetPalette = null;
+        localStorage.removeItem('rizpec_subset_palette');
     }
     
+    // [UPDATE PRO FEATURES] - Memulihkan paramater Res. Incremental, Cumulative & Zone
+    if (data.pitProConfigs) {
+        localStorage.setItem('rizpec_pit_pro_configs', JSON.stringify(data.pitProConfigs));
+        window.pitProConfigs = data.pitProConfigs;
+    } else {
+        // Fallback jika file .riz versi lama yang belum punya fitur ini
+        window.pitProConfigs = {};
+        localStorage.removeItem('rizpec_pit_pro_configs');
+    }
+
     // Memulihkan Konfigurasi Warna Palette Disposal
     if (data.dispColorModes) {
         localStorage.setItem('rizpec_disp_color_modes', JSON.stringify(data.dispColorModes));
         window.dispColorModes = data.dispColorModes;
+    } else {
+        window.dispColorModes = {};
+        localStorage.removeItem('rizpec_disp_color_modes');
     }
+    
     if (data.dispBurdenPalette) {
         localStorage.setItem('rizpec_disp_burden_palette', JSON.stringify(data.dispBurdenPalette));
         window.dispBurdenPalette = data.dispBurdenPalette;
+    } else {
+        window.dispBurdenPalette = null;
+        localStorage.removeItem('rizpec_disp_burden_palette');
     }
+    
     if (data.dispSubsetPalette) {
         localStorage.setItem('rizpec_disp_subset_palette', JSON.stringify(data.dispSubsetPalette));
         window.dispSubsetPalette = data.dispSubsetPalette;
+    } else {
+        window.dispSubsetPalette = null;
+        localStorage.removeItem('rizpec_disp_subset_palette');
     }
 
     if (data.cameraState && typeof controls !== 'undefined' && typeof camera !== 'undefined') {
@@ -898,6 +970,10 @@ async function processLoadedData(data, fileName) {
         if (typeof isStupaMode !== 'undefined') isStupaMode = data.visualization.isStupaMode;
         if (typeof currentExtrusion !== 'undefined') currentExtrusion = data.visualization.currentExtrusion;
         
+        // Restore konfigurasi Label
+        window.isLabelLayerVisible = data.visualization.isLabelLayerVisible || false;
+        window.labelOpacity = data.visualization.labelOpacity !== undefined ? data.visualization.labelOpacity : 1.0;
+
         isStupa = data.visualization.isStupaMode;
 
         const modeToggle = document.getElementById('mode-toggle');
@@ -952,11 +1028,11 @@ async function processLoadedData(data, fileName) {
                 refFileName: savedState.refFileName || (savedState.refFilePlaceholder ? savedState.refFilePlaceholder.name : null),
                 buildMethod: savedState.buildMethod || (savedState.refFilePlaceholder ? 'CEN' : 'NON_CEN'),
                 refFileApplied: savedState.refFileApplied || false,
-                mrFile: null,  // Hindari object palsu agar `.size` tidak eror
-                refFile: null, // Hindari object palsu
+                mrFile: null,  
+                refFile: null, 
                 generatedCsv: null, 
                 summaryObj: savedState.summaryObj,
-                originalSummaryObj: savedState.originalSummaryObj, // FIX: Kembalikan nilai original
+                originalSummaryObj: savedState.originalSummaryObj, 
                 mrStats: savedState.mrStats || { text: '0.00 MB (0 Row, 0 Column)' },
                 refStats: savedState.refStats || { text: '0.00 MB (0 Row, 0 Column)' },
                 neStats: savedState.neStats || { text: '0 Block' },
@@ -974,7 +1050,6 @@ async function processLoadedData(data, fileName) {
                 localStorage.setItem(`rizpec_entity_${safeId}_summary`, JSON.stringify(savedState.summaryObj));
             }
 
-            // FIX 3: Tulis ulang _meta ke IndexedDB saat load project
             if (typeof RizpecDB !== 'undefined') {
                 const metaToSave = {
                     buildMethod: window.pitStates[pitId].buildMethod,
@@ -984,7 +1059,7 @@ async function processLoadedData(data, fileName) {
                     refStats: window.pitStates[pitId].refStats,
                     neStats: window.pitStates[pitId].neStats,
                     summaryObj: window.pitStates[pitId].summaryObj,
-                    originalSummaryObj: window.pitStates[pitId].originalSummaryObj, // FIX: Simpan nilai original ke DB
+                    originalSummaryObj: window.pitStates[pitId].originalSummaryObj, 
                     cols: window.pitStates[pitId].cols,
                     substrings: window.pitStates[pitId].substrings,
                     mrHeaders: window.pitStates[pitId].mrHeaders,
@@ -1002,14 +1077,14 @@ async function processLoadedData(data, fileName) {
             }
         }
         
+        // [PERBAIKAN MEMORY LEAK 1]: Hapus assignment re-inject ke Global State
+        // Data cukup masuk ke IndexedDB saja.
         if (data.pitDataCSVs) {
             for (const [pId, csvStr] of Object.entries(data.pitDataCSVs)) {
                 const safeId = pId.replace(/\s+/g, '_');
                 try {
                     await RizpecDB.set(`rizpec_pit_entity_${safeId}`, csvStr);
-                    if (window.pitStates[pId]) {
-                        window.pitStates[pId].generatedCsv = csvStr;
-                    }
+                    // Dihapus: if (window.pitStates[pId]) { window.pitStates[pId].generatedCsv = csvStr; }
                 } catch(e) {
                     console.warn("Gagal memulihkan CSV untuk Pit: " + pId);
                 }
@@ -1038,7 +1113,7 @@ async function processLoadedData(data, fileName) {
                 refFile: null, 
                 generatedCsv: null, 
                 summaryObj: savedState.summaryObj,
-                originalSummaryObj: savedState.originalSummaryObj, // FIX: Kembalikan nilai original
+                originalSummaryObj: savedState.originalSummaryObj,
                 mrStats: savedState.mrStats || { text: '0.00 MB (0 Row, 0 Column)' },
                 refStats: savedState.refStats || { text: '0.00 MB (0 Row, 0 Column)' },
                 neStats: savedState.neStats || { text: '0 Block' },
@@ -1064,7 +1139,7 @@ async function processLoadedData(data, fileName) {
                     refStats: window.disposalStates[dispId].refStats,
                     neStats: window.disposalStates[dispId].neStats,
                     summaryObj: window.disposalStates[dispId].summaryObj,
-                    originalSummaryObj: window.disposalStates[dispId].originalSummaryObj, // FIX: Simpan nilai original ke DB
+                    originalSummaryObj: window.disposalStates[dispId].originalSummaryObj,
                     cols: window.disposalStates[dispId].cols,
                     substrings: window.disposalStates[dispId].substrings,
                     mrHeaders: window.disposalStates[dispId].mrHeaders,
@@ -1082,14 +1157,14 @@ async function processLoadedData(data, fileName) {
             }
         }
         
+        // [PERBAIKAN MEMORY LEAK 2]: Hapus assignment re-inject ke Global State
+        // Data cukup masuk ke IndexedDB saja.
         if (data.dispDataCSVs) {
             for (const [dId, csvStr] of Object.entries(data.dispDataCSVs)) {
                 const safeId = dId.replace(/\s+/g, '_');
                 try {
                     await RizpecDB.set(`rizpec_disp_entity_${safeId}`, csvStr);
-                    if (window.disposalStates[dId]) {
-                        window.disposalStates[dId].generatedCsv = csvStr;
-                    }
+                    // Dihapus: if (window.disposalStates[dId]) { window.disposalStates[dId].generatedCsv = csvStr; }
                 } catch(e) {
                     console.warn("Gagal memulihkan CSV untuk Disposal: " + dId);
                 }
@@ -1173,8 +1248,6 @@ async function processLoadedData(data, fileName) {
 
             group.visible = lData.visible;
 
-            // --- RE-APPLY RAINBOW COLOR MODE ---
-            // Bangun ulang vertex colors khusus untuk mode Rainbow agar tidak membebani ukuran file .riz saat di save
             if (lData.colorMode === 'Rainbow') {
                 const box = new THREE.Box3().setFromObject(group);
                 const minY = box.min.y;
@@ -1215,7 +1288,6 @@ async function processLoadedData(data, fileName) {
 
             scene.add(group);
             
-            // Re-hydrate Base64 kembali menjadi File Object beserta Metadata GCP untuk keperluan UI Tab File
             let restoredTextureMeta = null;
             if (lData.textureMeta && lData.textureBase64) {
                 const restoredFile = base64ToFile(lData.textureBase64, lData.textureMeta.name);
@@ -1236,7 +1308,6 @@ async function processLoadedData(data, fileName) {
                     threeObject: group, colorHex: lData.colorHex, defaultColorHex: lData.defaultColorHex,
                     type: 'dxf', hasFaces: lData.hasFaces, opacity: lData.opacity,
                     
-                    // Restore Properties Lanjutan DXF
                     clippingEnabled: lData.clippingEnabled || false,
                     colorMode: lData.colorMode || 'Default',
                     visualColor: lData.visualColor || lData.colorHex,
@@ -1248,14 +1319,12 @@ async function processLoadedData(data, fileName) {
                 });
             }
 
-            // --- RESTORE DB META UNTUK BADGES ---
             if (typeof RizpecDB !== 'undefined') {
                 const safeName = lData.name.replace(/\s+/g, '_');
                 const metaDB = lData.metaDB || { dxfType: lData.dxfType || (lData.hasFaces ? 'Polymesh' : 'Polyline') };
                 await RizpecDB.set(`rizpec_dxf_entity_${safeName}_meta`, metaDB).catch(()=>{});
             }
 
-            // --- RESTORE FOLDER UI ---
             if (typeof window.restoreDxfFolderUI === 'function') {
                 window.restoreDxfFolderUI(lData.name);
             }
@@ -1295,6 +1364,10 @@ async function processLoadedData(data, fileName) {
 
             const mesh = new THREE.Mesh(geo, mat);
             mesh.userData = m.userData;
+            
+            // [FIX 2] PENTING: Original material tidak boleh hilang dari object mesh, agar tidak error ketika mouse Hover
+            mesh.userData.originalMaterial = mat;
+
             mesh.matrixAutoUpdate = false;
             mesh.updateMatrix();
 
@@ -1309,6 +1382,11 @@ async function processLoadedData(data, fileName) {
                 } else {
                     mesh.visible = window.loadedPits.has(entityIdFromUserData);
                 }
+            }
+
+            // [FIX 3] Mencek status mesh yang ter-record
+            if (m.userData.isRecorded) {
+                mesh.visible = false; // Langsung di-hide saat di-load 
             }
 
             const edges = new THREE.EdgesGeometry(geo, isStupa ? 10 : 60);
@@ -1331,31 +1409,129 @@ async function processLoadedData(data, fileName) {
                 appLayers.unshift({ id: 'layer_pit_reserve', name: 'Pit Reserve', visible: true, threeObject: pitReserveGroup, colorHex: '#3b82f6', defaultColorHex: '#3b82f6', type: 'csv', hasFaces: false });
             }
         }
-    }
 
-    let loadedSequences = data.sequences || null;
-
-    if (loadedSequences) {
-        window.sequenceRecords = loadedSequences.records || [];
-        window.sequenceTotalWaste = loadedSequences.totalWaste || 0;
-        window.sequenceTotalResource = loadedSequences.totalResource || 0;
-        window.sequenceCounter = loadedSequences.counter || 1;
+        // --- [FIX] REBUILD LABELS UNTUK PRO MODES ---
+        const proModes = ['Res. Incremental', 'Res. Cumulative', 'Res. Zone'];
+        const labelsContainer = document.getElementById('labels-container');
         
-        const recordedKeysToHide = loadedSequences.recordedKeys || [];
-        if (recordedKeysToHide.length > 0 && typeof meshes !== 'undefined') {
-            Object.values(meshes).forEach(m => {
-                const key = `${m.userData.blockName}_${m.userData.bench}`;
-                if (recordedKeysToHide.includes(key)) {
-                    m.userData.isRecorded = true;
-                    m.visible = false;
-                    if (m.material) m.material.emissive.setHex(0x000000);
+        if (labelsContainer) {
+            if(getComputedStyle(labelsContainer).position === 'static') {
+                labelsContainer.style.position = 'absolute';
+                labelsContainer.style.top = '0';
+                labelsContainer.style.left = '0';
+                labelsContainer.style.width = '100%';
+                labelsContainer.style.height = '100%';
+                labelsContainer.style.pointerEvents = 'none'; 
+                labelsContainer.style.overflow = 'hidden';
+            }
+            labelsContainer.style.zIndex = '1';
+
+            window.activeLabels = window.activeLabels || [];
+
+            window.loadedPits.forEach(pitId => {
+                const mode = window.pitColorModes[pitId];
+                if (proModes.includes(mode)) {
+                    const blockBoxes = {};
+                    const groupStats = {};
+
+                    // 1. Hitung ulang Bounding Box dan Total Volume per GroupKey dari mesh yang di-load
+                    Object.values(meshes).forEach(mesh => {
+                        if (mesh.userData.entityId === pitId && mesh.userData.groupKey) {
+                            const gKey = mesh.userData.groupKey;
+                            
+                            if (!blockBoxes[gKey]) blockBoxes[gKey] = new THREE.Box3();
+                            blockBoxes[gKey].expandByObject(mesh);
+
+                            if (!groupStats[gKey]) groupStats[gKey] = { waste: 0, res: 0 };
+                            
+                            // Ambil data wasteVol dan resVol yang melekat pada mesh
+                            groupStats[gKey].waste += (mesh.userData.wasteVol || 0);
+                            groupStats[gKey].res += (mesh.userData.resVol || 0);
+                        }
+                    });
+
+                    // 2. Buat kembali elemen HTML Labelnya
+                    Object.keys(blockBoxes).forEach(gKey => {
+                        const box = blockBoxes[gKey];
+                        const center = box.getCenter(new THREE.Vector3());
+                        center.y = box.max.y + 5; 
+                        
+                        const g = groupStats[gKey];
+                        if (!g) return;
+
+                        const div = document.createElement('div');
+                        div.className = 'absolute top-0 left-0 text-[10px] sm:text-[11px] font-bold px-2 py-1 rounded-md shadow-lg border border-slate-500/80 pointer-events-none select-none flex items-center justify-center text-center transition-opacity duration-75 z-10 backdrop-blur-sm';
+                        
+                        let srText = g.res > 0 ? (g.waste / g.res).toFixed(2) : '-';
+                        
+                        div.innerHTML = `<span class="${srText !== '-' ? 'text-amber-400' : 'text-slate-200'} drop-shadow-md tracking-widest">SR: ${srText}</span>`;
+                        div.style.backgroundColor = 'rgba(15, 23, 42, 0.75)'; 
+                        div.style.willChange = 'transform, opacity'; 
+                        
+                        // Set visibilitas dan opacity sesuai state yang tersimpan
+                        div.style.display = window.isLabelLayerVisible ? 'flex' : 'none';
+                        div.style.opacity = window.labelOpacity !== undefined ? window.labelOpacity : 1;
+                        
+                        labelsContainer.appendChild(div);
+
+                        window.activeLabels.push({
+                            entityId: pitId,
+                            element: div,
+                            position: center,
+                            vec: new THREE.Vector3()
+                        });
+                    });
                 }
             });
+            
+            // Re-hook label events jika belum
+            if (typeof controls !== 'undefined' && !window.isLabelHooked) {
+                controls.addEventListener('change', window.updateLabels);
+                window.addEventListener('resize', window.updateLabels);
+                window.isLabelHooked = true;
+            }
+            if (typeof window.updateLabels === 'function') window.updateLabels();
         }
-        
-        if (typeof window.updateSequenceUI === 'function') window.updateSequenceUI();
-        if (typeof window.clearSelection === 'function') window.clearSelection();
+        // --------------------------------------------
     }
+
+    // [FIX 3] Restorasi Sequence secara Spesifik
+    if (data.pitSequences) {
+        window.pitSequenceRecords = data.pitSequences.records || [];
+        window.pitTotalWaste = data.pitSequences.totalWaste || 0;
+        window.pitTotalResource = data.pitSequences.totalResource || 0;
+        window.pitSequenceCounter = data.pitSequences.counter || 1;
+    } else if (data.sequences) {
+        // Fallback untuk file .riz versi lama yang menyatukan log pit/disp
+        window.pitSequenceRecords = data.sequences.records || [];
+        window.pitTotalWaste = data.sequences.totalWaste || 0;
+        window.pitTotalResource = data.sequences.totalResource || 0;
+        window.pitSequenceCounter = data.sequences.counter || 1;
+    }
+
+    if (data.dispSequences) {
+        window.dispSequenceRecords = data.dispSequences.records || [];
+        window.dispTotalWaste = data.dispSequences.totalWaste || 0;
+        window.dispSequenceCounter = data.dispSequences.counter || 1;
+    }
+
+    // Mengaplikasikan hide/show pada block mesh yang sempat tersave dengan posisi record
+    const recordedKeysToHide = data.recordedKeys || (data.sequences ? data.sequences.recordedKeys : []) || [];
+    if (recordedKeysToHide.length > 0 && typeof meshes !== 'undefined') {
+        Object.values(meshes).forEach(m => {
+            if (recordedKeysToHide.includes(m.userData.blockKey)) {
+                m.userData.isRecorded = true;
+                if (!m.userData.recordType) {
+                    m.userData.recordType = (m.userData.type === 'disp' || m.userData.type === 'disposal') ? 'disp' : 'pit';
+                }
+                m.visible = false;
+            }
+        });
+    }
+
+    if (typeof window.updateSequenceUI === 'function') window.updateSequenceUI();
+    if (typeof window.updateRecordedVisibility === 'function') window.updateRecordedVisibility();
+    if (typeof window.clearSelection === 'function') window.clearSelection();
 
     if (data.csvHeaders && data.csvHeaders.length > 0) {
         csvHeaders = data.csvHeaders;
@@ -1379,6 +1555,19 @@ async function processLoadedData(data, fileName) {
         renderer.render(scene, camera);
     }
     
+    // ==========================================================
+    // [PERBAIKAN MEMORY LEAK 3]: AGGRESSIVE MANUAL GC
+    // Menghapus objek data raksasa setelah selesai dikonsumsi.
+    // ==========================================================
+    if (data) {
+        delete data.pitDataCSVs;
+        delete data.dispDataCSVs;
+        delete data.pitReserve;
+        delete data.dxfLayers;
+        data = null; 
+    }
+    // ==========================================================
+
     setTimeout(() => {
         hideFullscreenLoading();
 
@@ -1393,7 +1582,7 @@ async function processLoadedData(data, fileName) {
 
         if(typeof updateFileMenuState === 'function') updateFileMenuState();
 
-        if (data.pitStates) {
+        if (data && data.pitStates) { // Perlindungan jika 'data' null dari GC
             Object.keys(data.pitStates).forEach(pit => {
                 if (!window.loadedPits.has(pit)) {
                     if (typeof window.unloadPitGeometry === 'function') {
@@ -1403,7 +1592,7 @@ async function processLoadedData(data, fileName) {
             });
         }
         
-        if (data.disposalStates) {
+        if (data && data.disposalStates) {
             Object.keys(data.disposalStates).forEach(disp => {
                 if (!window.loadedDisposals.has(disp)) {
                     if (typeof window.unloadDisposalGeometry === 'function') {
@@ -1413,7 +1602,6 @@ async function processLoadedData(data, fileName) {
             });
         }
         
-        // Re-Apply Footprint Clipping Shader khusus untuk layer DXF yang kondisinya aktif
         if (typeof window.executeDxfFootprintClipping === 'function' && typeof appLayers !== 'undefined') {
             appLayers.forEach(layer => {
                 if (layer.type === 'dxf' && layer.clippingEnabled && layer.hasFaces) {
@@ -1422,7 +1610,6 @@ async function processLoadedData(data, fileName) {
             });
         }
 
-        // Segarkan List dan Panel Summary DXF setelah Open File 
         if (typeof window.updateDxfListUI === 'function') window.updateDxfListUI();
         if (typeof window.updateGeometryDxfListUI === 'function') window.updateGeometryDxfListUI();
         if (typeof aggregateAllDxfData === 'function') aggregateAllDxfData();

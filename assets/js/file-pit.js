@@ -59,7 +59,42 @@ window.applyPitSafetyDisable = function() {
 };
 
 // ==============================================================
-// [PERBAIKAN MEMORY LEAK]: GLOBAL EVENT DELEGATION
+// EVALUATOR STATUS WARNA & DROPDOWN DRAFT
+// Mengecek apakah UI di layar berbeda dengan data tersimpan
+// ==============================================================
+window.evaluateUnsavedColorChanges = function() {
+    let isChanged = false;
+
+    // 1. Cek Apakah ada Dropdown Mode yang berubah dari aslinya
+    const selects = document.querySelectorAll('.pit-color-mode-select');
+    selects.forEach(select => {
+        const pit = select.getAttribute('data-pit');
+        const savedMode = window.pitColorModes[pit] || 'Burden';
+        if (select.value !== savedMode) {
+            isChanged = true;
+        }
+    });
+
+    // 2. Cek Apakah Palette Burden berubah
+    const savedBurden = localStorage.getItem('rizpec_burden_palette');
+    if (savedBurden && JSON.stringify(window.burdenPalette) !== savedBurden) {
+        isChanged = true;
+    }
+
+    // 3. Cek Apakah Palette Subset berubah
+    const savedSubset = localStorage.getItem('rizpec_subset_palette');
+    if (savedSubset && JSON.stringify(window.subsetPalette) !== savedSubset) {
+        isChanged = true;
+    }
+
+    window.hasUnsavedColorChanges = isChanged;
+    if (typeof window.updatePitApplyColorButton === 'function') {
+        window.updatePitApplyColorButton();
+    }
+};
+
+// ==============================================================
+// GLOBAL EVENT DELEGATION
 // Mengganti listener di dalam loop (innerHTML) menjadi terpusat 
 // ==============================================================
 document.addEventListener('change', async (e) => {
@@ -103,54 +138,35 @@ document.addEventListener('change', async (e) => {
         }
     }
 
-    // 2. Select Color Mode (Burden/Subset)
+    // 2. Select Color Mode (Burden/Subset/Res Pro) - DRAFT MODE
     if (e.target && e.target.classList.contains('pit-color-mode-select')) {
         const pit = e.target.getAttribute('data-pit');
         const newMode = e.target.value;
-        if (window.pitColorModes[pit] !== newMode) {
-            window.pitColorModes[pit] = newMode;
-            localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
-            
-            if (window.loadedPits.has(pit)) {
-                if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
-                if (window.renderedPits) window.renderedPits.delete(pit);
-                
-                const geoTab = document.getElementById('panel-geometry');
-                const isGeoTabActive = geoTab && !geoTab.classList.contains('hidden');
-                
-                if (isGeoTabActive) {
-                    if (typeof window.renderPendingPits === 'function') window.renderPendingPits();
-                } else {
-                    const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
-                    if (tabBtn) {
-                        tabBtn.classList.add('bg-blue-600/30', 'text-blue-300', 'animate-pulse');
-                        setTimeout(() => tabBtn.classList.remove('bg-blue-600/30', 'text-blue-300', 'animate-pulse'), 2000);
-                    }
-                }
+
+        // Cegat jika yang dipilih adalah mode Processing Pro
+        if (['Res. Incremental', 'Res. Cumulative', 'Res. Zone'].includes(newMode)) {
+            if (typeof window.showProcessingModal === 'function') {
+                window.showProcessingModal(pit, newMode, e.target);
             }
+            return; // Evaluasi unsaved akan dilakukan setelah modal Apply/Cancel
         }
+
+        // Evaluasi state dropdown untuk menyalakan tombol Apply Color
+        window.evaluateUnsavedColorChanges();
     }
 
     // 3. Palette Color Input (Burden)
     if (e.target && e.target.classList.contains('color-input-burden')) {
         const index = parseInt(e.target.getAttribute('data-index'));
-        const oldColor = window.burdenPalette[index].color;
-        if (oldColor !== e.target.value) {
-            window.burdenPalette[index].color = e.target.value;
-            window.hasUnsavedColorChanges = true;
-            if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
-        }
+        window.burdenPalette[index].color = e.target.value;
+        window.evaluateUnsavedColorChanges();
     }
 
     // 4. Palette Color Input (Subset)
     if (e.target && e.target.classList.contains('color-input-subset')) {
         const index = parseInt(e.target.getAttribute('data-index'));
-        const oldColor = window.subsetPalette[index].color;
-        if (oldColor !== e.target.value) {
-            window.subsetPalette[index].color = e.target.value;
-            window.hasUnsavedColorChanges = true;
-            if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
-        }
+        window.subsetPalette[index].color = e.target.value;
+        window.evaluateUnsavedColorChanges();
     }
 });
 
@@ -163,9 +179,8 @@ document.addEventListener('click', (e) => {
             const temp = window.subsetPalette[index];
             window.subsetPalette[index] = window.subsetPalette[index - 1];
             window.subsetPalette[index - 1] = temp;
-            window.hasUnsavedColorChanges = true;
-            if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
             if (typeof window.renderPitPaletteUI === 'function') window.renderPitPaletteUI();
+            window.evaluateUnsavedColorChanges();
         }
     }
 
@@ -177,9 +192,8 @@ document.addEventListener('click', (e) => {
             const temp = window.subsetPalette[index];
             window.subsetPalette[index] = window.subsetPalette[index + 1];
             window.subsetPalette[index + 1] = temp;
-            window.hasUnsavedColorChanges = true;
-            if (typeof window.updatePitApplyColorButton === 'function') window.updatePitApplyColorButton();
             if (typeof window.renderPitPaletteUI === 'function') window.renderPitPaletteUI();
+            window.evaluateUnsavedColorChanges();
         }
     }
 });
@@ -411,13 +425,6 @@ async function restorePitUIState(pitId) {
         }
     } catch(e) {}
 
-    if (!state.generatedCsv) {
-        try {
-            const savedCsv = await RizpecDB.get(`rizpec_pit_entity_${safeId}`);
-            if (savedCsv) state.generatedCsv = savedCsv;
-        } catch(e) {}
-    }
-
     const mrFileEl = document.getElementById('pit-mr-filename');
     const mrClearBtn = document.getElementById('pit-clear-mr');
     if (state.mrFile || state.mrFileName) {
@@ -615,8 +622,8 @@ window.onPitFolderSelected = async function(name, type, rootName) {
 
     if (window._lastSelectedFolderName === name) return;
     
-    if (typeof window.resetUnsavedColorChanges === 'function') {
-        window.resetUnsavedColorChanges();
+    if (typeof window.resetUnsavedPitColorChanges === 'function') {
+        window.resetUnsavedPitColorChanges();
     }
 
     window._lastSelectedFolderName = name;
@@ -1110,6 +1117,7 @@ async function updatePitFileStats(file, type) {
 
             const mrFile = state.mrFile;
             const refFile = state.refFile;
+            const safePitId = window.activePitId.replace(/\s+/g, '_');
 
             btnBuildGeometry.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing in Background...';
             btnBuildGeometry.disabled = true;
@@ -1126,8 +1134,7 @@ async function updatePitFileStats(file, type) {
                 const isMrReal = state.mrFile && state.mrFile.size !== undefined;
                 const isRefReal = state.refFile && state.refFile.size !== undefined;
                 const hasRefPlaceholder = !!state.refFileName;
-                const isBuilt = state.generatedCsv !== null;
-                const safePitId = window.activePitId.replace(/\s+/g, '_');
+                const isBuilt = state.generatedCsv !== null || (document.getElementById('pit-ne-filename') && document.getElementById('pit-ne-filename').textContent !== "Build Geometry terlebih dahulu");
                 const savedBuildMethod = state.buildMethod || 'NON_CEN';
 
                 let action = 'BUILD';
@@ -1153,6 +1160,16 @@ async function updatePitFileStats(file, type) {
                     refText = await readAsText(refFile);
                 } else if (action === 'APPLY_PRORATA') {
                     refText = await readAsText(refFile);
+                }
+
+                // [OPTIMASI RAM]: Ambil dari IndexedDB jika RAM sudah dikosongkan sebelumnya
+                let currentGeneratedCsv = state.generatedCsv;
+                if (isBuilt && !currentGeneratedCsv && (action === 'APPLY_PRORATA' || action === 'RESET')) {
+                    try {
+                        if (typeof RizpecDB !== 'undefined') {
+                            currentGeneratedCsv = await RizpecDB.get(`rizpec_pit_entity_${safePitId}`);
+                        }
+                    } catch(e) { console.warn("Gagal load CSV dari DB untuk prorata", e); }
                 }
 
                 const workerCode = `
@@ -1600,7 +1617,9 @@ async function updatePitFileStats(file, type) {
 
                     const result = e.data.result;
 
-                    state.generatedCsv = result.combinedCsv;
+                    // [FIX CELAH MEMORY LEAK 1]: Kosongkan string mentah raksasa dari State jangka panjang!
+                    // String ini tidak perlu bersarang di RAM karena akan disimpan di IndexedDB.
+                    state.generatedCsv = null; 
                     
                     // [UPDATE]: Ekstrak & Kunci koordinat Origin langsung tanpa menunggu dicentang!
                     if (typeof window.establishWorldOrigin === 'function') {
@@ -1614,6 +1633,7 @@ async function updatePitFileStats(file, type) {
                     localStorage.setItem(`rizpec_build_type_${safePitId}`, result.newBuildMethod);
 
                     if (action === 'APPLY_PRORATA') {
+                        // [OPTIMASI MEMORI - POINT 2]: Buang referensi file fisik dari memori
                         state.refFile = null; 
                         state.refFileApplied = true;
                     } else if (action === 'RESET') {
@@ -1625,6 +1645,9 @@ async function updatePitFileStats(file, type) {
                         if (ddWaste) ddWaste.value = '';
                         if (ddRes) ddRes.value = '';
                     } else if (action === 'BUILD') {
+                        // [OPTIMASI MEMORI - POINT 2]: Buang referensi file fisik dari memori
+                        // setelah CSV sukses diproses dan disimpan ke DB. Nama file tetap ada untuk UI.
+                        state.mrFile = null;
                         if (state.refFileName) {
                             state.refFile = null;
                             state.refFileApplied = true;
@@ -1710,7 +1733,7 @@ async function updatePitFileStats(file, type) {
                     pitId: window.activePitId,
                     mrText,
                     refText,
-                    generatedCsv: state.generatedCsv,
+                    generatedCsv: currentGeneratedCsv, // Membaca dari variabel lokal (DB), bukan state global
                     originalSummaryObj: state.originalSummaryObj,
                     summaryObj: state.summaryObj,
                     cols: state.cols,
@@ -1718,6 +1741,12 @@ async function updatePitFileStats(file, type) {
                     savedBuildMethod,
                     refFileName: state.refFileName
                 });
+
+                // [FIX CELAH MEMORY LEAK 2]: Kosongkan memori di Main Thread seketika!
+                // Mencegah file puluhan MB disandera oleh Event Listener Closure
+                mrText = null;
+                refText = null;
+                currentGeneratedCsv = null; 
 
             } catch(err) {
                 btnBuildGeometry.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Gagal! Cek Log/Upload Ulang';
@@ -1742,7 +1771,25 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
     if (!summaryObj) {
         placeholder?.classList.remove('hidden');
         summaryTable?.classList.add('hidden');
-        if (canvasContainer && !updateSummaryOnly) canvasContainer.innerHTML = '';
+        
+        // [FIX CANVAS OVERFLOW] Sembunyikan container canvas secara eksplisit agar tidak memakan ruang layout 
+        // ketika placeholder sedang ditampilkan. Ini mencegah tinggi parent menjadi melar/bocor (overflow).
+        canvasContainer?.classList.add('hidden'); 
+
+        if (canvasContainer && !updateSummaryOnly) {
+            // [FIX BUG OBSERVER CLOSURE] Putuskan observer lama agar tidak menggambar ulang data pit sebelumnya secara gaib!
+            if (canvasContainer._resizeObserver) canvasContainer._resizeObserver.disconnect();
+            if (canvasContainer._visibilityObserver) canvasContainer._visibilityObserver.disconnect();
+
+            // [OPTIMASI MEMORI - POINT 1]: Jangan hancurkan canvas, cukup hapus gambarnya
+            const existingCanvas = canvasContainer.querySelector('canvas');
+            if (existingCanvas) {
+                const ctx = existingCanvas.getContext('2d');
+                ctx.clearRect(0, 0, existingCanvas.width, existingCanvas.height);
+            } else {
+                canvasContainer.innerHTML = '';
+            }
+        }
         return;
     }
 
@@ -1814,6 +1861,9 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
     if (summaryContent) summaryContent.innerHTML = html;
     placeholder?.classList.add('hidden');
     summaryTable?.classList.remove('hidden');
+
+    // [FIX CANVAS OVERFLOW] Munculkan kembali kontainer canvas setelah ada data dan placeholder disembunyikan
+    canvasContainer?.classList.remove('hidden');
 
     if (updateSummaryOnly) return;
 
@@ -1920,15 +1970,24 @@ window.renderPitGeometryPreview = function(csvData, summaryObj, buildMethod = 'N
         }
 
     } else {
-        canvasContainer.innerHTML = '';
+        // [OPTIMASI MEMORI - POINT 1]: Jangan hancurkan canvas, cukup hapus gambarnya
+        const existingCanvas = canvasContainer.querySelector('canvas');
+        if (existingCanvas) {
+            const ctx = existingCanvas.getContext('2d');
+            ctx.clearRect(0, 0, existingCanvas.width, existingCanvas.height);
+        }
         return;
     }
 
-    canvasContainer.innerHTML = '';
-    const canvas = document.createElement('canvas');
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvasContainer.appendChild(canvas);
+    // [OPTIMASI MEMORI - POINT 1]: Reuse canvas DOM untuk mencegah thrashing
+    let canvas = canvasContainer.querySelector('canvas');
+    if (!canvas) {
+        canvasContainer.innerHTML = '';
+        canvas = document.createElement('canvas');
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvasContainer.appendChild(canvas);
+    }
     const ctx = canvas.getContext('2d');
 
     const draw = () => {
@@ -2020,7 +2079,17 @@ window.updatePitApplyColorButton = function() {
 };
 
 window.resetUnsavedPitColorChanges = function() {
+    // Dipanggil saat berpindah Tab atau Folder agar status Draft direvert ke Asli
     if (window.hasUnsavedColorChanges) {
+        
+        // 1. Revert Dropdown UI
+        const selects = document.querySelectorAll('.pit-color-mode-select');
+        selects.forEach(select => {
+            const pit = select.getAttribute('data-pit');
+            select.value = window.pitColorModes[pit] || 'Burden';
+        });
+
+        // 2. Revert Memory / Data Warna
         window.hasUnsavedColorChanges = false;
         
         const savedBurden = localStorage.getItem('rizpec_burden_palette');
@@ -2096,12 +2165,23 @@ window.initGeometryPitListUI = function() {
         document.getElementById('pit-btn-apply-colors').addEventListener('click', function() {
             if (!window.hasUnsavedColorChanges) return;
 
+            // 1. Simpan Data Warna Palette
             localStorage.setItem('rizpec_burden_palette', JSON.stringify(window.burdenPalette));
             localStorage.setItem('rizpec_subset_palette', JSON.stringify(window.subsetPalette));
             
+            // 2. Simpan Data Value Dropdown yang sedang terpasang di UI
+            const selects = document.querySelectorAll('.pit-color-mode-select');
+            selects.forEach(select => {
+                const pit = select.getAttribute('data-pit');
+                window.pitColorModes[pit] = select.value;
+            });
+            localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
+
+            // 3. Matikan status Unsaved
             window.hasUnsavedColorChanges = false;
             window.updatePitApplyColorButton();
 
+            // 4. Trigger Unload & Re-render Geometri 3D Tab
             if (window.loadedPits && window.loadedPits.size > 0) {
                 window.loadedPits.forEach(pit => {
                     if (typeof window.unloadPitGeometry === 'function') window.unloadPitGeometry(pit, 'pit');
@@ -2176,7 +2256,7 @@ window.updateGeometryPitListUI = async function() {
             
             let currentMode = window.pitColorModes[pit];
 
-            if (!currentMode || !['Burden', 'Subset'].includes(currentMode)) {
+            if (!currentMode || !['Burden', 'Subset', 'Res. Incremental', 'Res. Cumulative', 'Res. Zone'].includes(currentMode)) {
                 currentMode = pitObj.hasSubset ? 'Subset' : 'Burden';
                 window.pitColorModes[pit] = currentMode;
                 localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
@@ -2186,13 +2266,15 @@ window.updateGeometryPitListUI = async function() {
             if (pitObj.hasSubset) {
                 optionsHtml += `<option value="Subset" ${currentMode === 'Subset' ? 'selected' : ''}>Subset</option>`;
             }
+            // Tambahan 3 Mode Pro
+            optionsHtml += `<option value="Res. Incremental" ${currentMode === 'Res. Incremental' ? 'selected' : ''}>Res. Incremental</option>`;
+            optionsHtml += `<option value="Res. Cumulative" ${currentMode === 'Res. Cumulative' ? 'selected' : ''}>Res. Cumulative</option>`;
+            optionsHtml += `<option value="Res. Zone" ${currentMode === 'Res. Zone' ? 'selected' : ''}>Res. Zone</option>`;
 
             const div = document.createElement('div');
             
             div.className = `flex items-center gap-2.5 bg-slate-900/80 border ${isLoaded ? 'border-blue-500/50 shadow-sm' : 'border-slate-700/80'} p-2 rounded-md transition-all hover:bg-slate-800 group`;
             
-            // [PERBAIKAN]: Menghapus event listener murni di dalam sini, menggunakan pendekatan 'data-*' attribut 
-            // agar bisa dikontrol oleh Event Delegation Global di atas.
             div.innerHTML = `
                 <label class="relative flex items-center justify-center w-5 h-5 cursor-pointer m-0 shrink-0" title="Check/Uncheck untuk menampilkan Geometri">
                     <input type="checkbox" class="pit-checkbox peer absolute opacity-0 w-full h-full cursor-pointer" data-pit="${pit}" ${isLoaded ? 'checked' : ''}>
@@ -2327,7 +2409,6 @@ window.renderPitPaletteUI = function(isEmpty = false) {
         return;
     }
 
-    // [PERBAIKAN]: Menambahkan penanda Class untuk diolah Global Event Delegation
     if (burdenListEl && window.burdenPalette) {
         burdenListEl.innerHTML = '';
         window.burdenPalette.forEach((item, index) => {
@@ -2356,7 +2437,6 @@ window.renderPitPaletteUI = function(isEmpty = false) {
             return;
         }
 
-        // [PERBAIKAN]: Menambahkan penanda Class (btn-up-subset / btn-down-subset) untuk global delegate
         palette.forEach((item, index) => {
             const div = document.createElement('div');
             div.className = "grid grid-cols-[24px_1fr_16px] gap-2 items-center bg-slate-900/80 border border-slate-700/80 p-2 rounded-md hover:bg-slate-800 transition-colors group";
@@ -2452,3 +2532,117 @@ document.addEventListener('DOMContentLoaded', () => {
 
     }, 1000);
 });
+
+// ==============================================================
+// PROCESSING MODAL UI TRIGGER 
+// ==============================================================
+window.showProcessingModal = function(pitId, mode, selectElement) {
+    // 1. Injeksi Modal ke DOM jika belum ada
+    if (!document.getElementById('processing-modal')) {
+        const modalHtml = `
+            <div id="processing-modal" class="fixed inset-0 bg-black/60 z-[300] hidden items-center justify-center backdrop-blur-sm">
+                <div class="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-[340px] flex flex-col overflow-hidden relative">
+                    <div class="h-10 border-b border-slate-700 bg-slate-800 flex items-center justify-between px-3 shrink-0 shadow">
+                        <h2 id="processing-modal-title" class="text-white font-bold text-[12px]"><i class="fa-solid fa-gear mr-2 text-blue-400"></i> Processing</h2>
+                        <button id="close-processing-modal" class="text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+                    </div>
+                    <div id="processing-modal-content" class="p-4 flex flex-col gap-3 text-[11px]">
+                        <!-- Konten Dinamis -->
+                    </div>
+                    <div class="p-3 border-t border-slate-700 flex justify-end gap-2 bg-slate-800/50">
+                        <button id="btn-apply-processing" class="bg-green-600 hover:bg-green-500 text-white px-5 py-1.5 rounded text-[11px] font-bold shadow transition-colors">Apply</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    }
+
+    const modal = document.getElementById('processing-modal');
+    const title = document.getElementById('processing-modal-title');
+    const content = document.getElementById('processing-modal-content');
+    
+    // Siapkan atribut untuk diakses oleh file-pit-pro.js (Jika ada)
+    modal.setAttribute('data-pit', pitId);
+    modal.setAttribute('data-mode', mode);
+    
+    title.innerHTML = `<i class="fa-solid fa-gear mr-2 text-blue-400"></i> ${mode} - ${pitId}`;
+    content.innerHTML = '';
+
+    // Ambil daftar Header jika mode "Res. Zone"
+    let headers = [];
+    if (window.pitStates && window.pitStates[pitId] && window.pitStates[pitId].mrHeaders) {
+        headers = window.pitStates[pitId].mrHeaders;
+    }
+    const headerOptions = '<option value="">None</option>' + headers.map(h => `<option value="${h}">${h}</option>`).join('');
+
+    // 2. Render Form Berdasarkan Mode
+    if (mode === 'Res. Incremental') {
+        content.innerHTML = `
+            <div class="flex flex-col gap-1.5">
+                <label class="text-slate-300 font-semibold">SR Limit</label>
+                <input type="number" id="pro-sr-limit" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 transition-colors" placeholder="Contoh: 5.0" step="0.01">
+            </div>
+        `;
+    } else if (mode === 'Res. Cumulative') {
+        content.innerHTML = `
+            <div class="flex flex-col gap-1.5">
+                <label class="text-slate-300 font-semibold">Direction</label>
+                <select id="pro-direction" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">
+                    <option value="Top-Down">Top-Down</option>
+                    <option value="Bottom-Up">Bottom-Up</option>
+                </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+                <label class="text-slate-300 font-semibold">Sequence</label>
+                <select id="pro-sequence" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">
+                    <option value="By Bench">By Bench</option>
+                    <option value="By Block">By Block</option>
+                </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+                <label class="text-slate-300 font-semibold">SR Limit</label>
+                <input type="number" id="pro-sr-limit" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 transition-colors" placeholder="Contoh: 5.0" step="0.01">
+            </div>
+        `;
+    } else if (mode === 'Res. Zone') {
+        content.innerHTML = `
+            <div class="flex flex-col gap-1.5">
+                <label class="text-slate-300 font-semibold">Waste Thick</label>
+                <select id="pro-waste-thick" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${headerOptions}</select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+                <label class="text-slate-300 font-semibold">Resource Thick</label>
+                <select id="pro-resource-thick" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${headerOptions}</select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+                <label class="text-slate-300 font-semibold">Quality From</label>
+                <select id="pro-quality-from" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${headerOptions}</select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+                <label class="text-slate-300 font-semibold">Quality To</label>
+                <select id="pro-quality-to" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${headerOptions}</select>
+            </div>
+        `;
+    }
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+
+    // Handle Close Modal (Batal)
+    document.getElementById('close-processing-modal').onclick = () => {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        
+        // Revert teks dropdown dan cek ulang status Apply Button
+        const prevMode = window.pitColorModes[pitId] || 'Burden';
+        if (selectElement) selectElement.value = prevMode;
+        
+        window.evaluateUnsavedColorChanges(); 
+    };
+
+    // Note: Event listener click untuk tombol 'btn-apply-processing' akan di-handle
+    // oleh file-pit-pro.js. File pro hanya akan men-hide modal, menyimpan state pro, 
+    // lalu HANYA perlu memanggil `window.evaluateUnsavedColorChanges()` 
+    // agar menyalakan tombol Apply besar, BUKAN merender langsung.
+};

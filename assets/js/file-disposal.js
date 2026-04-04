@@ -416,12 +416,14 @@ async function restoreDisposalUIState(dispId) {
         }
     } catch(e) {}
 
-    if (!state.generatedCsv) {
-        try {
-            const savedCsv = await RizpecDB.get(`rizpec_disp_entity_${safeId}`);
-            if (savedCsv) state.generatedCsv = savedCsv;
-        } catch(e) {}
-    }
+    // [OPTIMASI RAM]: Hapus load CSV puluhan MB saat ganti folder. 
+    // Render preview sudah cukup pakai Hulls di state.summaryObj.
+    // if (!state.generatedCsv) {
+    //     try {
+    //         const savedCsv = await RizpecDB.get(`rizpec_disp_entity_${safeId}`);
+    //         if (savedCsv) state.generatedCsv = savedCsv;
+    //     } catch(e) {}
+    // }
 
     const mrFileEl = document.getElementById('disp-mr-filename');
     const mrClearBtn = document.getElementById('disp-clear-mr');
@@ -1143,7 +1145,7 @@ async function updateDisposalFileStats(file, type) {
                 const isMrReal = state.mrFile && state.mrFile.size !== undefined;
                 const isRefReal = state.refFile && state.refFile.size !== undefined;
                 const hasRefPlaceholder = !!state.refFileName;
-                const isBuilt = state.generatedCsv !== null;
+                const isBuilt = state.generatedCsv !== null || (document.getElementById('disp-ne-filename') && document.getElementById('disp-ne-filename').textContent !== "Build Geometry terlebih dahulu");
                 const safeDispId = window.activeDisposalId.replace(/\s+/g, '_');
                 const savedBuildMethod = state.buildMethod || 'NON_CEN';
 
@@ -1170,6 +1172,16 @@ async function updateDisposalFileStats(file, type) {
                     refText = await readAsText(refFile);
                 } else if (action === 'APPLY_PRORATA') {
                     refText = await readAsText(refFile);
+                }
+                
+                // [OPTIMASI RAM]: Ambil dari IndexedDB jika RAM sudah dikosongkan sebelumnya
+                let currentGeneratedCsv = state.generatedCsv;
+                if (isBuilt && !currentGeneratedCsv && (action === 'APPLY_PRORATA' || action === 'RESET')) {
+                    try {
+                        if (typeof RizpecDB !== 'undefined') {
+                            currentGeneratedCsv = await RizpecDB.get(`rizpec_disp_entity_${safeDispId}`);
+                        }
+                    } catch(e) { console.warn("Gagal load CSV dari DB untuk prorata", e); }
                 }
 
                 const workerCode = `
@@ -1469,7 +1481,15 @@ async function updateDisposalFileStats(file, type) {
 
                     const result = e.data.result;
 
-                    state.generatedCsv = result.combinedCsv;
+                    // [FIX CELAH MEMORY LEAK 1]: Kosongkan string mentah raksasa dari State jangka panjang!
+                    // String ini tidak perlu bersarang di RAM karena akan disimpan di IndexedDB.
+                    state.generatedCsv = null; 
+
+                    // [UPDATE]: Ekstrak & Kunci koordinat Origin langsung tanpa menunggu dicentang!
+                    if (typeof window.establishWorldOrigin === 'function') {
+                        window.establishWorldOrigin(result.combinedCsv);
+                    }
+
                     state.summaryObj = result.newSummaryObj;
                     if (result.newOriginalSummaryObj) state.originalSummaryObj = result.newOriginalSummaryObj;
                     state.buildMethod = result.newBuildMethod;
@@ -1477,6 +1497,7 @@ async function updateDisposalFileStats(file, type) {
                     localStorage.setItem(`rizpec_disp_build_type_${safeDispId}`, result.newBuildMethod);
 
                     if (action === 'APPLY_PRORATA') {
+                        // [OPTIMASI MEMORI - POINT 2]: Buang referensi file fisik dari memori
                         state.refFile = null; 
                         state.refFileApplied = true;
                     } else if (action === 'RESET') {
@@ -1485,6 +1506,9 @@ async function updateDisposalFileStats(file, type) {
                         const ddWaste = document.getElementById('disp-col-recon-waste');
                         if (ddWaste) ddWaste.value = '';
                     } else if (action === 'BUILD') {
+                        // [OPTIMASI MEMORI - POINT 2]: Buang referensi file fisik dari memori
+                        // setelah CSV sukses diproses dan disimpan ke DB. Nama file tetap ada untuk UI.
+                        state.mrFile = null;
                         if (state.refFileName) {
                             state.refFile = null;
                             state.refFileApplied = true;
@@ -1570,7 +1594,7 @@ async function updateDisposalFileStats(file, type) {
                     dispId: window.activeDisposalId,
                     mrText,
                     refText,
-                    generatedCsv: state.generatedCsv,
+                    generatedCsv: currentGeneratedCsv, // Menggunakan currentGeneratedCsv yang bisa diload dari DB lokal
                     originalSummaryObj: state.originalSummaryObj,
                     summaryObj: state.summaryObj,
                     cols: state.cols,
@@ -1578,6 +1602,12 @@ async function updateDisposalFileStats(file, type) {
                     savedBuildMethod,
                     refFileName: state.refFileName
                 });
+
+                // [FIX CELAH MEMORY LEAK 2]: Kosongkan memori di Main Thread seketika!
+                // Mencegah file puluhan MB disandera oleh Event Listener Closure
+                mrText = null;
+                refText = null;
+                currentGeneratedCsv = null;
 
             } catch(err) {
                 btnBuildGeometry.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Gagal! Cek Log/Upload Ulang';
@@ -1602,7 +1632,25 @@ window.renderDisposalGeometryPreview = function(csvData, summaryObj, buildMethod
     if (!summaryObj) {
         placeholder?.classList.remove('hidden');
         summaryTable?.classList.add('hidden');
-        if (canvasContainer && !updateSummaryOnly) canvasContainer.innerHTML = '';
+        
+        // [FIX CANVAS OVERFLOW] Sembunyikan container canvas secara eksplisit agar tidak memakan ruang layout 
+        // ketika placeholder sedang ditampilkan. Ini mencegah tinggi parent menjadi melar/bocor (overflow).
+        canvasContainer?.classList.add('hidden'); 
+
+        if (canvasContainer && !updateSummaryOnly) {
+            // [FIX BUG OBSERVER CLOSURE] Putuskan observer lama agar tidak menggambar ulang data disposal sebelumnya secara gaib!
+            if (canvasContainer._resizeObserver) canvasContainer._resizeObserver.disconnect();
+            if (canvasContainer._visibilityObserver) canvasContainer._visibilityObserver.disconnect();
+
+            // [OPTIMASI MEMORI - POINT 1]: Jangan hancurkan canvas, cukup hapus gambarnya
+            const existingCanvas = canvasContainer.querySelector('canvas');
+            if (existingCanvas) {
+                const ctx = existingCanvas.getContext('2d');
+                ctx.clearRect(0, 0, existingCanvas.width, existingCanvas.height);
+            } else {
+                canvasContainer.innerHTML = '';
+            }
+        }
         return;
     }
 
@@ -1630,6 +1678,9 @@ window.renderDisposalGeometryPreview = function(csvData, summaryObj, buildMethod
     if (summaryContent) summaryContent.innerHTML = html;
     placeholder?.classList.add('hidden');
     summaryTable?.classList.remove('hidden');
+    
+    // [FIX CANVAS OVERFLOW] Munculkan kembali kontainer canvas setelah ada data dan placeholder disembunyikan
+    canvasContainer?.classList.remove('hidden');
 
     if (updateSummaryOnly) return;
 
@@ -1737,15 +1788,24 @@ window.renderDisposalGeometryPreview = function(csvData, summaryObj, buildMethod
         }
 
     } else {
-        canvasContainer.innerHTML = '';
+        // [OPTIMASI MEMORI - POINT 1]: Jangan hancurkan canvas, cukup hapus gambarnya
+        const existingCanvas = canvasContainer.querySelector('canvas');
+        if (existingCanvas) {
+            const ctx = existingCanvas.getContext('2d');
+            ctx.clearRect(0, 0, existingCanvas.width, existingCanvas.height);
+        }
         return;
     }
 
-    canvasContainer.innerHTML = '';
-    const canvas = document.createElement('canvas');
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvasContainer.appendChild(canvas);
+    // [OPTIMASI MEMORI - POINT 1]: Reuse canvas DOM untuk mencegah thrashing
+    let canvas = canvasContainer.querySelector('canvas');
+    if (!canvas) {
+        canvasContainer.innerHTML = '';
+        canvas = document.createElement('canvas');
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvasContainer.appendChild(canvas);
+    }
     const ctx = canvas.getContext('2d');
 
     const draw = () => {
@@ -2014,7 +2074,6 @@ window.updateGeometryDisposalListUI = async function() {
             
             div.className = `flex items-center gap-2.5 bg-slate-900/80 border ${isLoaded ? 'border-blue-500/50 shadow-sm' : 'border-slate-700/80'} p-2 rounded-md transition-all hover:bg-slate-800 group`;
             
-            // [PERBAIKAN]: Menghapus event listener spesifik, digantikan oleh atribut 'data-*'
             div.innerHTML = `
                 <label class="relative flex items-center justify-center w-5 h-5 cursor-pointer m-0 shrink-0" title="Check/Uncheck untuk menampilkan Geometri">
                     <input type="checkbox" class="disp-checkbox peer absolute opacity-0 w-full h-full cursor-pointer" data-disp="${disp}" ${isLoaded ? 'checked' : ''}>
@@ -2127,7 +2186,6 @@ window.renderDisposalPaletteUI = function(isEmpty = false) {
         return;
     }
 
-    // [PERBAIKAN]: Menambahkan penanda Class ('disp-color-input-burden') untuk diolah Global Event Delegation
     if (burdenListEl && window.dispBurdenPalette) {
         burdenListEl.innerHTML = '';
         window.dispBurdenPalette.forEach((item, index) => {
@@ -2156,7 +2214,6 @@ window.renderDisposalPaletteUI = function(isEmpty = false) {
             return;
         }
 
-        // [PERBAIKAN]: Menambahkan penanda Class ('disp-color-input-subset', 'disp-btn-up-subset', dll) untuk global delegate
         palette.forEach((item, index) => {
             const div = document.createElement('div');
             div.className = "grid grid-cols-[24px_1fr_16px] gap-2 items-center bg-slate-900/80 border border-slate-700/80 p-2 rounded-md hover:bg-slate-800 transition-colors group";

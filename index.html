@@ -85,15 +85,23 @@
             <button class="nav-tab px-3 py-1.5 lg:px-2.5 lg:py-1 hover:bg-slate-700 rounded cursor-pointer text-slate-400 hover:text-slate-200 transition-colors" data-target="panel-report">Report</button>
         </div>
             
-        <div class="px-2 shrink-0 h-full flex items-center border-l border-slate-700 text-[12px] lg:text-[11px] font-medium">
+        <div class="px-2 shrink-0 h-full flex items-center border-l border-slate-700 text-[12px] lg:text-[11px] font-medium gap-2">
+            
+            <!-- NEW GEOLOCATION BUTTON (Toolbar Kiri Dropdown Layout) -->
+            <div id="geo-toolbar-container" class="geo-wrapper flex items-center h-full hidden">
+                <label id="geo-btn-label" class="px-3 py-1.5 lg:px-2.5 lg:py-1 hover:bg-slate-700 rounded cursor-pointer flex items-center gap-1.5 text-slate-400 hover:text-slate-200 transition-colors m-0 mr-1">
+                    <input type="checkbox" id="geo-location-toggle" class="hidden">
+                    <i class="fa-solid fa-location-crosshairs"></i> 
+                    <span>Geolocation:</span>
+                    <span id="geo-status-badge" class="font-bold text-rose-400">OFF</span>
+                </label>
+            </div>
+
             <div id="layout-dropdown" class="relative inline-block text-left menu-dropdown hidden">
                 <button class="px-3 py-1.5 lg:px-2.5 lg:py-1 hover:bg-slate-700 rounded cursor-pointer flex items-center gap-1.5 menu-btn text-slate-400 hover:text-slate-200 transition-colors">
                     Layout <i class="fa-solid fa-chevron-down text-[10px] lg:text-[8px] text-slate-500 pointer-events-none"></i>
                 </button>
                 <div class="absolute right-0 mt-1 w-48 lg:w-44 bg-slate-800 border border-slate-600 rounded shadow-xl hidden z-50 dropdown-content py-1 font-normal">
-                    <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
-                        <input type="checkbox" id="cb-layout-geolocation" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Geolocation
-                    </label>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
                         <input type="checkbox" id="cb-layout-geo" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Geometry
                     </label>
@@ -869,25 +877,6 @@
                 <!-- FLOATING LAYER PANEL (MODIFIED STRUCTURE) -->
                 <div class="absolute top-4 bottom-4 right-4 z-20 flex flex-col items-end pointer-events-none">
                     <div id="layer-container" class="w-56 lg:w-64 h-full flex flex-col gap-2 transition-all">
-                        
-                        <!-- Panel Geolocation (Top Right, fixed to top outside of middle section) -->
-                        <div id="container-geolocation" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm p-3 lg:p-2 flex flex-col gap-2 shrink-0">
-                            <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 mb-1">
-                                <i class="fa-solid fa-map-location-dot text-rose-400"></i> Geolocation
-                            </h3>
-                            <div class="flex items-center justify-between p-2 lg:p-1.5 bg-slate-900/50 rounded border border-slate-700">
-                                <div class="flex flex-col">
-                                    <label class="text-[11px] lg:text-[10px] text-slate-300 font-bold uppercase tracking-wide flex items-center gap-2 lg:gap-1.5 cursor-pointer" for="geo-location-toggle">
-                                        <i class="fa-solid fa-location-crosshairs text-slate-400"></i> <span id="geo-label-text">Enable Location</span>
-                                    </label>
-                                </div>
-                                <!-- Toggle Switch (Unchecked by default) -->
-                                <div class="relative inline-block w-10 lg:w-9 align-middle select-none transition duration-200 ease-in">
-                                    <input type="checkbox" name="geo-toggle" id="geo-location-toggle" class="toggle-checkbox absolute block w-5 h-5 lg:w-4 lg:h-4 rounded-full bg-white border-[3px] appearance-none cursor-pointer z-10 top-0 bottom-0 m-auto transition-all duration-300" />
-                                    <label for="geo-location-toggle" class="toggle-label block overflow-hidden h-5 lg:h-4 rounded-full bg-slate-600 cursor-pointer transition-all duration-300"></label>
-                                </div>
-                            </div>
-                        </div>
 
                         <!-- MIDDLE SECTION: FLEX CONTAINER UNTUK MEMENUHI TINGGI -->
                         <div class="flex-1 flex flex-col gap-2 min-h-0 w-full">
@@ -1018,15 +1007,6 @@
                 </div>
             </div> <!-- END VIEW: 3D CANVAS -->
 
-            <!-- VIEW: SCHEDULING (Tab Scheduling) -->
-            <div id="view-scheduling" class="absolute inset-0 hidden flex-col items-center justify-center bg-slate-900 z-30">
-                <div class="w-24 h-24 lg:w-20 lg:h-20 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-5 lg:mb-4 border border-slate-700 shadow-lg">
-                    <i class="fa-solid fa-calendar-days text-slate-500 text-4xl lg:text-3xl"></i>
-                </div>
-                <h2 class="text-3xl lg:text-2xl font-bold text-white mb-3 lg:mb-2 tracking-tight">Scheduling Canvas</h2>
-                <p class="text-slate-500 text-base lg:text-sm">Tampilan gantt chart & penjadwalan akan berada di sini.</p>
-            </div>
-
             <!-- VIEW: REPORT (Tab Report) -->
             <div id="view-report" class="absolute inset-0 hidden flex-col items-center justify-center bg-slate-900 z-30">
                 <div class="w-24 h-24 lg:w-20 lg:h-20 mx-auto bg-slate-800 rounded-full flex items-center justify-center mb-5 lg:mb-4 border border-slate-700 shadow-lg">
@@ -1077,8 +1057,141 @@
                 </div>
             </div>
 
+            <!-- Geolocation Sync Modal -->
+            <div id="geo-sync-modal" class="fixed inset-0 bg-black/80 z-[250] hidden items-center justify-center backdrop-blur-sm p-4">
+                <div class="bg-slate-800 border border-slate-600 rounded-xl w-full max-w-[340px] shadow-2xl flex flex-col overflow-hidden relative">
+                    <div class="h-10 border-b border-slate-700 bg-slate-800 flex items-center justify-between px-3 shrink-0 shadow">
+                        <h2 class="text-white font-bold text-[11px]"><i class="fa-solid fa-location-crosshairs mr-2 text-blue-400"></i> Sinkronisasi Geolokasi</h2>
+                        <button id="close-geo-sync" class="text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark text-sm"></i></button>
+                    </div>
+                    
+                    <div class="p-3 flex flex-col gap-3">
+                        <!-- Zone Selection & Start Button -->
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-[10px] font-semibold text-slate-300 whitespace-nowrap">Project UTM Zone</span>
+                            <div class="flex gap-1.5 items-center flex-1 justify-end">
+                                <input type="number" id="geo-utm-zone-num" min="1" max="60" value="49" class="bg-slate-900 border border-slate-600 rounded px-1.5 py-1 text-[10px] text-white outline-none w-10 text-center focus:border-blue-500 transition-colors" title="UTM Zone (1-60)">
+                                <select id="geo-utm-hemisphere" class="bg-slate-900 border border-slate-600 rounded px-1 py-1 text-[10px] text-white outline-none w-16 cursor-pointer focus:border-blue-500 transition-colors" title="Hemisphere">
+                                    <option value="N">North</option>
+                                    <option value="S" selected>South</option>
+                                </select>
+                                <button id="btn-start-sync" class="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded text-[10px] font-bold shadow transition-colors flex items-center gap-1">
+                                    <i class="fa-solid fa-satellite-dish"></i> Sync
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="border-t border-slate-700 w-full"></div>
+                        
+                        <!-- Details Table -->
+                        <div class="flex flex-col gap-2.5">
+                            
+                            <!-- LOKASI PROJECT -->
+                            <div class="flex flex-col border border-slate-700 rounded overflow-hidden">
+                                <div class="bg-slate-700/50 px-2 py-1.5 border-b border-slate-700">
+                                    <span class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Lokasi Project (Centroid)</span>
+                                </div>
+                                <div class="bg-slate-900/50 flex flex-col divide-y divide-slate-700/50 text-[10px]">
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/3">Zone</span>
+                                        <span id="sync-project-zone" class="text-emerald-400 font-medium text-right">-</span>
+                                    </div>
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/3">Easting</span>
+                                        <span id="sync-project-e" class="text-emerald-400 font-medium text-right">-</span>
+                                    </div>
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/3">Northing</span>
+                                        <span id="sync-project-n" class="text-emerald-400 font-medium text-right">-</span>
+                                    </div>
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/3">Lat/Lon</span>
+                                        <span id="sync-project-latlon" class="text-emerald-400 font-medium text-right">-</span>
+                                    </div>
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/4 shrink-0">Location</span>
+                                        <span id="sync-project-locname" class="text-emerald-400 font-medium text-right truncate pl-2" title="-">-</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- LOKASI ANDA -->
+                            <div class="flex flex-col border border-slate-700 rounded overflow-hidden">
+                                <div class="bg-slate-700/50 px-2 py-1.5 border-b border-slate-700">
+                                    <span class="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Lokasi Anda (GPS)</span>
+                                </div>
+                                <div class="bg-slate-900/50 flex flex-col divide-y divide-slate-700/50 text-[10px]">
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/3">Zone</span>
+                                        <span id="sync-user-zone" class="text-blue-400 font-medium text-right">-</span>
+                                    </div>
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/3">Easting</span>
+                                        <span id="sync-user-e" class="text-blue-400 font-medium text-right">-</span>
+                                    </div>
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/3">Northing</span>
+                                        <span id="sync-user-n" class="text-blue-400 font-medium text-right">-</span>
+                                    </div>
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/3">Lat/Lon</span>
+                                        <span id="sync-user-latlon" class="text-blue-400 font-medium text-right">-</span>
+                                    </div>
+                                    <div class="flex justify-between items-center px-2 py-1 hover:bg-slate-800/30 transition-colors">
+                                        <span class="text-slate-500 w-1/4 shrink-0">Location</span>
+                                        <span id="sync-user-locname" class="text-blue-400 font-medium text-right truncate pl-2" title="-">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-center justify-between bg-slate-900/50 px-2 py-1.5 rounded border border-slate-700 mt-0.5">
+                                <span class="text-[10px] text-slate-400">Distance</span>
+                                <span id="sync-distance" class="text-[12px] text-amber-400">-</span>
+                            </div>
+                            
+                            <div id="sync-status-container" class="flex justify-center mt-0.5 hidden">
+                                <button id="geo-status-success" class="hidden w-full text-center bg-emerald-500/20 text-emerald-400 px-2 py-1.5 rounded text-[10px] font-bold border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors cursor-pointer"><i class="fa-solid fa-check mr-1"></i> Geolocation Success</button>
+                                <button id="geo-status-fail" class="hidden w-full text-center bg-rose-500/20 text-rose-400 px-2 py-1.5 rounded text-[10px] font-bold border border-rose-500/30 hover:bg-rose-500/30 transition-colors cursor-pointer"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Geolocation Too Far</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div> <!-- End Main Canvas Area -->
     </div>
+
+    <!-- Script UI Sinkronisasi Geolocation Button -->
+    <script>
+        const geoToggleHTML = document.getElementById('geo-location-toggle');
+        const geoLabelHTML = document.getElementById('geo-btn-label');
+        const geoBadgeHTML = document.getElementById('geo-status-badge');
+        
+        function syncGeoUI() {
+            if (!geoToggleHTML || !geoLabelHTML || !geoBadgeHTML) return;
+            
+            // Tambahkan style nonaktif jika di-disabled (misal oleh updateGeolocationState() dari layout.js)
+            if (geoToggleHTML.disabled || geoLabelHTML.classList.contains('pointer-events-none')) {
+                geoLabelHTML.classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                geoLabelHTML.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+
+            if(geoToggleHTML.checked) {
+                geoBadgeHTML.className = "font-bold text-emerald-400";
+                geoBadgeHTML.innerText = "ON";
+            } else {
+                geoBadgeHTML.className = "font-bold text-rose-400";
+                geoBadgeHTML.innerText = "OFF";
+            }
+        }
+
+        if(geoToggleHTML) {
+            geoToggleHTML.addEventListener('change', syncGeoUI);
+            // Polling interval kecil untuk menangkap perubahan logic disabled/enabled dari script terpisah (layout.js)
+            setInterval(syncGeoUI, 300); 
+        }
+    </script>
 
     <!-- External Script Files -->
     <script src="assets/js/utils.js"></script>
@@ -1087,6 +1200,7 @@
     <script src="assets/js/geometry.js"></script>
     <script src="assets/js/file.js"></script>
     <script src="assets/js/file-pit.js"></script>
+    <script src="assets/js/file-pit-pro.js"></script>
     <script src="assets/js/file-disposal.js"></script>
     <script src="assets/js/file-dxf.js"></script>
     <script src="assets/js/project.js"></script>

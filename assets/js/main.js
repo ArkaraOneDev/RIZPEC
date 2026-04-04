@@ -84,9 +84,37 @@ window.resume3D = function() {
     animate();
 };
 
+// Fungsi ini memaksa rendering 1 frame (berguna saat 3D sedang pause tapi ada action Real-time)
+window.forceSingleRender = function() {
+    if (window.is3DRenderingActive) return; // Abaikan jika loop sudah berjalan normal
+    if (!renderer || !scene || !camera) return;
+
+    controls.update();
+    renderer.setViewport(0, 0, cachedContainerW, cachedContainerH);
+    renderer.clear();
+    renderer.render(scene, camera);
+
+    if (compassScene && compassCamera) {
+        renderer.clearDepth(); 
+        const compassSize = 100;
+        renderer.setViewport(16, cachedContainerH - compassSize - 16, compassSize, compassSize);
+        compassCamera.position.copy(camera.position).sub(controls.target).normalize().multiplyScalar(5);
+        compassCamera.quaternion.copy(camera.quaternion);
+        renderer.render(compassScene, compassCamera);
+    }
+
+    if (padScene && padCamera && padRenderer && cachedTrackpadW > 0) {
+        _v1.copy(camera.position).sub(controls.target).normalize().multiplyScalar(2.5);
+        padCamera.position.copy(_v1);
+        padCamera.quaternion.copy(camera.quaternion);
+        padRenderer.render(padScene, padCamera);
+    }
+
+    if(typeof updateLabels === 'function') updateLabels();
+};
+
 const AUTO_CAD_COLOR_INDEX = [
     0xffffff, 0xff0000, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0xff00ff, 0xffffff, 0x414141, 0x808080, 
-    // ... (warna lainnya disingkat agar fokus pada struktur, gunakan array full Anda di sini)
     0x333333, 0x505050, 0x696969, 0x828282, 0x9c9c9c, 0xb5b5b5
 ];
 
@@ -145,7 +173,6 @@ function init3D() {
     controls.panSpeed = 1.5;
     controls.enableDamping = false; 
 
-    // Batas minimum dihapus agar kamera terasa lebih mulus dan bisa "nembus" batas objek
     controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: null, RIGHT: null };
 
     renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -159,14 +186,11 @@ function init3D() {
     // ==========================================
     renderer.domElement.addEventListener('wheel', (e) => {
         e.preventDefault();
-        e.stopImmediatePropagation(); // Blokir perlambatan matematis bawaan OrbitControls
+        e.stopImmediatePropagation(); 
 
         if (!window.is3DRenderingActive) return;
 
         let dist = camera.position.distanceTo(controls.target);
-
-        // Kecepatan Dinamis: 8% dari jarak saat ini, 
-        // dengan KECEPATAN MINIMUM 10 meter/scroll agar tidak pernah lambat/nyangkut!
         let step = dist * 0.08;
         if (step < 10) step = 10; 
 
@@ -177,18 +201,14 @@ function init3D() {
 
         if (isZoomingIn) {
             if (dist - moveAmount <= 1.0) {
-                // Kamera akan menabrak target pivot. 
-                // Solusinya: Dorong kameranya maju DAN dorong targetnya maju bersamaan! (Efek Nembus)
                 _v1.multiplyScalar(moveAmount);
                 camera.position.add(_v1);
                 controls.target.add(_v1);
             } else {
-                // Zoom in normal
                 _v1.multiplyScalar(moveAmount);
                 camera.position.add(_v1);
             }
         } else {
-            // Zoom out normal
             _v1.multiplyScalar(moveAmount);
             camera.position.add(_v1);
         }
@@ -338,13 +358,13 @@ function init3D() {
         camera.up.set(0, 1, 0);
         camera.lookAt(center);
         controls.update();
+        window.forceSingleRender(); // Pastikan render langsung
     });
 
     // ==========================================
     // RESIZE EVENT OPTIMIZATION
     // ==========================================
     window.addEventListener('resize', () => {
-        // [OPTIMASI]: Perbarui Cache Ukuran, hindari pembacaan di dalam loop animate()
         cachedContainerW = container.clientWidth;
         cachedContainerH = container.clientHeight;
 
@@ -366,6 +386,10 @@ function init3D() {
             padCamera.updateProjectionMatrix();
             padRenderer.setSize(cachedTrackpadW, cachedTrackpadH);
         }
+
+        // [TAMBAHAN BARU]: Paksa render ulang 1 frame saat layar di-resize (seperti saat buka console)
+        // Mencegah WebGL menampilkan layar hitam kosong saat sedang di-pause
+        window.forceSingleRender();
     });
     
     container.addEventListener('contextmenu', (e) => { e.preventDefault(); });
@@ -389,7 +413,6 @@ function init3D() {
             _v2D.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(_v2D, camera);
 
-            // [OPTIMASI]: Kosongkan array daur ulang tanpa membuat array baru
             _raycastTargets.length = 0;
             if (pitReserveGroup && pitReserveGroup.visible) _raycastTargets.push(pitReserveGroup);
             appLayers.forEach(l => { if (l.visible && l.threeObject) _raycastTargets.push(l.threeObject); });
@@ -523,31 +546,46 @@ function init3D() {
     }
 
     // ==========================================
-    // KEYBOARD EVENT OPTIMIZATION
+    // KEYBOARD EVENT OPTIMIZATION (TERMASUK FORCE RENDER)
     // ==========================================
     window.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); window.undoLastRecord(); return; }
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); window.redoLastUndo(); return; }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { 
+            e.preventDefault(); 
+            window.undoLastRecord(); 
+            window.forceSingleRender(); 
+            return; 
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { 
+            e.preventDefault(); 
+            window.redoLastUndo(); 
+            window.forceSingleRender(); 
+            return; 
+        }
         if (e.key === 'Escape' || e.key === 'Esc' || e.key.toLowerCase() === 'x') { 
             (typeof isDrawingPolygon !== 'undefined' && isDrawingPolygon) ? window.cancelPolygon() : window.resetSequenceAndView(); 
+            window.forceSingleRender();
         }
         if (e.key.toLowerCase() === 'c' && typeof window.executeCenterPivot === 'function' && window.currentMousePos) {
             window.executeCenterPivot(window.currentMousePos);
+            window.forceSingleRender();
         }
-        if (e.key === 'Enter' && typeof isDrawingPolygon !== 'undefined' && isDrawingPolygon) window.finishPolygonSelection();
+        if (e.key === 'Enter' && typeof isDrawingPolygon !== 'undefined' && isDrawingPolygon) {
+            window.finishPolygonSelection();
+            window.forceSingleRender();
+        }
         
         if (e.key === 'Shift') {
             const mode = window.activeInteractionMode || 'select_bench';
-            if (mode === 'select_bench' && window.is3DRenderingActive) {
+            if (mode === 'select_bench') {
                 raycaster.setFromCamera(mouse, camera);
-                // [OPTIMASI]: Gunakan array daur ulang untuk mencegah pembuatan objek array memori baru
                 _checkArray.length = 0;
                 for (let key in meshes) {
                     if (meshes[key].visible && pitReserveGroup.visible) _checkArray.push(meshes[key]);
                 }
                 window.handleHover(raycaster.intersectObjects(_checkArray, false), true);
+                window.forceSingleRender();
             }
         }
     });
@@ -555,15 +593,43 @@ function init3D() {
     window.addEventListener('keyup', (e) => {
         if (e.key === 'Shift') {
             const mode = window.activeInteractionMode || 'select_bench';
-            if (mode === 'select_bench' && window.is3DRenderingActive) {
+            if (mode === 'select_bench') {
                 raycaster.setFromCamera(mouse, camera);
-                // [OPTIMASI]: Gunakan array daur ulang
                 _checkArray.length = 0;
                 for (let key in meshes) {
                     if (meshes[key].visible && pitReserveGroup.visible) _checkArray.push(meshes[key]);
                 }
                 window.handleHover(raycaster.intersectObjects(_checkArray, false), false);
+                window.forceSingleRender();
             }
+        }
+    });
+
+    // Menjamin click pada UI / Checkbox yang berada di area panel yang di "pause" 
+    // juga memicu paksa render agar tampilannya langsung termutakhir.
+    window.addEventListener('click', () => {
+        if (!window.is3DRenderingActive) {
+            setTimeout(() => { window.forceSingleRender(); }, 10);
+        }
+    });
+
+    // ==========================================
+    // LOGIKA PAUSE / RESUME BERDASARKAN HOVER PANEL
+    // ==========================================
+    const panelsToPause = [
+        'sequence-panel',         // Panel rekaman Pit
+        'disp-sequence-panel',    // Panel rekaman Disposal
+        'container-geometry',     // Panel floating Geometry di kanan
+        'container-layerlist',    // Panel floating Drawings/Layerlist di kanan
+        'container-control',      // Panel floating Control (Tools) di kanan
+        'panel-geometry'          // Fallback sidebar Geometry
+    ];
+
+    panelsToPause.forEach(id => {
+        const panel = document.getElementById(id);
+        if (panel) {
+            panel.addEventListener('mouseenter', window.pause3D);
+            panel.addEventListener('mouseleave', window.resume3D);
         }
     });
 
@@ -587,8 +653,6 @@ function animate() {
     window.animationFrameId = requestAnimationFrame(animate);
     controls.update();
 
-    // [OPTIMASI]: Menggunakan cachedContainerW dan cachedContainerH
-    // TIDAK BOLEH membaca DOM properti (container.clientWidth) di dalam frame loop!
     renderer.setViewport(0, 0, cachedContainerW, cachedContainerH);
     renderer.clear();
     renderer.render(scene, camera);

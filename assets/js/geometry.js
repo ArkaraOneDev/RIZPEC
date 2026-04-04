@@ -1,7 +1,7 @@
 // ==========================================
-// GEOMETRY BUILDER & MANAGER
-// DENGAN WEB WORKER, DYNAMIC TIME-CHUNK & MATERIAL CACHING
-// OPTIMIZED FOR MOBILE/TABLET (ULTRA OOM PREVENTION)
+// GEOMETRY BUILDER & MANAGER (ULTIMATE EDITION)
+// UI/UX DARI NEW_3 + MEMORY MANAGEMENT DARI NEW_1
+// OPTIMIZED FOR MOBILE/TABLET (ULTRA OOM PREVENTION & DOM CULLING)
 // ==========================================
 
 // Track state Pit & Disposal mana saja yang saat ini sedang diload dan dirender
@@ -11,18 +11,131 @@ window.renderedPits = window.renderedPits || new Set();
 window.loadedDisposals = window.loadedDisposals || new Set();
 window.renderedDisposals = window.renderedDisposals || new Set();
 
-// [UPDATE]: Inisialisasi World Origin Persistent (Bisa bertahan walau di-refresh)
+// Inisialisasi World Origin Persistent (Bisa bertahan walau di-refresh)
 const savedOrigin = localStorage.getItem('rizpec_world_origin');
 window.worldOrigin = savedOrigin ? JSON.parse(savedOrigin) : { x: 0, y: 0, z: 0, isSet: false };
 
 // Lock antrean untuk mencegah Race Condition saat render banyak entitas sekaligus
 window.isRenderingPits = window.isRenderingPits || false; 
 
-// [UPDATE]: Fungsi untuk mengunci Origin dari CSV TANPA perlu render/centang
-window.establishWorldOrigin = function(csvText) {
-    if (window.worldOrigin && window.worldOrigin.isSet) return; // Jika sudah ada, jangan ditimpa
+// =========================================================================
+// FITUR: 3D TO 2D SCREEN-SPACE LABELING MANAGER (OPTIMIZED + DOM CULLING)
+// =========================================================================
+window.activeLabels = window.activeLabels || [];
+window.isLabelHooked = window.isLabelHooked || false;
 
-    const lines = csvText.split(/\r?\n/);
+// Konfigurasi jarak (Distance) untuk Fade dan Hide Label
+const LABEL_CONFIG = {
+    FADE_START: 1500,  // Jarak kamera dimana label mulai memudar
+    FADE_END: 3000,    // Jarak kamera dimana label hilang 100%
+    MAX_VISIBLE: 200   // [OPTIMASI DOM]: Batas maksimal DOM label yg dirender per frame agar tidak lag
+};
+
+window.clearLabels = function(entityId) {
+    window.activeLabels = window.activeLabels.filter(lbl => {
+        // [FIX LEAK]: Pastikan hanya menghapus label milik entity yang diminta dari DOM & Array
+        if (lbl.entityId === entityId) { 
+            if (lbl.element && lbl.element.parentNode) {
+                lbl.element.parentNode.removeChild(lbl.element);
+            }
+            return false; 
+        }
+        return true; 
+    });
+};
+
+window.updateLabels = function() {
+    const labelsContainer = document.getElementById('labels-container');
+    if (!labelsContainer) return;
+
+    // [FIX STACKING CONTEXT]: Cegah z-index bocor menimpa Compass (z-10)
+    labelsContainer.style.zIndex = '1';
+
+    if (!window.isLabelLayerVisible) {
+        labelsContainer.style.display = 'none';
+        return;
+    } else {
+        labelsContainer.style.display = 'block';
+    }
+
+    if (typeof camera === 'undefined' || typeof renderer === 'undefined') return;
+
+    const widthHalf = renderer.domElement.clientWidth / 2;
+    const heightHalf = renderer.domElement.clientHeight / 2;
+    const camPos = camera.position;
+    
+    let visibleCount = 0;
+
+    window.activeLabels.forEach(lbl => {
+        lbl.vec.copy(lbl.position);
+        const distance = camPos.distanceTo(lbl.position);
+
+        // [OPTIMASI DOM CULLING]: Hilangkan dari kalkulasi UI jika melebihi batas render / jumlah maks
+        if (distance > LABEL_CONFIG.FADE_END || visibleCount > LABEL_CONFIG.MAX_VISIBLE) {
+            if (lbl.element.style.display !== 'none') lbl.element.style.display = 'none';
+            return;
+        }
+
+        lbl.vec.project(camera);
+
+        // Cek apakah koordinat berada di belakang kamera
+        if (lbl.vec.z > 1) {
+            if (lbl.element.style.display !== 'none') lbl.element.style.display = 'none';
+        } else {
+            lbl.element.style.display = 'flex';
+            visibleCount++;
+            
+            // [BEST PRACTICE UI/UX]: Dynamic Z-Index (Yang dekat menimpa yang jauh)
+            lbl.element.style.zIndex = Math.round(10000 - distance);
+
+            // Kalkulasi Opacity (Fading)
+            let currentOpacity = window.labelOpacity !== undefined ? window.labelOpacity : 1;
+            if (distance > LABEL_CONFIG.FADE_START) {
+                const fadeRange = LABEL_CONFIG.FADE_END - LABEL_CONFIG.FADE_START;
+                const fadeProgress = (distance - LABEL_CONFIG.FADE_START) / fadeRange;
+                currentOpacity = currentOpacity * Math.max(0, (1 - fadeProgress));
+            }
+            
+            if (currentOpacity < 0.05) {
+                lbl.element.style.display = 'none';
+                return;
+            }
+
+            lbl.element.style.opacity = currentOpacity;
+            
+            // Posisi Layar + Hardware Acceleration (translate3d)
+            const x = (lbl.vec.x * widthHalf) + widthHalf;
+            const y = -(lbl.vec.y * heightHalf) + heightHalf;
+            
+            let scale = 0.75; 
+            if (distance < LABEL_CONFIG.FADE_START / 2) {
+                scale = 0.75 + (0.15 * (1 - (distance / (LABEL_CONFIG.FADE_START / 2))));
+            }
+            
+            lbl.element.style.transform = `translate3d(calc(${x}px - 50%), calc(${y}px - 50%), 0) scale(${scale})`;
+        }
+    });
+};
+
+// [OPTIMASI RAM EKSTREM]: Fungsi kunci Origin TANPA `split(/\r?\n/)`
+window.establishWorldOrigin = function(csvText) {
+    if (window.worldOrigin && window.worldOrigin.isSet) return; 
+    if (!csvText) return;
+
+    let lines = [];
+    let lastIdx = 0;
+    let count = 0;
+    const limit = 500;
+    
+    while (count < limit && lastIdx < csvText.length) {
+        let nextIdx = csvText.indexOf('\n', lastIdx);
+        if (nextIdx === -1) nextIdx = csvText.length;
+        let line = csvText.substring(lastIdx, nextIdx).trim();
+        if (line) lines.push(line);
+        lastIdx = nextIdx + 1;
+        count++;
+    }
+
     if (lines.length < 2) return;
 
     const headers = lines[0].split(',').map(h => h.replace(/['"]/g, '').trim().toUpperCase());
@@ -34,10 +147,7 @@ window.establishWorldOrigin = function(csvText) {
 
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
 
-    // Scan 500 baris pertama sudah cukup untuk mendapatkan center relatif yang akurat
-    const limit = Math.min(lines.length, 500);
-    for (let i = 1; i < limit; i++) {
-        if (!lines[i].trim()) continue;
+    for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',');
         const x = parseFloat(cols[idxE1]);
         const y = parseFloat(cols[idxT1]);
@@ -51,18 +161,12 @@ window.establishWorldOrigin = function(csvText) {
     }
 
     if (minX !== Infinity) {
-        window.worldOrigin = {
-            x: (minX + maxX) / 2,
-            y: (minY + maxY) / 2,
-            z: (minZ + maxZ) / 2,
-            isSet: true
-        };
+        window.worldOrigin = { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2, isSet: true };
         localStorage.setItem('rizpec_world_origin', JSON.stringify(window.worldOrigin));
-        console.log("World Origin Dikunci dari Background Build:", window.worldOrigin);
     }
 };
 
-// 1. Fungsi Garbage Collection Utama (Menghapus Geometri Spesifik dari GPU Memory)
+// 1. Fungsi Garbage Collection Utama GPU & RAM
 window.unloadGeometry = function(entityId, type) {
     if (typeof meshes !== 'undefined' && typeof pitReserveGroup !== 'undefined') {
         const keysToDelete = [];
@@ -77,27 +181,21 @@ window.unloadGeometry = function(entityId, type) {
                     const mesh = meshes[key];
                     pitReserveGroup.remove(mesh);
                     
-                    // Murni buang dari Memory Kartu Grafis (GPU)
                     if(mesh.geometry) mesh.geometry.dispose();
                     if(mesh.material) {
-                        if (Array.isArray(mesh.material)) {
-                            mesh.material.forEach(m => m.dispose());
-                        } else {
-                            mesh.material.dispose();
-                        }
+                        if (Array.isArray(mesh.material)) mesh.material.forEach(m => m.dispose());
+                        else mesh.material.dispose();
                     }
                     mesh.children.forEach(child => { 
                         if(child.geometry) child.geometry.dispose(); 
                         if(child.material) {
-                            // [FIX MEMORY LEAK]: Tambahkan validasi Array pada anak material (Garis/Edges)
-                            if (Array.isArray(child.material)) {
-                                child.material.forEach(m => m.dispose());
-                            } else {
-                                child.material.dispose();
-                            }
+                            if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                            else child.material.dispose();
                         }
+                        child.userData = {}; 
                     });
                     
+                    mesh.userData = {}; 
                     keysToDelete.push(key);
                 }
             }
@@ -105,32 +203,32 @@ window.unloadGeometry = function(entityId, type) {
         
         keysToDelete.forEach(k => delete meshes[k]);
 
-        // --- [UPDATE]: TRIGGER AUTO-RELOAD DXF CLIPPING ---
-        if (typeof window.refreshAllDxfClipping === 'function') {
-            window.refreshAllDxfClipping();
+        window.clearLabels(entityId);
+
+        // Hapus dari state jika di-unload murni (Bukan Re-build)
+        if (type === 'pit' && !window.loadedPits.has(entityId)) {
+            window.renderedPits.delete(entityId);
+        } else if (type === 'disp' && !window.loadedDisposals.has(entityId)) {
+            window.renderedDisposals.delete(entityId);
         }
+
+        if (typeof window.refreshAllDxfClipping === 'function') window.refreshAllDxfClipping();
     }
     
     window.recalculateGlobalSums();
     if (typeof window.resetSequenceAndView === 'function') window.resetSequenceAndView();
-    
     if (typeof window.updateLayerUI === 'function') window.updateLayerUI();
     
     if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
         requestAnimationFrame(() => renderer.render(scene, camera));
     }
 
-    // =========================================================================
-    // GEOLOCATION VALIDATION: MATIKAN TRACKING JIKA SEMUA 3D MODEL KOSONG
-    // =========================================================================
+    // [OPTIMASI RAM & BATERAI]: Auto-Kill Geolocation jika layar 3D sudah kosong
     if (typeof window.AppGeolocation !== 'undefined' && window.AppGeolocation.isTracking) {
         const geoCheck = window.AppGeolocation.checkActiveBounds();
-        
         if (!geoCheck.hasData) {
-            console.warn("Semua data 3D telah dihapus. Mematikan fitur Geolocation otomatis.");
-            
+            console.warn("Semua data 3D dihapus. Mematikan fitur Geolocation otomatis.");
             window.AppGeolocation.toggleTracking(); 
-            
             const btnTrack = document.getElementById('btn-start-tracking');
             if (btnTrack) {
                 btnTrack.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Start Tracking';
@@ -144,7 +242,6 @@ window.unloadGeometry = function(entityId, type) {
 window.unloadPitGeometry = function(id) { window.unloadGeometry(id, 'pit'); };
 window.unloadDisposalGeometry = function(id) { window.unloadGeometry(id, 'disp'); };
 
-// 2. Menghitung Ulang Summary UI
 window.recalculateGlobalSums = function() {
     let totalWaste = 0, totalResource = 0, totalDisp = 0;
     let uniqueBlocks = new Set();
@@ -165,8 +262,6 @@ window.recalculateGlobalSums = function() {
     const elSumBlocks = document.getElementById('sum-blocks');
     if (elSumBlocks) elSumBlocks.textContent = uniqueBlocks.size.toLocaleString();
     
-    // PEMISAHAN LOGIC PIT & DISPOSAL PADA SIDEBAR UI
-    // Rekap PIT
     const elSumWaste = document.getElementById('sequence-waste-total') || document.getElementById('sequence-ob-total');
     if (elSumWaste) elSumWaste.textContent = Number(totalWaste.toFixed(2)).toLocaleString();
     
@@ -176,12 +271,10 @@ window.recalculateGlobalSums = function() {
     const elSumSr = document.getElementById('sequence-sr-total');
     if (elSumSr) elSumSr.textContent = totalResource > 0 ? (totalWaste / totalResource).toFixed(2) : "0.00";
 
-    // Rekap DISPOSAL
     const elSumDispWaste = document.getElementById('disp-sequence-waste-total');
     if (elSumDispWaste) elSumDispWaste.textContent = Number(totalDisp.toFixed(2)).toLocaleString();
 };
 
-// 3. Poller untuk Mengeksekusi Mesh Loading (Menangani Pit & Disposal)
 window.renderPendingPits = async function() {
     if (window.isRenderingPits) return; 
     window.isRenderingPits = true;
@@ -201,7 +294,7 @@ window.renderPendingPits = async function() {
                 window.renderedPits.add(pit); 
                 try {
                     await window.buildGeometryMesh(pit, 'pit');
-                    // [FIX] Beri Napas V8 Engine dan GC selama 500ms agar memori dicuci sebelum memuat Pit berikutnya
+                    // [OPTIMASI MEMORY]: Beri Napas V8 Engine (GC) 500ms
                     await new Promise(resolve => setTimeout(resolve, 500));
                 } catch(err) {
                     window.renderedPits.delete(pit); 
@@ -213,7 +306,7 @@ window.renderPendingPits = async function() {
                 window.renderedDisposals.add(disp); 
                 try {
                     await window.buildGeometryMesh(disp, 'disp');
-                    // [FIX] Beri Napas V8 Engine dan GC selama 500ms agar memori dicuci sebelum memuat Disposal berikutnya
+                    // [OPTIMASI MEMORY]: Beri Napas V8 Engine (GC) 500ms
                     await new Promise(resolve => setTimeout(resolve, 500));
                 } catch(err) {
                     window.renderedDisposals.delete(disp); 
@@ -228,37 +321,37 @@ window.renderPendingPits = async function() {
     } finally {
         window.isRenderingPits = false;
         if (typeof hideFullscreenLoading === 'function') hideFullscreenLoading();
+        
+        // Membersihkan state tombol (Dari optimasi File 1)
         const tabBtn = document.querySelector('.nav-tab[data-target="panel-geometry"]');
         if (tabBtn) tabBtn.classList.remove('bg-emerald-600/30', 'text-emerald-300', 'animate-pulse');
     }
 };
 
-document.addEventListener('click', (e) => {
+// [OPTIMASI RAM]: Fix Event Stacking Leak
+window.handleGeometryTabClick = function(e) {
     const tab = e.target.closest('.nav-tab');
     if (tab && tab.dataset.target === 'panel-geometry') {
         setTimeout(() => {
             if (typeof window.renderPendingPits === 'function') window.renderPendingPits();
         }, 50);
     }
-});
+};
+document.removeEventListener('click', window.handleGeometryTabClick); 
+document.addEventListener('click', window.handleGeometryTabClick);    
 
-// 4. Mengekstrak dan membangun Mesh menggunakan WEB WORKER (Dinamis: Pit / Disposal)
+// 4. Mengekstrak dan membangun Mesh menggunakan WEB WORKER
 window.buildGeometryMesh = function(entityId, type = 'pit') {
     return new Promise(async (resolve, reject) => {
         try {
-            // Fallback (jika karena suatu alasan worldOrigin isSet masih false)
             if (!window.worldOrigin.isSet && typeof meshes !== 'undefined') {
                 const existingKeys = Object.keys(meshes);
                 for (let i = 0; i < existingKeys.length; i++) {
                     const m = meshes[existingKeys[i]];
                     if (m && m.userData && m.userData.centerOffset) {
                         window.worldOrigin = { 
-                            x: m.userData.centerOffset.x, 
-                            y: m.userData.centerOffset.y, 
-                            z: m.userData.centerOffset.z, 
-                            isSet: true 
-                        };
-                        break;
+                            x: m.userData.centerOffset.x, y: m.userData.centerOffset.y, z: m.userData.centerOffset.z, isSet: true 
+                        }; break;
                     }
                 }
             }
@@ -266,9 +359,7 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
             const dbPrefix = type === 'pit' ? 'rizpec_pit_entity_' : 'rizpec_disp_entity_';
             const key = `${dbPrefix}${entityId.replace(/\s+/g, '_')}`;
             
-            // [FIX MEMORY LEAK]: Ubah dari const menjadi let agar bisa di-null-kan secepatnya di main thread
             let csvDataDB = await RizpecDB.get(key); 
-            
             if (!csvDataDB) throw new Error(`Data CSV (${type}) tidak ditemukan di database cache.`);
 
             if (typeof isProcessing !== 'undefined') isProcessing = true;
@@ -280,27 +371,23 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                 self.onmessage = function(e) {
                     try {
                         let { csvData, entityId, type, stupaMode, extrusionHeight, globalCenter } = e.data;
-                        
                         let firstLineEnd = csvData.indexOf('\\n');
                         if (firstLineEnd === -1) firstLineEnd = csvData.length;
                         const headersLine = csvData.substring(0, firstLineEnd).trim();
-                        
-                        // Hapus quotes (") jika ada dari format CSV
                         const headers = headersLine.split(',').map(h => h.replace(/['"]/g, '').trim().toUpperCase());
 
-                        // Pemetaan Kolom Murni Tanpa Alias
                         const idxE1 = headers.lastIndexOf('EASTING_1'); const idxN1 = headers.lastIndexOf('NORTHING_1'); const idxT1 = headers.lastIndexOf('TOPELEVATION_1'); const idxB1 = headers.lastIndexOf('BOTELEVATION_1');
                         const idxE2 = headers.lastIndexOf('EASTING_2'); const idxN2 = headers.lastIndexOf('NORTHING_2'); const idxT2 = headers.lastIndexOf('TOPELEVATION_2'); const idxB2 = headers.lastIndexOf('BOTELEVATION_2');
                         const idxE3 = headers.lastIndexOf('EASTING_3'); const idxN3 = headers.lastIndexOf('NORTHING_3'); const idxT3 = headers.lastIndexOf('TOPELEVATION_3'); const idxB3 = headers.lastIndexOf('BOTELEVATION_3');
-
                         const idxComposite = type === 'pit' ? headers.lastIndexOf('ID P-COMPOSITE') : headers.lastIndexOf('ID D-COMPOSITE');
                         const idxBench = type === 'pit' ? headers.lastIndexOf('ID P-BENCH') : headers.lastIndexOf('ID D-BENCH');
                         const idxSubset = type === 'pit' ? headers.lastIndexOf('ID P-SUBSET') : headers.lastIndexOf('ID D-SUBSET');
+                        const idxName = headers.lastIndexOf('ID P-NAME');
+                        const idxBlock = headers.lastIndexOf('ID P-BLOCK');
+                        const idxStrip = headers.lastIndexOf('ID P-STRIP');
                         const idxBurden = headers.lastIndexOf('BURDEN');
 
-                        let idxWaste = -1;
-                        let idxRes = -1;
-                        
+                        let idxWaste = -1; let idxRes = -1;
                         if (type === 'pit') {
                             idxWaste = headers.lastIndexOf('PRO_RATA_WASTE');
                             idxRes = headers.lastIndexOf('PRO_RATA_RESOURCE');
@@ -310,7 +397,7 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         }
 
                         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-                        let blocks = {};
+                        let blocks = {}; let groupStats = {};
 
                         function parseBenchElevation(benchStr) {
                             if (!benchStr) return null;
@@ -331,12 +418,23 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             
                             let line = csvData.substring(lastIndex, nextIndex).trim();
                             lastIndex = nextIndex + 1;
-                            
                             if (!line) continue;
                             
                             const row = line.split(',');
                             const e1 = parseFloat(row[idxE1]);
                             if (isNaN(e1)) continue;
+
+                            let compositeId = '';
+                            if (idxComposite !== -1 && row[idxComposite]) compositeId = row[idxComposite].replace(/['"]/g, '').trim();
+                            else compositeId = 'Row_' + lastIndex;
+                            if (!compositeId) compositeId = 'Unknown_Block';
+
+                            const nameVal = idxName !== -1 && row[idxName] ? row[idxName].replace(/['"]/g, '').trim() : '';
+                            const blockVal = idxBlock !== -1 && row[idxBlock] ? row[idxBlock].replace(/['"]/g, '').trim() : '';
+                            const stripVal = idxStrip !== -1 && row[idxStrip] ? row[idxStrip].replace(/['"]/g, '').trim() : '';
+                            const groupKey = nameVal + '_' + blockVal + '_' + stripVal;
+
+                            if (!groupStats[groupKey]) groupStats[groupKey] = { waste: 0, res: 0 };
 
                             [   [row[idxE1], row[idxT1], row[idxN1]], [row[idxE2], row[idxT2], row[idxN2]],
                                 [row[idxE3], row[idxT3], row[idxN3]], [row[idxE1], row[idxB1], row[idxN1]]
@@ -346,12 +444,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                                 if(y < minY) minY = y; if(y > maxY) maxY = y;
                                 if(z < minZ) minZ = z; if(z > maxZ) maxZ = z;
                             });
-
-                            let compositeId = '';
-                            if (idxComposite !== -1 && row[idxComposite]) compositeId = row[idxComposite].replace(/['"]/g, '').trim();
-                            else compositeId = 'Row_' + lastIndex;
-
-                            if (!compositeId) compositeId = 'Unknown_Block';
 
                             const bench = idxBench !== -1 && row[idxBench] ? row[idxBench].replace(/['"]/g, '').trim() : 'Unknown';
                             const subset = idxSubset !== -1 && row[idxSubset] ? row[idxSubset].replace(/['"]/g, '').trim() : '';
@@ -364,25 +456,16 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                                 if (burden === 'RESOURCE' || burden === 'COAL') burden = 'RESOURCE'; 
                                 else if (burden !== '') burden = 'WASTE';
                                 else burden = resVal > 0 ? 'RESOURCE' : 'WASTE';
+                                groupStats[groupKey].waste += wasteVal;
+                                groupStats[groupKey].res += resVal;
                             } else {
                                 burden = 'WASTE';
                             }
 
                             const blockKey = entityId + '_' + compositeId;
-
                             if (!blocks[blockKey]) {
                                 blocks[blockKey] = {
-                                    info: { 
-                                        entityId: entityId, 
-                                        type: type, 
-                                        blockKey: blockKey, 
-                                        compositeId: compositeId, 
-                                        burden: burden, 
-                                        subset: subset, 
-                                        bench: bench, 
-                                        wasteVol: 0, 
-                                        resVol: 0 
-                                    },
+                                    info: { entityId, type, blockKey, compositeId, burden, subset, bench, groupKey, wasteVol: 0, resVol: 0 },
                                     triangles: []
                                 };
                             }
@@ -412,18 +495,25 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             blocks[blockKey].triangles.push(p);
                         }
 
-                        // --- OPTIMASI EKSTREM 1: Bersihkan string mentah raksasa dari Memori/RAM seketika!
-                        csvData = null; 
-                        if (e.data) e.data.csvData = null; // [FIX MEMORY LEAK]: Pastikan event object melepas referensi string
-
-                        const bounds = { minX, maxX, minY, maxY, minZ, maxZ };
+                        // [OPTIMASI MEMORY WORKER] Kosongkan string raksasa
+                        csvData = null; if (e.data) e.data.csvData = null; 
                         
                         const cX = globalCenter ? globalCenter.x : (minX + maxX) / 2; 
                         const cY = globalCenter ? globalCenter.y : (minY + maxY) / 2; 
                         const cZ = globalCenter ? globalCenter.z : (minZ + maxZ) / 2;
 
-                        let processedBlocks = [];
-                        let transferables = [];
+                        let minSR = Infinity;
+                        if (type === 'pit') {
+                            Object.keys(groupStats).forEach(k => {
+                                const g = groupStats[k];
+                                g.sr = g.res > 0 ? g.waste / g.res : Infinity;
+                                if (g.res > 0 && g.sr < minSR) minSR = g.sr;
+                            });
+                            if (minSR === Infinity) minSR = 0;
+                        }
+
+                        const bounds = { minX, maxX, minY, maxY, minZ, maxZ };
+                        let processedBlocks = []; let transferables = [];
 
                         Object.keys(blocks).forEach(blockKey => {
                             const blockData = blocks[blockKey];
@@ -452,19 +542,15 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
 
                             const positionsArray = new Float32Array(positions);
                             transferables.push(positionsArray.buffer);
-
                             processedBlocks.push({ blockKey: blockKey, info: blockData.info, positions: positionsArray });
                             
-                            // --- OPTIMASI EKSTREM 2: Mencegah Memory Spike! ---
+                            // [OPTIMASI RAM WORKER]: Prevent Memory Spike
                             delete blocks[blockKey];
                         });
 
                         blocks = null; 
-
-                        self.postMessage({ success: true, blocks: processedBlocks, bounds: bounds, centerUsed: {x: cX, y: cY, z: cZ} }, transferables);
-                        
-                        processedBlocks = null;
-                        transferables = null;
+                        self.postMessage({ success: true, blocks: processedBlocks, bounds: bounds, centerUsed: {x: cX, y: cY, z: cZ}, groupStats, minSR }, transferables);
+                        processedBlocks = null; transferables = null;
 
                     } catch (err) { self.postMessage({ error: err.message }); }
                 };
@@ -474,20 +560,16 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
             const workerUrl = URL.createObjectURL(blob);
             const worker = new Worker(workerUrl);
 
-            const globalCenter = window.worldOrigin.isSet
-                ? { x: window.worldOrigin.x, y: window.worldOrigin.y, z: window.worldOrigin.z }
-                : null;
+            const globalCenter = window.worldOrigin.isSet ? { x: window.worldOrigin.x, y: window.worldOrigin.y, z: window.worldOrigin.z } : null;
 
-            // Panggil Worker
             worker.postMessage({ csvData: csvDataDB, entityId, type, stupaMode, extrusionHeight, globalCenter });
             
-            // [FIX MEMORY LEAK]: Bebaskan RAM string ratusan MB di Main Thread seketika setelah masuk Worker!
-            // Jika tidak, closure dari fungsi Promise ini akan terus menyandera CSV di RAM hingga proses render selesai.
+            // [OPTIMASI RAM EKSTREM]: Bebaskan RAM string ratusan MB di Main Thread seketika setelah masuk Worker!
             csvDataDB = null; 
 
             worker.onmessage = (e) => {
                 URL.revokeObjectURL(workerUrl); 
-                // [FIX] HARUS SEGERA DIBUNUH AGAR THREAD & RAM BENAR-BENAR BERSIH (MENCEGAH ZOMBIE WORKER)
+                // [OPTIMASI ZOMBIE WORKER]: Langsung matikan worker untuk bebaskan RAM background
                 worker.terminate();
                 
                 if (e.data.error) {
@@ -500,138 +582,80 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                 const isStillValid = localStorage.getItem(`${lsPrefix}${safeIdCheck}`) !== null;
                 
                 if (!isStillValid) {
-                    console.warn(`Geometri "${entityId}" telah dihapus atau dire-build. Membatalkan render.`);
                     if (typeof isProcessing !== 'undefined') isProcessing = false;
-                    if (type === 'pit') {
-                        window.loadedPits.delete(entityId);
-                        window.renderedPits.delete(entityId);
-                    } else {
-                        window.loadedDisposals.delete(entityId);
-                        window.renderedDisposals.delete(entityId);
-                    }
-                    resolve();
-                    return;
+                    if (type === 'pit') { window.loadedPits.delete(entityId); window.renderedPits.delete(entityId); } 
+                    else { window.loadedDisposals.delete(entityId); window.renderedDisposals.delete(entityId); }
+                    resolve(); return;
                 }
 
-                let { blocks, bounds, centerUsed } = e.data;
-
-                if (!window.worldOrigin.isSet && centerUsed) {
-                    window.worldOrigin = { x: centerUsed.x, y: centerUsed.y, z: centerUsed.z, isSet: true };
-                }
+                let { blocks, bounds, centerUsed, groupStats, minSR } = e.data;
+                if (!window.worldOrigin.isSet && centerUsed) { window.worldOrigin = { x: centerUsed.x, y: centerUsed.y, z: centerUsed.z, isSet: true }; }
 
                 window.unloadGeometry(entityId, type);
-                if (typeof clearLabels === 'function') clearLabels();
+                
+                if (typeof window.clearLabels === 'function') window.clearLabels(entityId);
 
-                // =======================================================
-                // 1. PERHITUNGAN RUANG OBJEK SEBELUM RENDER (Fit to Bounds via Sphere)
-                // 2. SESUAIKAN KAMERA (Elevation 45°, Bearing 315° + Kompensasi UI)
-                // =======================================================
+                // --- 1. SETUP KAMERA ---
                 if (bounds && typeof camera !== 'undefined' && typeof controls !== 'undefined') {
                     const box = new THREE.Box3();
-                    
-                    // a. Masukkan ukuran objek-objek yang sebelumnya sudah dirender (jika ada)
-                    if (typeof meshes !== 'undefined') {
-                        Object.values(meshes).forEach(mesh => box.expandByObject(mesh));
-                    }
-
-                    // b. Tambahkan ukuran dari entitas data yang *akan* dirender saat ini
+                    if (typeof meshes !== 'undefined') Object.values(meshes).forEach(mesh => box.expandByObject(mesh));
                     const boxMin = new THREE.Vector3(bounds.minX - centerUsed.x, bounds.minY - centerUsed.y, bounds.minZ - centerUsed.z);
                     const boxMax = new THREE.Vector3(bounds.maxX - centerUsed.x, bounds.maxY - centerUsed.y, bounds.maxZ - centerUsed.z);
-                    box.expandByPoint(boxMin);
-                    box.expandByPoint(boxMax);
-
+                    box.expandByPoint(boxMin); box.expandByPoint(boxMax);
+                    
                     if (!box.isEmpty()) {
                         const center = box.getCenter(new THREE.Vector3()); 
                         const sphere = box.getBoundingSphere(new THREE.Sphere());
                         const radius = sphere.radius;
                         const fov = camera.fov * (Math.PI / 180); 
-                        
                         let cameraDistance = Math.abs(radius / Math.sin(fov / 2));
-                        if (camera.aspect < 1) { 
-                            cameraDistance /= camera.aspect;
-                        }
-                        cameraDistance *= 1.1; // Padding agar tidak mepet
-
-                        if (camera.far < cameraDistance * 3) {
-                            camera.far = cameraDistance * 3;
-                            camera.updateProjectionMatrix();
-                        }
-
-                        // Aturan Kamera 45° & 315°
-                        const elevation = 45 * (Math.PI / 180); 
-                        const azimuth = 315 * (Math.PI / 180);
-
+                        if (camera.aspect < 1) cameraDistance /= camera.aspect;
+                        cameraDistance *= 1.3; 
+                        if (camera.far < cameraDistance * 3) { camera.far = cameraDistance * 3; camera.updateProjectionMatrix(); }
+                        const elevation = 45 * (Math.PI / 180); const azimuth = 315 * (Math.PI / 180);
                         camera.up.set(0, 1, 0);
-
                         camera.position.x = center.x + cameraDistance * Math.cos(elevation) * Math.sin(azimuth);
                         camera.position.y = center.y + cameraDistance * Math.sin(elevation);
                         camera.position.z = center.z + cameraDistance * Math.cos(elevation) * Math.cos(azimuth);
-                        
-                        camera.lookAt(center); 
-                        controls.target.copy(center); 
-
-                        // Kompensasi layar UI
+                        camera.lookAt(center); controls.target.copy(center); 
                         camera.updateMatrix();
-                        const vh = 2 * Math.tan(fov / 2) * cameraDistance;
-                        const vw = vh * camera.aspect;
                         
-                        const panRight = vw * 0.08; 
-                        const panDown = vh * 0.12;  
-
+                        const vh = 2 * Math.tan(fov / 2) * cameraDistance; const vw = vh * camera.aspect;
+                        const panRight = vw * 0.08; const panDown = vh * 0.12;  
                         const rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
                         const upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-                        
                         const offset = new THREE.Vector3();
-                        offset.addScaledVector(rightVec, panRight);
-                        offset.addScaledVector(upVec, -panDown);
-                        
-                        camera.position.add(offset);
-                        controls.target.add(offset);
-
+                        offset.addScaledVector(rightVec, panRight); offset.addScaledVector(upVec, -panDown);
+                        camera.position.add(offset); controls.target.add(offset);
                         controls.update();
-
-                        // [PENTING] Render scene secara instan agar frame awal langsung berpindah 
-                        // ke posisi kamera yang benar SEBELUM blok pertama muncul!
-                        if (typeof renderer !== 'undefined' && typeof scene !== 'undefined') {
-                            renderer.render(scene, camera);
-                        }
+                        
+                        if (typeof renderer !== 'undefined' && typeof scene !== 'undefined') renderer.render(scene, camera);
                     }
                 }
 
-                // =======================================================
-                // 3. LAKUKAN RENDER (Membangun blok 3D Chunk per Chunk)
-                // =======================================================
+                // --- 2. RENDER 3D MESH ---
                 const opacResource = typeof resourceOpacity !== 'undefined' ? resourceOpacity : 1;
                 const opacWaste = typeof wasteOpacity !== 'undefined' ? wasteOpacity : 1;
-
-                const pitColorModes = JSON.parse(localStorage.getItem(type === 'pit' ? 'rizpec_pit_color_modes' : 'rizpec_disp_color_modes')) || {};
                 const burdenPalette = JSON.parse(localStorage.getItem(type === 'pit' ? 'rizpec_burden_palette' : 'rizpec_disp_burden_palette')) || [];
                 const subsetPalette = JSON.parse(localStorage.getItem(type === 'pit' ? 'rizpec_subset_palette' : 'rizpec_disp_subset_palette')) || [];
-
-                const sharedMaterials = {};
-                const sharedLineMaterials = {};
-
-                let currentIndex = 0;
+                const proConfigs = JSON.parse(localStorage.getItem('rizpec_pit_pro_configs')) || {};
                 
-                const TIME_BUDGET_MS = 15; 
+                let sharedMaterials = {}; 
+                let sharedLineMaterials = {};
                 
+                let currentIndex = 0; const TIME_BUDGET_MS = 15; 
                 const statEl = document.getElementById('stat-new-entity');
                 const originalStatText = statEl ? statEl.textContent : '';
+
+                const discretePalette = ['#000080', '#0000FF', '#0080FF', '#00FFFF', '#00FF80', '#00FF00', '#80FF00', '#FFFF00', '#FF8000', '#FF0000'];
 
                 const processChunk = () => {
                     const isStillValidChunk = localStorage.getItem(`${lsPrefix}${safeIdCheck}`) !== null;
                     if (!isStillValidChunk) {
                         if (typeof isProcessing !== 'undefined') isProcessing = false;
-                        if (type === 'pit') {
-                            window.loadedPits.delete(entityId);
-                            window.renderedPits.delete(entityId);
-                        } else {
-                            window.loadedDisposals.delete(entityId);
-                            window.renderedDisposals.delete(entityId);
-                        }
-                        blocks = null;
-                        resolve();
-                        return;
+                        if (type === 'pit') { window.loadedPits.delete(entityId); window.renderedPits.delete(entityId); } 
+                        else { window.loadedDisposals.delete(entityId); window.renderedDisposals.delete(entityId); }
+                        blocks = null; resolve(); return;
                     }
 
                     const frameStartTime = performance.now();
@@ -640,7 +664,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         const b = blocks[currentIndex];
                         let geometry = new THREE.BufferGeometry();
                         geometry.setAttribute('position', new THREE.BufferAttribute(b.positions, 3));
-                        
                         const vertexCount = b.positions.length / 3;
                         const SAFE_VERTEX_LIMIT = 30000; 
                         
@@ -649,24 +672,35 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                                 const mergedGeom = THREE.BufferGeometryUtils.mergeVertices(geometry, stupaMode ? 0.01 : 0.5);
                                 geometry.dispose(); 
                                 geometry = mergedGeom;
-                            } catch (mergeErr) {
-                                console.warn("Skip mergeVertices: Memori penuh", mergeErr);
-                            }
+                            } catch (mergeErr) { }
                         } else if (vertexCount > SAFE_VERTEX_LIMIT) {
-                            console.warn(`Blok ${b.info.blockKey} terlalu berat (${vertexCount} vertex). Skip mergeVertices untuk hindari OOM di Tablet.`);
+                            // [OPTIMASI RAM GPU]: Bypass merge jika blok terlalu kompleks agar tidak crash di Tablet
+                            console.warn(`Bypass Merge Blok ${b.info.blockKey}: Terlalu berat (${vertexCount} vertex)`);
                         }
                         
                         geometry.computeBoundingBox();
 
-                        const blockEntityId = b.info.entityId;
-                        const burden = (b.info.burden || '').toUpperCase();
-                        const subset = b.info.subset || '';
+                        const blockEntityId = b.info.entityId; const burden = (b.info.burden || '').toUpperCase();
+                        const subset = b.info.subset || ''; const isResource = burden === 'RESOURCE';
+                        const pitColorModes = JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {};
                         const mode = pitColorModes[blockEntityId] || (subset ? 'Subset' : 'Burden'); 
-
-                        const isResource = burden === 'RESOURCE';
+                        const proConfig = (proConfigs[blockEntityId] && proConfigs[blockEntityId][mode]) ? proConfigs[blockEntityId][mode] : null;
 
                         let hexColor = '#aaaaaa';
-                        if (mode === 'Subset' && subset) {
+                        if (mode === 'Res. Incremental' && proConfig) {
+                            const srLimit = parseFloat(proConfig.srLimit) || 0;
+                            const gStats = groupStats ? groupStats[b.info.groupKey] : null;
+                            const sr = gStats ? gStats.sr : Infinity;
+                            if (!gStats || gStats.res === 0) { hexColor = '#ffffff'; } 
+                            else if (sr > srLimit) { hexColor = '#8b0000'; } 
+                            else {
+                                const range = srLimit - minSR; let t = range > 0 ? (sr - minSR) / range : 0;
+                                t = Math.max(0, Math.min(1, t)); 
+                                let classIndex = Math.floor(t * discretePalette.length);
+                                if (classIndex >= discretePalette.length) classIndex = discretePalette.length - 1; 
+                                hexColor = discretePalette[classIndex];
+                            }
+                        } else if (mode === 'Subset' && subset) {
                             const subsetItem = subsetPalette.find(p => p.name === subset);
                             if (subsetItem) hexColor = subsetItem.color;
                         } else {
@@ -677,35 +711,26 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
 
                         const currentOpacity = isResource ? opacResource : opacWaste;
                         const isTransparent = currentOpacity < 1.0; 
-
-                        const matKey = `${blockEntityId}_${burden}_${subset}_${currentOpacity}`;
+                        const matKey = `${blockEntityId}_${burden}_${subset}_${currentOpacity}_${mode}_${hexColor}`;
                         let material = sharedMaterials[matKey];
                         
                         if (!material) {
                             material = new THREE.MeshStandardMaterial({ 
-                                color: hexColor, 
-                                side: THREE.DoubleSide,
-                                flatShading: true,
-                                roughness: isResource ? 0.4 : 0.8,
-                                metalness: 0.1,
-                                polygonOffset: true, 
-                                polygonOffsetFactor: isResource ? -2 : 1, 
-                                polygonOffsetUnits: isResource ? -2 : 1,
-                                transparent: isTransparent,
-                                opacity: currentOpacity 
+                                color: hexColor, side: THREE.DoubleSide, flatShading: true,
+                                roughness: isResource ? 0.4 : 0.8, metalness: 0.1, polygonOffset: true, 
+                                polygonOffsetFactor: isResource ? -2 : 1, polygonOffsetUnits: isResource ? -2 : 1,
+                                transparent: isTransparent, opacity: currentOpacity 
                             });
                             sharedMaterials[matKey] = material;
                         }
 
                         const mesh = new THREE.Mesh(geometry, material);
                         mesh.userData = { ...b.info, isRecorded: false, centerOffset: centerUsed };
-                        mesh.matrixAutoUpdate = false;
-                        mesh.updateMatrix();
+                        mesh.matrixAutoUpdate = false; mesh.updateMatrix();
 
                         if (vertexCount <= SAFE_VERTEX_LIMIT * 1.5) {
                             const lineMatKey = isResource ? 'resource' : 'waste';
                             let lineMaterial = sharedLineMaterials[lineMatKey];
-                            
                             if (!lineMaterial) {
                                 lineMaterial = new THREE.LineBasicMaterial({ 
                                     color: 0x111111, opacity: 0.9, transparent: true, linewidth: 1,
@@ -713,52 +738,104 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                                 });
                                 sharedLineMaterials[lineMatKey] = lineMaterial;
                             }
-
                             const edges = new THREE.EdgesGeometry(geometry, stupaMode ? 10 : 60); 
                             const line = new THREE.LineSegments(edges, lineMaterial);
-                            line.matrixAutoUpdate = false;
-                            line.updateMatrix();
-                            mesh.add(line);
+                            line.matrixAutoUpdate = false; line.updateMatrix(); mesh.add(line);
                         }
 
                         if (typeof pitReserveGroup !== 'undefined' && typeof meshes !== 'undefined') {
-                            pitReserveGroup.add(mesh); 
-                            meshes[b.blockKey] = mesh;
+                            pitReserveGroup.add(mesh); meshes[b.blockKey] = mesh;
                         }
                         
-                        // [FIX MEMORY LEAK]: Hancurkan buffer & referensi objek blok SETELAH dirender ke layer
-                        // agar Garbage Collector (GC) dapat langsung membuangnya di sela-sela frame!
-                        b.positions = null;
+                        // [OPTIMASI RAM CHUNK]: Langsung hancurkan referensi buffer titik per blok
+                        b.positions = null; 
                         blocks[currentIndex] = null; 
-                        
                         currentIndex++;
                     }
 
                     const currentCount = Math.min(currentIndex, blocks.length);
-                    const percent = Math.round((currentCount / blocks.length) * 100);
-
-                    if (statEl && statEl.textContent !== 'Processing Data...') {
-                        statEl.textContent = `Merender 3D... ${percent}% (${currentCount} / ${blocks.length} Mesh)`;
-                    }
-
-                    if (typeof updateLoadingProgress === 'function') {
-                        updateLoadingProgress(`(${currentCount} / ${blocks.length} Mesh)`);
-                    }
+                    if (statEl && statEl.textContent !== 'Processing Data...') statEl.textContent = `Merender 3D... ${Math.round((currentCount / blocks.length) * 100)}%`;
+                    if (typeof updateLoadingProgress === 'function') updateLoadingProgress(`(${currentCount} / ${blocks.length} Mesh)`);
 
                     if (currentIndex < blocks.length) {
                         requestAnimationFrame(processChunk);
                     } else {
+                        // Bersihkan total array blocks & pooling references
                         blocks = null;
+                        sharedMaterials = null; 
+                        sharedLineMaterials = null;
+                        
+                        if (statEl && statEl.textContent.includes('Merender 3D')) statEl.textContent = originalStatText; 
 
-                        if (statEl && statEl.textContent.includes('Merender 3D')) {
-                            statEl.textContent = originalStatText; 
+                        // --- 3. GENERATE SCREEN-SPACE LABELS ---
+                        const pitColorModes = JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {};
+                        const colorMode = pitColorModes[entityId] || 'Burden';
+                        
+                        if (type === 'pit' && ['Res. Incremental', 'Res. Cumulative', 'Res. Zone'].includes(colorMode)) {
+                            const labelsContainer = document.getElementById('labels-container');
+                            
+                            if(labelsContainer && getComputedStyle(labelsContainer).position === 'static') {
+                                labelsContainer.style.position = 'absolute';
+                                labelsContainer.style.top = '0';
+                                labelsContainer.style.left = '0';
+                                labelsContainer.style.width = '100%';
+                                labelsContainer.style.height = '100%';
+                                labelsContainer.style.pointerEvents = 'none'; 
+                                labelsContainer.style.overflow = 'hidden';
+                            }
+
+                            if (labelsContainer) labelsContainer.style.zIndex = '1';
+
+                            if (labelsContainer && groupStats) {
+                                const blockBoxes = {};
+                                Object.values(meshes).forEach(mesh => {
+                                    if (mesh.userData.entityId === entityId && mesh.userData.groupKey) {
+                                        const gKey = mesh.userData.groupKey;
+                                        if (!blockBoxes[gKey]) blockBoxes[gKey] = new THREE.Box3();
+                                        blockBoxes[gKey].expandByObject(mesh);
+                                    }
+                                });
+
+                                Object.keys(blockBoxes).forEach(gKey => {
+                                    const box = blockBoxes[gKey];
+                                    const center = box.getCenter(new THREE.Vector3());
+                                    center.y = box.max.y + 5; 
+                                    
+                                    const g = groupStats[gKey];
+                                    if (!g) return;
+
+                                    const div = document.createElement('div');
+                                    div.className = 'absolute top-0 left-0 text-[10px] sm:text-[11px] font-bold px-2 py-1 rounded-md shadow-lg border border-slate-500/80 pointer-events-none select-none flex items-center justify-center text-center transition-opacity duration-75 z-10 backdrop-blur-sm';
+                                    
+                                    let srText = g.res > 0 ? (g.waste / g.res).toFixed(2) : '-';
+                                    
+                                    div.innerHTML = `<span class="${srText !== '-' ? 'text-amber-400' : 'text-slate-200'} drop-shadow-md tracking-widest">SR: ${srText}</span>`;
+                                    div.style.backgroundColor = 'rgba(15, 23, 42, 0.75)'; 
+                                    div.style.willChange = 'transform, opacity'; 
+                                    
+                                    div.style.display = window.isLabelLayerVisible ? 'flex' : 'none';
+                                    labelsContainer.appendChild(div);
+
+                                    window.activeLabels.push({
+                                        entityId: entityId,
+                                        element: div,
+                                        position: center,
+                                        vec: new THREE.Vector3()
+                                    });
+                                });
+                                
+                                window.updateLabels();
+                            }
+                        }
+
+                        if (typeof controls !== 'undefined' && !window.isLabelHooked) {
+                            controls.addEventListener('change', window.updateLabels);
+                            window.addEventListener('resize', window.updateLabels);
+                            window.isLabelHooked = true;
                         }
 
                         window.recalculateGlobalSums();
-
-                        if (typeof window.refreshAllDxfClipping === 'function') {
-                            window.refreshAllDxfClipping();
-                        }
+                        if (typeof window.refreshAllDxfClipping === 'function') window.refreshAllDxfClipping();
 
                         if (typeof appLayers !== 'undefined') {
                             const existingLayer = appLayers.find(l => l.id === 'layer_pit_reserve');
@@ -769,9 +846,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         }
 
                         if (typeof isProcessing !== 'undefined') isProcessing = false;
-                        
-                        // Perhitungan sudut kamera SUDAH dipindah ke atas (sebelum process chunk).
-                        // Jadi di sini kita tinggal pastikan scene ter-render saja setelah seluruh 100% data selesai di-push.
                         if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
                             requestAnimationFrame(() => renderer.render(scene, camera));
                         }
@@ -784,13 +858,11 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
             };
 
             worker.onerror = (err) => {
-                URL.revokeObjectURL(workerUrl);
-                // [FIX] HARUS DIBUNUH KETIKA ERROR PADA SAAT MEMBACA ARRAY YANG MEMBUAT OOM
+                URL.revokeObjectURL(workerUrl); 
                 worker.terminate();
-                
                 if (typeof isProcessing !== 'undefined') isProcessing = false;
                 console.error("Fatal Web Worker Error:", err);
-                reject(new Error("Memori Perangkat Penuh saat mengekstrak titik koordinat. (Data terlalu besar untuk RAM device)"));
+                reject(new Error("Memori Perangkat Penuh saat mengekstrak titik koordinat. (Data terlalu besar untuk RAM)"));
             };
 
         } catch (err) {

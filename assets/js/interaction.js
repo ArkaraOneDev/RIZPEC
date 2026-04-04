@@ -35,21 +35,154 @@ window.redoStack = [];
 window.MAX_UNDO_STEPS = 10;
 window.currentMousePos = { x: 0, y: 0, nx: 0, ny: 0 };
 
-// OPTIMASI: Variabel pengendali untuk Tablet
+// OPTIMASI: Variabel pengendali untuk Tablet & Throttle
 window.lastRaycastTime = 0;
 window.isCameraMoving = false; 
 window.isPointerDown = false; 
 window.rawPointerDownPos = { x: 0, y: 0 }; 
 
-// [PERBAIKAN] OPTIMASI MEMORI: Variabel Bantuan Global untuk Loop
+// STATE VIRTUAL SCROLL
+window.ROW_HEIGHT = 30; // Tinggi tetap setiap baris tabel (px)
+
+// ==========================================
+// OPTIMASI MEMORI 1: Bantuan Global & Single-Instance Raycaster
+// ==========================================
 const _tempVector3 = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
 const _tempScreenPos = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
 const _tempBox3 = typeof THREE !== 'undefined' ? new THREE.Box3() : null;
+const _sharedRaycaster = typeof THREE !== 'undefined' ? new THREE.Raycaster() : null;
+const _sharedMouseVec = typeof THREE !== 'undefined' ? new THREE.Vector2() : null;
+
+const _verticalRaycaster = typeof THREE !== 'undefined' ? new THREE.Raycaster() : null;
+const _verticalRayOrigin = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
+const _verticalRayDir = typeof THREE !== 'undefined' ? new THREE.Vector3(0, -1, 0) : null;
 
 // ==========================================
-// OPTIMASI VRAM: MATERIAL STATE POOLING
+// HELPER: GET 3D POINT DARI MOUSE POS
+// ==========================================
+window._get3DPointFromMouse = function(pos) {
+    if (typeof window.getRaycastPoint === 'function') {
+        let pt = window.getRaycastPoint(pos);
+        if (pt) return pt.clone();
+    }
+    if (!_sharedRaycaster || typeof camera === 'undefined') return null;
+    
+    _sharedRaycaster.setFromCamera({x: pos.nx, y: pos.ny}, camera);
+    
+    let intersectableObjects = [];
+    if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup.visible) {
+        pitReserveGroup.children.forEach(c => {
+            if (c.isMesh && c.visible) intersectableObjects.push(c);
+        });
+    }
+    if (typeof appLayers !== 'undefined') {
+        appLayers.forEach(l => {
+            if (l.type === 'dxf' && l.visible && l.threeObject) {
+                l.threeObject.traverse(c => {
+                    if ((c.isMesh || c.isLineSegments) && c.visible) intersectableObjects.push(c);
+                });
+            }
+        });
+    }
+
+    const hits = _sharedRaycaster.intersectObjects(intersectableObjects, false);
+    const validHit = window.getFirstValidIntersection(hits);
+    
+    if (validHit) {
+        return validHit.point.clone();
+    }
+    
+    // Fallback: Area kosong (Tembak ke bidang tanah imajiner Y=0)
+    const plane = typeof THREE !== 'undefined' ? new THREE.Plane(new THREE.Vector3(0, 1, 0), 0) : null;
+    const target = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
+    if (plane && target && _sharedRaycaster) {
+        _sharedRaycaster.ray.intersectPlane(plane, target);
+        return target;
+    }
+    return null;
+};
+
+// ==========================================
+// BIND CAMERA UPDATE UNTUK POLYGON SINKRONISASI
+// ==========================================
+window.bindCameraChange = function() {
+    if (window._cameraBound) return;
+    if (typeof controls !== 'undefined') {
+        controls.addEventListener('change', () => {
+            if (window.isDrawingPolygon) {
+                window.updatePolygonSVG(window.currentMousePos);
+            }
+        });
+        window._cameraBound = true;
+    }
+};
+
+// ==========================================
+// HELPER: VIRTUAL SCROLLER (HANYA RENDER YANG TERLIHAT)
+// ==========================================
+window.renderVirtualList = function(containerId, tbodyId, data, renderRowFn) {
+    const container = document.getElementById(containerId);
+    const tbody = document.getElementById(tbodyId);
+    if (!container || !tbody) return;
+
+    if (data.length === 0) {
+        tbody.style.paddingTop = '0px';
+        tbody.style.paddingBottom = '0px';
+        tbody.innerHTML = '';
+        return;
+    }
+
+    const clientHeight = container.clientHeight || 200; 
+    const visibleCount = Math.ceil(clientHeight / window.ROW_HEIGHT) + 4; // Buffer atas dan bawah
+
+    const update = () => {
+        const scrollTop = container.scrollTop;
+        let startIndex = Math.floor(scrollTop / window.ROW_HEIGHT);
+        startIndex = Math.max(0, Math.min(startIndex, data.length - visibleCount));
+        let endIndex = Math.min(startIndex + visibleCount, data.length);
+
+        const paddingTop = startIndex * window.ROW_HEIGHT;
+        const paddingBottom = (data.length - endIndex) * window.ROW_HEIGHT;
+
+        tbody.style.paddingTop = `${paddingTop}px`;
+        tbody.style.paddingBottom = `${paddingBottom}px`;
+
+        tbody.innerHTML = '';
+        for (let i = startIndex; i < endIndex; i++) {
+            tbody.appendChild(renderRowFn(data[i], i));
+        }
+    };
+
+    if (!container._vsHandler) {
+        container._vsHandler = () => requestAnimationFrame(update);
+        container.addEventListener('scroll', container._vsHandler, { passive: true });
+    }
+
+    update(); 
+};
+
+// ==========================================
+// OPTIMASI MEMORI 2: Zombie Cleanser
+// ==========================================
+window.cleanseZombieMesh = function(mesh) {
+    if (!mesh) return;
+    if (mesh.geometry) mesh.geometry.dispose();
+    if (mesh.material) {
+        if (Array.isArray(mesh.material)) {
+            mesh.material.forEach(m => m.dispose());
+        } else {
+            mesh.material.dispose();
+        }
+    }
+    if (mesh.userData) mesh.userData = {};
+};
+
+// ==========================================
+// OPTIMASI MEMORI 3: Material State Pooling
 // ==========================================
 window.applyMaterialState = function(mesh, stateType) {
+    if (!mesh.material) return;
+    
     if (!mesh.userData.originalMaterial) {
         mesh.userData.originalMaterial = mesh.material;
     }
@@ -71,7 +204,7 @@ window.applyMaterialState = function(mesh, stateType) {
     
     if (!window.sharedStateMaterials[key]) {
         const clone = baseMat.clone();
-        clone.emissive.setHex(hex);
+        if (clone.emissive) clone.emissive.setHex(hex);
         
         if (stateType === 'recorded_pit' || stateType === 'recorded_disp') {
             clone.transparent = false;
@@ -85,7 +218,7 @@ window.applyMaterialState = function(mesh, stateType) {
 };
 
 // ==========================================
-// PENTING: PARSER ID P-COMPOSITE BARU
+// PARSER ID P-COMPOSITE
 // ==========================================
 window.parseCompositeId = function(userData) {
     if (!userData) return { isUnknown: true, full: "UNKNOWN", base: "UNKNOWN", record: "UNKNOWN" };
@@ -116,7 +249,7 @@ window.parseCompositeId = function(userData) {
 };
 
 // ==========================================
-// PENYIAPAN DOM (INFO PANEL)
+// PENYIAPAN DOM (INFO PANEL & ACARA)
 // ==========================================
 const container = document.getElementById('canvas-container');
 const selectionRect = document.getElementById('selection-rect');
@@ -132,10 +265,23 @@ if (hoverBar) hoverBar.classList.add('hidden');
 // ==========================================
 // PENGENDALI ACARA UMUM & LOD
 // ==========================================
-
 if (container) {
+    container.addEventListener('mouseleave', () => {
+        if (window.hoveredGroupKey) {
+            window.hoveredMeshes.forEach(m => window.highlightMesh(m, false));
+            window.hoveredMeshes.length = 0; 
+            window.hoveredGroupKey = null; 
+            window.currentHoveredData = null;
+            window.renderInfoPanel();
+        }
+    });
+
     container.addEventListener('pointerdown', (e) => {
         if (e.target && e.target.tagName !== 'CANVAS') return;
+        
+        // HANYA MATIKAN KONTROL PADA KLIK KIRI SAJA
+        // Ini memungkinkan Pengguna menggunakan klik tengah / kanan untuk pan dan rotasi kamera
+        if (e.button !== 0) return; 
 
         const mode = window.activeInteractionMode;
         const isBox = mode === 'box_select';
@@ -150,6 +296,12 @@ window.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     if (e.key === 'Shift') window.isShiftDown = true;
+
+    if (e.key === 'r' || e.key === 'R') {
+        if (typeof window.toggleAutoRecord === 'function') {
+            window.toggleAutoRecord();
+        }
+    }
 
     if (e.key === 'Enter') {
         if (window.activeInteractionMode === 'draw_line' || window.activeInteractionMode === 'draw_area') {
@@ -179,13 +331,11 @@ window.addEventListener('keydown', (e) => {
     if ((e.key === 'Delete' || e.key === 'Backspace') && typeof selectedDrawing !== 'undefined' && selectedDrawing) {
         if (selectedDrawing.lineMesh) {
             if (typeof drawGroup !== 'undefined') drawGroup.remove(selectedDrawing.lineMesh);
-            if(selectedDrawing.lineMesh.geometry) selectedDrawing.lineMesh.geometry.dispose();
-            if(selectedDrawing.lineMesh.material) selectedDrawing.lineMesh.material.dispose(); 
+            window.cleanseZombieMesh(selectedDrawing.lineMesh);
         }
         if (selectedDrawing.areaMesh) {
             if (typeof drawGroup !== 'undefined') drawGroup.remove(selectedDrawing.areaMesh);
-            if(selectedDrawing.areaMesh.geometry) selectedDrawing.areaMesh.geometry.dispose();
-            if(selectedDrawing.areaMesh.material) selectedDrawing.areaMesh.material.dispose(); 
+            window.cleanseZombieMesh(selectedDrawing.areaMesh);
         }
         if (typeof finishedDrawings !== 'undefined') finishedDrawings = finishedDrawings.filter(d => d !== selectedDrawing);
         selectedDrawing = null;
@@ -199,7 +349,6 @@ window.addEventListener('keyup', (e) => {
 if (container) {
     container.addEventListener('contextmenu', (e) => { 
         if (e.target && e.target.tagName !== 'CANVAS') return;
-
         if(window.activeInteractionMode === 'draw_line' || window.activeInteractionMode === 'draw_area') { 
             e.preventDefault(); 
             if(window.finishDrawing) window.finishDrawing(); 
@@ -218,7 +367,6 @@ let wheelTimeout;
 if (container) {
     container.addEventListener('wheel', (e) => {
         if (e.target && e.target.tagName !== 'CANVAS') return;
-
         window.isCameraMoving = true; window.toggleEdgesLOD(false);
         clearTimeout(wheelTimeout);
         wheelTimeout = setTimeout(() => { window.isCameraMoving = false; window.toggleEdgesLOD(true); }, 300);
@@ -259,15 +407,13 @@ window.highlightMesh = function(mesh, isHover) {
 
     if (isSelected) {
         window.applyMaterialState(mesh, 'selected');
+    } else if (mesh.userData.isRecorded) {
+        const isDisp = mesh.userData.recordType === 'disp' || mesh.userData.type === 'disp' || mesh.userData.type === 'disposal';
+        window.applyMaterialState(mesh, isDisp ? 'recorded_disp' : 'recorded_pit');
     } else if (isHover) {
         window.applyMaterialState(mesh, 'hover');
     } else {
-        if (mesh.userData.isRecorded) {
-            const isDisp = mesh.userData.recordType === 'disp' || mesh.userData.type === 'disp' || mesh.userData.type === 'disposal';
-            window.applyMaterialState(mesh, isDisp ? 'recorded_disp' : 'recorded_pit');
-        } else {
-            window.applyMaterialState(mesh, 'default');
-        }
+        window.applyMaterialState(mesh, 'default');
     }
 }
 
@@ -320,6 +466,55 @@ window.updateRecordedVisibility = function() {
 }
 
 // ==========================================
+// HELPER: DETEKSI AREA MASKING (CLIPPING) DXF
+// ==========================================
+window.isPointMaskedByFootprint = function(point, clipFootprints) {
+    if (!clipFootprints || typeof pitReserveGroup === 'undefined' || !_verticalRaycaster) return false;
+
+    let targetMeshes = [];
+    pitReserveGroup.children.forEach(c => {
+        if (c.isMesh) {
+            let type = c.userData.type || 'pit';
+            if (type === 'disposal') type = 'disp';
+            if (clipFootprints === 'All Data' || 
+               (clipFootprints === 'Pit Data' && type === 'pit') || 
+               (clipFootprints === 'Disposal Data' && type === 'disp')) {
+                targetMeshes.push(c);
+            }
+        }
+    });
+
+    if (targetMeshes.length === 0) return false;
+
+    _verticalRayOrigin.set(point.x, 10000, point.z);
+    _verticalRaycaster.set(_verticalRayOrigin, _verticalRayDir);
+
+    const hits = _verticalRaycaster.intersectObjects(targetMeshes, false);
+    return hits.length > 0;
+};
+
+window.getFirstValidIntersection = function(intersects) {
+    for (let i = 0; i < intersects.length; i++) {
+        const hit = intersects[i];
+        let isMasked = false;
+
+        if (hit.object.userData.dxfLayerName) {
+            if (typeof appLayers !== 'undefined') {
+                const layer = appLayers.find(l => l.name === hit.object.userData.dxfLayerName && l.type === 'dxf');
+                if (layer && layer.clippingEnabled && layer.hasFaces) {
+                    isMasked = window.isPointMaskedByFootprint(hit.point, layer.clipFootprints);
+                }
+            }
+        }
+        
+        if (!isMasked) {
+            return hit;
+        }
+    }
+    return null;
+};
+
+// ==========================================
 // LOGIKA HOVER (BLOCK GEOMETRY & DXF)
 // ==========================================
 window.handleHover = function(intersects, param2 = null) {
@@ -349,7 +544,7 @@ window.handleHover = function(intersects, param2 = null) {
         return;
     }
 
-    if (intersects.length > 0) {
+    if (intersects && intersects.length > 0) {
         updateCursor(true); 
         const object = intersects[0].object;
         const targetType = object.userData.type || 'pit';
@@ -519,7 +714,13 @@ window.onPointerDown = function(event) {
     } else if (isPoly) {
         window.isDrawingPolygon = true; 
         if(typeof controls !== 'undefined') controls.enabled = false; 
-        window.polygonPoints.push({ x: pos.x, y: pos.y }); 
+        
+        // Panggil hook sinkronisasi kamera & temukan poin 3D
+        if (typeof window.bindCameraChange === 'function') window.bindCameraChange();
+        
+        const pt3d = window._get3DPointFromMouse(pos);
+        // Simpan titik 3D agar update Polygon SVG bisa re-project titik tersebut
+        window.polygonPoints.push({ x: pos.x, y: pos.y, vec3: pt3d }); 
         window.updatePolygonSVG();
         
         if (window.polygonPoints.length > 2) {
@@ -612,36 +813,53 @@ window.onPointerMove = function(event) {
     if (currentTime - window.lastRaycastTime < 40) return;
     window.lastRaycastTime = currentTime;
 
-    if (typeof mouse !== 'undefined' && typeof raycaster !== 'undefined' && typeof camera !== 'undefined') {
-        mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
-        
-        let validIntersects = [];
-        if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup.visible) {
-            const rawIntersects = raycaster.intersectObjects(pitReserveGroup.children, false);
-            validIntersects = rawIntersects.filter(i => i.object.visible && i.object.isMesh);
-        }
-        
-        let dxfIntersect = null;
-        if (validIntersects.length === 0 && typeof appLayers !== 'undefined') {
-            const dxfObjects = [];
-            appLayers.forEach(l => {
-                if (l.type === 'dxf' && l.visible && l.threeObject) {
-                    l.threeObject.traverse(c => {
-                        if ((c.isMesh || c.isLineSegments) && c.visible) {
-                            c.userData.dxfLayerName = l.name;
-                            c.userData.dxfType = l.hasFaces ? 'Polymesh' : 'Polyline';
-                            dxfObjects.push(c);
-                        }
-                    });
-                }
-            });
-            const rawDxfIntersects = raycaster.intersectObjects(dxfObjects, false).filter(i => i.object.visible);
-            if (rawDxfIntersects.length > 0) {
-                dxfIntersect = rawDxfIntersects[0]; 
+    if (typeof mouse !== 'undefined' && typeof camera !== 'undefined') {
+        mouse.x = pos.nx; mouse.y = pos.ny; 
+        const rc = (typeof raycaster !== 'undefined' && raycaster) ? raycaster : _sharedRaycaster;
+        if (rc) {
+            rc.setFromCamera(mouse, camera);
+            
+            let intersectableObjects = [];
+
+            if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup.visible) {
+                pitReserveGroup.children.forEach(c => {
+                    if (c.isMesh && c.visible) {
+                        intersectableObjects.push(c);
+                    }
+                });
             }
+
+            if (typeof appLayers !== 'undefined') {
+                appLayers.forEach(l => {
+                    if (l.type === 'dxf' && l.visible && l.threeObject) {
+                        l.threeObject.traverse(c => {
+                            if ((c.isMesh || c.isLineSegments) && c.visible) {
+                                c.userData.dxfLayerName = l.name;
+                                c.userData.dxfType = l.hasFaces ? 'Polymesh' : 'Polyline';
+                                intersectableObjects.push(c);
+                            }
+                        });
+                    }
+                });
+            }
+
+            const intersects = rc.intersectObjects(intersectableObjects, false);
+
+            let pitIntersects = [];
+            let dxfIntersect = null;
+
+            const validHit = window.getFirstValidIntersection(intersects);
+
+            if (validHit) {
+                if (validHit.object.userData.dxfLayerName) {
+                    dxfIntersect = validHit;
+                } else {
+                    pitIntersects = [validHit];
+                }
+            }
+            
+            window.handleHover(pitIntersects, dxfIntersect);
         }
-        
-        window.handleHover(validIntersects, dxfIntersect);
     }
 }
 
@@ -651,7 +869,9 @@ window.onPointerUp = function(event) {
     if (window._justCentered) { window._justCentered = false; return; }
     
     if (typeof controls !== 'undefined' && !controls.enabled) {
-        if (!window.isDraggingRect && !window.isDrawingPolygon && (typeof isCustomOrbiting === 'undefined' || !isCustomOrbiting)) {
+        // PERBAIKAN: Melepaskan kendali bahkan saat 'isDrawingPolygon' bernilai true.
+        // Dengan ini, user bisa pan / zoom di sela-sela klik pembuatan polygon.
+        if (!window.isDraggingRect && (typeof isCustomOrbiting === 'undefined' || !isCustomOrbiting)) {
             controls.enabled = true;
         }
     }
@@ -687,30 +907,36 @@ window.onPointerUp = function(event) {
 // TINDAKAN KLIK (SELEKSI & APPEND)
 // ==========================================
 window.executeCenterPivot = function(pos) {
-    if (typeof mouse === 'undefined' || typeof raycaster === 'undefined' || typeof camera === 'undefined' || typeof controls === 'undefined') return;
+    if (typeof mouse === 'undefined' || typeof camera === 'undefined' || typeof controls === 'undefined') return;
 
-    mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
+    const rc = (typeof raycaster !== 'undefined' && raycaster) ? raycaster : _sharedRaycaster;
+    if (!rc) return;
+
+    mouse.x = pos.nx; mouse.y = pos.ny; rc.setFromCamera(mouse, camera);
     const intersectable = [];
     
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
         pitReserveGroup.traverse(c => { 
+            // Izinkan center pivot pada objek terekam asalkan terlihat
             if (c.isMesh && c.visible) intersectable.push(c); 
         });
     }
     if (typeof appLayers !== 'undefined') {
         appLayers.forEach(l => { 
-            if (l.visible && l.threeObject) {
+            if (l.type === 'dxf' && l.visible && l.threeObject) {
                 l.threeObject.traverse(c => { 
-                    if (c.isMesh && c.visible) intersectable.push(c); 
+                    if ((c.isMesh || c.isLineSegments) && c.visible) intersectable.push(c); 
                 });
             }
         });
     }
 
-    const intersects = raycaster.intersectObjects(intersectable, false).filter(i => i.object.visible);
+    const intersects = rc.intersectObjects(intersectable, false);
     
-    if (intersects.length > 0) { 
-        const newTarget = intersects[0].point;
+    const validHit = window.getFirstValidIntersection(intersects);
+    
+    if (validHit) { 
+        const newTarget = validHit.point;
         const offset = new THREE.Vector3().subVectors(newTarget, controls.target);
         camera.position.add(offset);
         controls.target.copy(newTarget); 
@@ -727,18 +953,27 @@ window.executeCenterPivot = function(pos) {
 
 window.executeClickAction = function(event, pos) {
     const mode = window.activeInteractionMode;
-    if (typeof mouse === 'undefined' || typeof raycaster === 'undefined' || typeof camera === 'undefined') return;
+    if (typeof mouse === 'undefined' || typeof camera === 'undefined') return;
 
-    mouse.x = pos.nx; mouse.y = pos.ny; raycaster.setFromCamera(mouse, camera);
+    const rc = (typeof raycaster !== 'undefined' && raycaster) ? raycaster : _sharedRaycaster;
+    if (!rc) return;
+
+    mouse.x = pos.nx; mouse.y = pos.ny; rc.setFromCamera(mouse, camera);
     
     const isAppend = event.shiftKey || window.isShiftDown;
     const isBlockMode = mode === 'select_block' || mode === 'record_block';
     const isRecordMode = mode === 'record_bench' || mode === 'record_block';
 
-    let intersects = [];
+    let intersectableObjects = [];
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
-        intersects = raycaster.intersectObjects(pitReserveGroup.children, false).filter(i => i.object.visible && i.object.isMesh);
+        pitReserveGroup.children.forEach(c => {
+            if (c.isMesh && c.visible && !c.userData.isRecorded) {
+                intersectableObjects.push(c);
+            }
+        });
     }
+
+    const intersects = rc.intersectObjects(intersectableObjects, false);
 
     if (intersects.length === 0) { 
         if (!isAppend) window.clearSelection(); 
@@ -753,7 +988,7 @@ window.executeClickAction = function(event, pos) {
 
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup) {
         pitReserveGroup.children.forEach(m => {
-            if (!m.isMesh || !m.visible) return;
+            if (!m.isMesh || !m.visible || m.userData.isRecorded) return;
             if ((m.userData.type || 'pit') !== targetType) return;
             const mParsed = window.parseCompositeId(m.userData);
 
@@ -779,11 +1014,22 @@ window.executeClickAction = function(event, pos) {
 }
 
 // ==========================================
-// PEMILIHAN KAWASAN & POLIGON (MEMPERTIMBANGKAN OCCLUSION/TERLIHAT MATA)
+// PEMILIHAN KAWASAN & POLIGON
 // ==========================================
 window.updatePolygonSVG = function(currentPos = null) {
     if (window.polygonPoints.length === 0 || !polygonShape || !polygonLine) return;
     
+    // PEMBARUAN: Kalkulasi ulang posisi 2D SVG berbasis koordinat 3D mengikuti posisi kamera terbaru
+    if (typeof camera !== 'undefined' && container) {
+        window.polygonPoints.forEach(p => {
+            if (p.vec3 && _tempScreenPos) {
+                _tempScreenPos.copy(p.vec3).project(camera);
+                p.x = (_tempScreenPos.x * 0.5 + 0.5) * container.clientWidth;
+                p.y = (_tempScreenPos.y * -0.5 + 0.5) * container.clientHeight;
+            }
+        });
+    }
+
     let pointsForShape = [...window.polygonPoints];
     if (currentPos) {
         pointsForShape.push({ x: currentPos.x, y: currentPos.y });
@@ -792,7 +1038,8 @@ window.updatePolygonSVG = function(currentPos = null) {
     polygonShape.setAttribute('points', pointsForShape.map(p => `${p.x},${p.y}`).join(' '));
     
     if (currentPos) {
-        polygonLine.setAttribute('points', `${window.polygonPoints[window.polygonPoints.length-1].x},${window.polygonPoints[window.polygonPoints.length-1].y} ${currentPos.x},${currentPos.y}`);
+        const lastP = window.polygonPoints[window.polygonPoints.length-1];
+        polygonLine.setAttribute('points', `${lastP.x},${lastP.y} ${currentPos.x},${currentPos.y}`);
     } else {
         polygonLine.setAttribute('points', '');
     }
@@ -801,6 +1048,7 @@ window.updatePolygonSVG = function(currentPos = null) {
 window.finishPolygonSelection = function() {
     window.isDrawingPolygon = false; 
     if(typeof controls !== 'undefined') controls.enabled = true; 
+    window.updatePolygonSVG(); // Sinkronisasi titik terakhir
     if(polygonLine) polygonLine.setAttribute('points', '');
     if (window.polygonPoints.length > 2) window.processAreaSelection(null, window.polygonPoints, window.isShiftDown);
     setTimeout(() => { if(polygonShape) polygonShape.setAttribute('points', ''); window.polygonPoints = []; }, 300);
@@ -824,19 +1072,18 @@ window.processAreaSelection = function(rectBounds, polyPoints, isAppend = false)
     let targetTypes = new Set();
     let checkedRays = new Set();
     
-    const localRaycaster = typeof THREE !== 'undefined' ? new THREE.Raycaster() : null;
-    if(!localRaycaster) return;
+    if(!_sharedRaycaster) return;
 
     pitReserveGroup.children.forEach(mesh => {
-        if (!mesh.visible || !mesh.isMesh) return;
+        if (!mesh.visible || !mesh.isMesh || mesh.userData.isRecorded) return;
         if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
         
         if(_tempVector3 && _tempScreenPos) {
             mesh.geometry.boundingBox.getCenter(_tempVector3);
             mesh.updateMatrixWorld(true);
-            _tempVector3.applyMatrix4(mesh.matrixWorld); // Pastikan pusat bounding box ada di world space
+            _tempVector3.applyMatrix4(mesh.matrixWorld); 
             
-            const worldCenter = _tempVector3.clone(); // Simpan untuk kalkulasi jarak 3D
+            const worldCenter = _tempVector3.clone(); 
             
             _tempScreenPos.copy(_tempVector3).project(camera);
             
@@ -856,15 +1103,20 @@ window.processAreaSelection = function(rectBounds, polyPoints, isAppend = false)
             }
             
             if (isInside) {
-                // [PERBAIKAN] Presisi raykey dinaikkan agar tidak mengabaikan block kecil yang berdekatan
                 const rayKey = `${nx.toFixed(4)},${ny.toFixed(4)}`; 
                 
                 if (!checkedRays.has(rayKey)) {
                     checkedRays.add(rayKey);
                     
-                    localRaycaster.setFromCamera({x: nx, y: ny}, camera);
-                    const intersects = localRaycaster.intersectObjects(pitReserveGroup.children, false);
-                    const validHits = intersects.filter(i => i.object.visible && i.object.isMesh);
+                    if(_sharedMouseVec) {
+                        _sharedMouseVec.set(nx, ny);
+                        _sharedRaycaster.setFromCamera(_sharedMouseVec, camera);
+                    } else {
+                        _sharedRaycaster.setFromCamera({x: nx, y: ny}, camera);
+                    }
+                    
+                    const intersectables = pitReserveGroup.children.filter(c => c.isMesh && c.visible && !c.userData.isRecorded);
+                    const validHits = _sharedRaycaster.intersectObjects(intersectables, false);
                     
                     if (validHits.length > 0) {
                         const topHit = validHits[0].object;
@@ -872,26 +1124,20 @@ window.processAreaSelection = function(rectBounds, polyPoints, isAppend = false)
                         targetBases.add(parsed.base);
                         targetTypes.add(topHit.userData.type || 'pit');
 
-                        // [PERBAIKAN] Cek jarak Z-Depth. Jika bounding box meleset saat diraycast, 
-                        // tapi mesh ini sebenarnya ada di depan/sekitar area yang sama, tetap tambahkan!
                         const distToMeshCenter = camera.position.distanceTo(worldCenter);
                         const distToHit = validHits[0].distance;
                         
-                        // Margin toleransi 2.5 unit jika ray tembus melewati block kecil (misal stupa)
                         if (distToMeshCenter <= distToHit + 2.5) { 
                             const parsedMesh = window.parseCompositeId(mesh.userData);
                             targetBases.add(parsedMesh.base);
                             targetTypes.add(mesh.userData.type || 'pit');
                         }
                     } else {
-                        // Jika meleset total (kosong), berarti celah terbuka dan tetap terlihat
                         const parsedMesh = window.parseCompositeId(mesh.userData);
                         targetBases.add(parsedMesh.base);
                         targetTypes.add(mesh.userData.type || 'pit');
                     }
                 } else {
-                    // [PERBAIKAN] RayKey ini pernah ditelusuri.
-                    // Block kecil menumpuk di pixel layar yang sama. Langsung tambahkan ke seleksi.
                     const parsedMesh = window.parseCompositeId(mesh.userData);
                     targetBases.add(parsedMesh.base);
                     targetTypes.add(mesh.userData.type || 'pit');
@@ -902,7 +1148,7 @@ window.processAreaSelection = function(rectBounds, polyPoints, isAppend = false)
 
     if (targetBases.size > 0) {
         pitReserveGroup.children.forEach(mesh => {
-            if (!mesh.visible || !mesh.isMesh) return;
+            if (!mesh.visible || !mesh.isMesh || mesh.userData.isRecorded) return;
             const parsed = window.parseCompositeId(mesh.userData);
             const type = mesh.userData.type || 'pit';
 
@@ -936,7 +1182,7 @@ window.pointInPolygon = function(point, vs) {
 }
 
 // ==========================================
-// RENDER PANEL INFORMASI (STATIS & RAPI)
+// RENDER PANEL INFORMASI
 // ==========================================
 window.renderInfoPanel = function() {
     const infoPanel = document.getElementById('info-panel');
@@ -1065,7 +1311,7 @@ window.renderInfoPanel = function() {
 window.displaySelectionInfo = function() { window.renderInfoPanel(); }
 
 // ==========================================
-// PENGATURAN TOGGLE AUTO-RECORD BARU
+// PENGATURAN TOGGLE AUTO-RECORD 
 // ==========================================
 window.toggleAutoRecord = function() {
     window.isAutoRecordActive = !window.isAutoRecordActive;
@@ -1087,106 +1333,121 @@ window.toggleAutoRecord = function() {
 }
 
 // ==========================================
-// URUTAN & RAKAMAN REKOD (BENCH AND ABOVE LOGIC)
+// URUTAN & RAKAMAN REKOD (LOGIK BARU TERPISAH PIT/DISP & NAMING BARU)
 // ==========================================
 window.recordSelectedMeshes = function() {
     if (window.selectedMeshes.size === 0) return;
     
     window.redoStack = []; 
-    let expandedMeshes = new Set();
     
-    let isDispAction = false;
+    let pitSelected = new Set();
+    let dispSelected = new Set();
+    
     window.selectedMeshes.forEach(target => {
-        if(target.userData.type === 'disp' || target.userData.type === 'disposal') isDispAction = true;
+        const type = target.userData.type || 'pit';
+        if (type === 'disp' || type === 'disposal') {
+            dispSelected.add(target);
+        } else {
+            pitSelected.add(target);
+        }
     });
 
-    window.selectedMeshes.forEach(target => {
-        const targetType = target.userData.type || 'pit';
-        const targetParsed = window.parseCompositeId(target.userData);
+    const processGroup = (groupMeshes, isDispAction) => {
+        if (groupMeshes.size === 0) return;
         
-        // [PERBAIKAN] Disposal Data mengabaikan 'Bench Dependency'
-        // Hanya Pit Data yang akan mengekspansi seleksi ke bench di atasnya
+        let expandedMeshes = new Set();
+        
         if (!isDispAction) {
-            if (!target.geometry.boundingBox) target.geometry.computeBoundingBox();
+            groupMeshes.forEach(target => {
+                const targetType = target.userData.type || 'pit';
+                const targetParsed = window.parseCompositeId(target.userData);
+                
+                if (!target.geometry.boundingBox) target.geometry.computeBoundingBox();
+                
+                let targetCenterY = 0;
+                if(_tempVector3) {
+                    target.updateMatrixWorld(true);
+                    targetCenterY = target.geometry.boundingBox.getCenter(_tempVector3).applyMatrix4(target.matrixWorld).y;
+                }
+
+                if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
+                    pitReserveGroup.children.forEach(m => {
+                        if (!m.isMesh || !m.visible || m.userData.isRecorded) return;
+                        if ((m.userData.type || 'pit') !== targetType) return;
+                        
+                        const mParsed = window.parseCompositeId(m.userData);
+                        if (mParsed.base !== targetParsed.base) return; 
+
+                        if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                        
+                        let mCenterY = 0;
+                        if(_tempVector3) {
+                            m.updateMatrixWorld(true);
+                            mCenterY = m.geometry.boundingBox.getCenter(_tempVector3).applyMatrix4(m.matrixWorld).y;
+                        }
+                        
+                        if (mCenterY >= targetCenterY - 0.5 || mParsed.bench === targetParsed.bench) {
+                            expandedMeshes.add(m);
+                        }
+                    });
+                }
+            });
+            groupMeshes.forEach(m => expandedMeshes.add(m));
+        } else {
+            groupMeshes.forEach(m => expandedMeshes.add(m));
+        }
+
+        let combinedWaste = 0, combinedResource = 0; 
+        let uniqueRecordNames = new Set(), recordedMeshesInStep = [];
+        
+        expandedMeshes.forEach(m => {
+            combinedWaste += m.userData.wasteVol || 0; 
+            combinedResource += m.userData.resVol || 0; 
             
-            let targetCenterY = 0;
-            if(_tempVector3) {
-                target.updateMatrixWorld(true);
-                targetCenterY = target.geometry.boundingBox.getCenter(_tempVector3).applyMatrix4(target.matrixWorld).y;
-            }
+            const parsed = window.parseCompositeId(m.userData);
+            uniqueRecordNames.add(parsed.record); 
+            
+            m.userData.isRecorded = true;
+            m.userData.recordType = isDispAction ? 'disp' : 'pit'; 
+            
+            m.visible = false; 
+            window.applyMaterialState(m, 'default');
+            
+            recordedMeshesInStep.push(m);
+        });
+        
+        const recArr = Array.from(uniqueRecordNames); 
+        let seqName = "";
 
-            if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
-                pitReserveGroup.children.forEach(m => {
-                    if (!m.isMesh || !m.visible) return;
-                    if ((m.userData.type || 'pit') !== targetType) return;
-                    
-                    const mParsed = window.parseCompositeId(m.userData);
-                    if (mParsed.base !== targetParsed.base) return; 
-
-                    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
-                    
-                    let mCenterY = 0;
-                    if(_tempVector3) {
-                        m.updateMatrixWorld(true);
-                        mCenterY = m.geometry.boundingBox.getCenter(_tempVector3).applyMatrix4(m.matrixWorld).y;
-                    }
-                    
-                    // Pit Data: Elevasi Atas (Unburden) harus terekam jika elevasi Bawah dipilih
-                    if (mCenterY >= targetCenterY - 0.5 || mParsed.bench === targetParsed.bench) {
-                        expandedMeshes.add(m);
-                    }
-                });
+        if (recArr.length === 1) {
+            seqName = `N - ${recArr[0]}`;
+        } else {
+            const baseGroups = new Set();
+            recArr.forEach(r => { const p = r.split('/'); baseGroups.add(`${p[0]}/${p[1]}/${p[2]}`); });
+            
+            if (baseGroups.size === 1) {
+                seqName = `M - ${Array.from(baseGroups)[0]}`;
+            } else {
+                let counter = isDispAction ? window.dispSequenceCounter++ : window.pitSequenceCounter++;
+                seqName = `S${counter} - ${recArr.length} Blocks`;
             }
         }
-    });
-
-    window.selectedMeshes.forEach(m => expandedMeshes.add(m));
-
-    let combinedWaste = 0, combinedResource = 0; 
-    let uniqueRecordNames = new Set(), recordedMeshesInStep = [];
-    
-    expandedMeshes.forEach(m => {
-        combinedWaste += m.userData.wasteVol || 0; 
-        combinedResource += m.userData.resVol || 0; 
         
-        const parsed = window.parseCompositeId(m.userData);
-        uniqueRecordNames.add(parsed.record); 
-        
-        m.userData.isRecorded = true;
-        m.userData.recordType = isDispAction ? 'disp' : 'pit'; 
-        
-        m.visible = false; 
-        window.applyMaterialState(m, 'default');
-        
-        recordedMeshesInStep.push(m);
-    });
-    
-    const recArr = Array.from(uniqueRecordNames); 
-    let seqName = "";
-
-    if (recArr.length === 1) {
-        seqName = recArr[0];
-    } else {
-        const baseGroups = new Set();
-        recArr.forEach(r => { const p = r.split('/'); baseGroups.add(`${p[0]}/${p[1]}/${p[2]}`); });
-        if (baseGroups.size === 1) seqName = `${Array.from(baseGroups)[0]} (Multi-Bench)`;
-        else {
-            let counter = isDispAction ? window.dispSequenceCounter++ : window.pitSequenceCounter++;
-            seqName = `Selection #${counter} (${recArr.length} Target)`;
+        if (isDispAction) {
+            window.dispSequenceRecords.push({ name: seqName, waste: combinedWaste });
+            window.dispTotalWaste += combinedWaste;
+        } else {
+            window.pitSequenceRecords.push({ name: seqName, waste: combinedWaste, resource: combinedResource });
+            window.pitTotalWaste += combinedWaste; 
+            window.pitTotalResource += combinedResource; 
         }
-    }
-    
-    if (isDispAction) {
-        window.dispSequenceRecords.push({ name: seqName, waste: combinedWaste });
-        window.dispTotalWaste += combinedWaste;
-    } else {
-        window.pitSequenceRecords.push({ name: seqName, waste: combinedWaste, resource: combinedResource });
-        window.pitTotalWaste += combinedWaste; 
-        window.pitTotalResource += combinedResource; 
-    }
-    
-    window.undoStack.push({ type: isDispAction ? 'disp' : 'pit', name: seqName, meshes: recordedMeshesInStep, waste: combinedWaste, resource: combinedResource });
-    if (window.undoStack.length > window.MAX_UNDO_STEPS) window.undoStack.shift();
+        
+        window.undoStack.push({ type: isDispAction ? 'disp' : 'pit', name: seqName, meshes: recordedMeshesInStep, waste: combinedWaste, resource: combinedResource });
+        if (window.undoStack.length > window.MAX_UNDO_STEPS) window.undoStack.shift();
+    };
+
+    processGroup(dispSelected, true);
+    processGroup(pitSelected, false);
     
     window.updateSequenceUI(); 
     window.updateRecordedVisibility(); 
@@ -1202,15 +1463,17 @@ window.undoLastRecord = function() {
     const lastAction = window.undoStack.pop(); window.redoStack.push(lastAction);
     if (window.redoStack.length > window.MAX_UNDO_STEPS) window.redoStack.shift();
     
+    const isSelectionFormat = /^S\d+ -/.test(lastAction.name);
+    
     if (lastAction.type === 'disp') {
         window.dispSequenceRecords.pop(); 
         window.dispTotalWaste -= lastAction.waste;
-        if (lastAction.name.startsWith('Selection #')) window.dispSequenceCounter = Math.max(1, window.dispSequenceCounter - 1);
+        if (isSelectionFormat) window.dispSequenceCounter = Math.max(1, window.dispSequenceCounter - 1);
     } else {
         window.pitSequenceRecords.pop(); 
         window.pitTotalWaste -= lastAction.waste; 
         window.pitTotalResource -= lastAction.resource;
-        if (lastAction.name.startsWith('Selection #')) window.pitSequenceCounter = Math.max(1, window.pitSequenceCounter - 1);
+        if (isSelectionFormat) window.pitSequenceCounter = Math.max(1, window.pitSequenceCounter - 1);
     }
     
     lastAction.meshes.forEach(m => {
@@ -1218,7 +1481,7 @@ window.undoLastRecord = function() {
         window.applyMaterialState(m, 'default');
         
         const isResource = (m.userData.burden || '').toUpperCase() === 'RESOURCE';
-        const isPit = m.userData.type === 'pit' || !m.userData.type; // default pit
+        const isPit = m.userData.type === 'pit' || !m.userData.type;
         const isDisp = m.userData.type === 'disp' || m.userData.type === 'disposal';
 
         if (isPit && !isResource) {
@@ -1246,12 +1509,14 @@ window.redoLastUndo = function() {
         window.applyMaterialState(m, 'default');
     });
     
+    const isSelectionFormat = /^S\d+ -/.test(actionToRedo.name);
+
     if (actionToRedo.type === 'disp') {
-        if (actionToRedo.name.startsWith('Selection #')) window.dispSequenceCounter++;
+        if (isSelectionFormat) window.dispSequenceCounter++;
         window.dispSequenceRecords.push({ name: actionToRedo.name, waste: actionToRedo.waste });
         window.dispTotalWaste += actionToRedo.waste;
     } else {
-        if (actionToRedo.name.startsWith('Selection #')) window.dispSequenceCounter++;
+        if (isSelectionFormat) window.dispSequenceCounter++;
         window.pitSequenceRecords.push({ name: actionToRedo.name, waste: actionToRedo.waste, resource: actionToRedo.resource });
         window.pitTotalWaste += actionToRedo.waste; 
         window.pitTotalResource += actionToRedo.resource;
@@ -1261,6 +1526,9 @@ window.redoLastUndo = function() {
     window.updateRecordedVisibility();
 }
 
+// ==========================================
+// PEMBERSIHAN VIEW DAN RESET STATE GLOBAL
+// ==========================================
 window.resetSequenceAndView = function() {
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup) {
         pitReserveGroup.children.forEach(mesh => {
@@ -1268,7 +1536,7 @@ window.resetSequenceAndView = function() {
             mesh.userData.isRecorded = false; delete mesh.userData.recordType;
             
             const isResource = (mesh.userData.burden || '').toUpperCase() === 'RESOURCE';
-            const isPit = mesh.userData.type === 'pit' || !mesh.userData.type; // default pit
+            const isPit = mesh.userData.type === 'pit' || !mesh.userData.type;
             const isDisp = mesh.userData.type === 'disp' || mesh.userData.type === 'disposal';
 
             if (isPit && !isResource) {
@@ -1303,13 +1571,7 @@ window.resetSequenceAndView = function() {
     window.displaySelectionInfo(); window.updateSequenceUI();
     
     if (typeof drawGroup !== 'undefined' && drawGroup) {
-        drawGroup.children.forEach(c => { 
-            if (c.geometry) c.geometry.dispose(); 
-            if (c.material) {
-                if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
-                else c.material.dispose();
-            }
-        }); 
+        drawGroup.children.forEach(c => window.cleanseZombieMesh(c)); 
         drawGroup.clear();
     }
     if (typeof finishedDrawings !== 'undefined') finishedDrawings = [];
@@ -1322,71 +1584,71 @@ window.resetSequenceAndView = function() {
     if(container) container.style.cursor = 'default';
 }
 
+// ==========================================
+// RENDER UI SEQUENCES (VIRTUAL SCROLL ENABLED)
+// ==========================================
 window.updateSequenceUI = function() {
-    const pitTbody = document.getElementById('sequence-tbody'); 
+    const renderPitRow = (record) => {
+        let sr = record.resource > 0 ? (record.waste / record.resource).toFixed(2) : '-';
+        const row = document.createElement('div');
+        row.className = "grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 px-2 text-[10px] lg:text-[9px] hover:bg-slate-800/50 transition-colors h-[30px] items-center border-b border-slate-800/50 box-border";
+        row.innerHTML = `
+            <div class="text-slate-300 truncate" title="${record.name}">${record.name}</div>
+            <div class="text-right text-blue-400 font-mono truncate">${Number(record.waste.toFixed(2)).toLocaleString()}</div>
+            <div class="text-right text-orange-400 font-mono truncate">${Number(record.resource.toFixed(2)).toLocaleString()}</div>
+            <div class="text-right text-green-400 font-mono truncate">${sr}</div>
+        `;
+        return row;
+    };
+
+    const renderDispRow = (record) => {
+        const row = document.createElement('div');
+        row.className = "grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 px-2 text-[10px] lg:text-[9px] hover:bg-slate-800/50 transition-colors h-[30px] items-center border-b border-slate-800/50 box-border";
+        row.innerHTML = `
+            <div class="text-slate-300 truncate" title="${record.name}">${record.name}</div>
+            <div class="text-right text-emerald-400 font-mono truncate">${Number(record.waste.toFixed(2)).toLocaleString()}</div>
+            <div class="text-right text-slate-600 font-mono truncate">-</div>
+            <div class="text-right text-slate-600 font-mono truncate">-</div>
+        `;
+        return row;
+    };
+
     const pitPlaceholder = document.getElementById('sequence-placeholder');
-    if (pitTbody && pitPlaceholder) {
-        pitTbody.innerHTML = '';
-        if (window.pitSequenceRecords.length === 0) { pitPlaceholder.style.display = 'flex'; } 
-        else {
-            pitPlaceholder.style.display = 'none';
-            window.pitSequenceRecords.forEach(record => {
-                let sr = record.resource > 0 ? (record.waste / record.resource).toFixed(2) : '-';
-                const row = document.createElement('div');
-                row.className = "grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 py-1.5 px-2 text-[10px] lg:text-[9px] hover:bg-slate-800/50 transition-colors";
-                row.innerHTML = `
-                    <div class="text-slate-300 truncate" title="${record.name}">${record.name}</div>
-                    <div class="text-right text-blue-400 font-mono truncate">${Number(record.waste.toFixed(2)).toLocaleString()}</div>
-                    <div class="text-right text-orange-400 font-mono truncate">${Number(record.resource.toFixed(2)).toLocaleString()}</div>
-                    <div class="text-right text-green-400 font-mono truncate">${sr}</div>
-                `;
-                pitTbody.appendChild(row);
-            });
-        }
-        
-        const pitElWaste = document.getElementById('sequence-waste-total');
-        if (pitElWaste) pitElWaste.textContent = `${Number(window.pitTotalWaste.toFixed(2)).toLocaleString()}`;
-        const pitElResource = document.getElementById('sequence-resource-total');
-        if (pitElResource) pitElResource.textContent = `${Number(window.pitTotalResource.toFixed(2)).toLocaleString()}`;
-        const pitElSr = document.getElementById('sequence-sr-total');
-        if (pitElSr) pitElSr.textContent = window.pitTotalResource > 0 ? (window.pitTotalWaste / window.pitTotalResource).toFixed(2) : '-';
-        
-        const pitScrollContainer = document.getElementById('sequence-scroll-container');
-        if (pitScrollContainer && window.pitSequenceRecords.length > 0) { setTimeout(() => { pitScrollContainer.scrollTop = pitScrollContainer.scrollHeight; }, 10); }
+    if (pitPlaceholder) {
+        pitPlaceholder.style.display = window.pitSequenceRecords.length === 0 ? 'flex' : 'none';
+    }
+    window.renderVirtualList('sequence-scroll-container', 'sequence-tbody', window.pitSequenceRecords, renderPitRow);
+    
+    const pitElWaste = document.getElementById('sequence-waste-total');
+    if (pitElWaste) pitElWaste.textContent = `${Number(window.pitTotalWaste.toFixed(2)).toLocaleString()}`;
+    const pitElResource = document.getElementById('sequence-resource-total');
+    if (pitElResource) pitElResource.textContent = `${Number(window.pitTotalResource.toFixed(2)).toLocaleString()}`;
+    const pitElSr = document.getElementById('sequence-sr-total');
+    if (pitElSr) pitElSr.textContent = window.pitTotalResource > 0 ? (window.pitTotalWaste / window.pitTotalResource).toFixed(2) : '-';
+    
+    const pitScrollContainer = document.getElementById('sequence-scroll-container');
+    if (pitScrollContainer && window.pitSequenceRecords.length > 0) { 
+        setTimeout(() => { pitScrollContainer.scrollTop = pitScrollContainer.scrollHeight; }, 10); 
     }
 
-    const dispTbody = document.getElementById('disp-sequence-tbody'); 
     const dispPlaceholder = document.getElementById('disp-sequence-placeholder');
-    if (dispTbody && dispPlaceholder) {
-        dispTbody.innerHTML = '';
-        if (window.dispSequenceRecords.length === 0) { dispPlaceholder.style.display = 'flex'; } 
-        else {
-            dispPlaceholder.style.display = 'none';
-            window.dispSequenceRecords.forEach(record => {
-                const row = document.createElement('div');
-                row.className = "grid grid-cols-[minmax(0,1fr)_55px_55px_35px] lg:grid-cols-[minmax(0,1fr)_65px_65px_35px] gap-2 py-1.5 px-2 text-[10px] lg:text-[9px] hover:bg-slate-800/50 transition-colors";
-                row.innerHTML = `
-                    <div class="text-slate-300 truncate" title="${record.name}">${record.name}</div>
-                    <div class="text-right text-emerald-400 font-mono truncate">${Number(record.waste.toFixed(2)).toLocaleString()}</div>
-                    <div class="text-right text-slate-600 font-mono truncate">-</div>
-                    <div class="text-right text-slate-600 font-mono truncate">-</div>
-                `;
-                dispTbody.appendChild(row);
-            });
-        }
-        
-        const dispElWaste = document.getElementById('disp-sequence-waste-total');
-        if (dispElWaste) dispElWaste.textContent = `${Number(window.dispTotalWaste.toFixed(2)).toLocaleString()}`;
-        const dispElResource = document.getElementById('disp-sequence-resource-total');
-        if (dispElResource) dispElResource.textContent = `-`;
-        const dispElSr = document.getElementById('disp-sequence-sr-total');
-        if (dispElSr) dispElSr.textContent = `-`;
-        
-        const dispScrollContainer = document.getElementById('disp-sequence-scroll-container');
-        if (dispScrollContainer && window.dispSequenceRecords.length > 0) { setTimeout(() => { dispScrollContainer.scrollTop = dispScrollContainer.scrollHeight; }, 10); }
+    if (dispPlaceholder) {
+        dispPlaceholder.style.display = window.dispSequenceRecords.length === 0 ? 'flex' : 'none';
+    }
+    window.renderVirtualList('disp-sequence-scroll-container', 'disp-sequence-tbody', window.dispSequenceRecords, renderDispRow);
+    
+    const dispElWaste = document.getElementById('disp-sequence-waste-total');
+    if (dispElWaste) dispElWaste.textContent = `${Number(window.dispTotalWaste.toFixed(2)).toLocaleString()}`;
+    const dispElResource = document.getElementById('disp-sequence-resource-total');
+    if (dispElResource) dispElResource.textContent = `-`;
+    const dispElSr = document.getElementById('disp-sequence-sr-total');
+    if (dispElSr) dispElSr.textContent = `-`;
+    
+    const dispScrollContainer = document.getElementById('disp-sequence-scroll-container');
+    if (dispScrollContainer && window.dispSequenceRecords.length > 0) { 
+        setTimeout(() => { dispScrollContainer.scrollTop = dispScrollContainer.scrollHeight; }, 10); 
     }
 
-    // Update state ketersediaan tombol Bin (Hapus)
     const btnClearPit = document.getElementById('btn-clear-pit-record');
     if (btnClearPit) btnClearPit.disabled = window.pitSequenceRecords.length === 0;
 
@@ -1416,7 +1678,6 @@ window.clearPitRecord = function() {
                     mesh.visible = typeof window.isPitResourceVisible !== 'undefined' ? window.isPitResourceVisible : true;
                 }
 
-                // Kembalikan warna asli hanya jika sedang tidak dalam mode diseleksi
                 if (!window.selectedMeshes.has(mesh)) {
                     window.applyMaterialState(mesh, 'default');
                 }
@@ -1424,7 +1685,6 @@ window.clearPitRecord = function() {
         });
     }
     
-    // Bersihkan history undo/redo yang berkaitan dengan pit
     window.undoStack = window.undoStack.filter(action => action.type !== 'pit');
     window.redoStack = window.redoStack.filter(action => action.type !== 'pit');
     
@@ -1446,7 +1706,6 @@ window.clearDispRecord = function() {
 
                 mesh.visible = typeof window.isDispWasteVisible !== 'undefined' ? window.isDispWasteVisible : true;
 
-                // Kembalikan warna asli hanya jika sedang tidak dalam mode diseleksi
                 if (!window.selectedMeshes.has(mesh)) {
                     window.applyMaterialState(mesh, 'default');
                 }
@@ -1454,7 +1713,6 @@ window.clearDispRecord = function() {
         });
     }
 
-    // Bersihkan history undo/redo yang berkaitan dengan disp
     window.undoStack = window.undoStack.filter(action => action.type !== 'disp');
     window.redoStack = window.redoStack.filter(action => action.type !== 'disp');
     

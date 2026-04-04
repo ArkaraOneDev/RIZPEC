@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'panel-geometry': view3D,
         'panel-range': view3D,
         'panel-link': view3D,
-        'panel-scheduling': viewScheduling,
+        'panel-scheduling': view3D, // Diubah menjadi view3D agar menampilkan layar Three.js
         'panel-report': viewReport
     };
 
@@ -140,6 +140,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     layoutDropdown.classList.remove('hidden');
                 } else {
                     layoutDropdown.classList.add('hidden');
+                }
+            }
+            
+            // 8. Kontrol visibilitas Geolocation Toolbar
+            const geoToolbarContainer = document.getElementById('geo-toolbar-container');
+            if (geoToolbarContainer) {
+                // Sembunyikan di tab tertentu
+                if (['panel-project', 'panel-file', 'panel-report'].includes(targetId)) {
+                    geoToolbarContainer.classList.add('hidden');
+                } else {
+                    geoToolbarContainer.classList.remove('hidden');
                 }
             }
         });
