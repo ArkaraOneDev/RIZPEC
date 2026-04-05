@@ -2226,7 +2226,26 @@ window.updateGeometryPitListUI = async function() {
 
                     if (isGeometryReady) {
                         let hasSubset = (meta.cols && meta.cols['pit-col-subset'] && meta.cols['pit-col-subset'] !== "");
-                        if (!pits.find(p => p.name === exactPitName)) pits.push({ name: exactPitName, hasSubset: hasSubset });
+                        
+                        // CEK APAKAH PIT BERHAK MENDAPATKAN OPSI "RES. ZONE"
+                        let hasResZone = false;
+                        if (meta.cols) {
+                            const wt = meta.cols['pit-col-waste-thickness'];
+                            const rt = meta.cols['pit-col-resource-thickness'];
+                            const qf = meta.cols['pit-col-quality-from'];
+                            const qt = meta.cols['pit-col-quality-to'];
+                            
+                            // Jika ada minimal salah satu dari Waste, Resource, ATAU Quality (From & To) yang di map
+                            if ((wt && wt.trim() !== '') || 
+                                (rt && rt.trim() !== '') || 
+                                (qf && qf.trim() !== '' && qt && qt.trim() !== '')) {
+                                hasResZone = true;
+                            }
+                        }
+
+                        if (!pits.find(p => p.name === exactPitName)) {
+                            pits.push({ name: exactPitName, hasSubset: hasSubset, hasResZone: hasResZone });
+                        }
                         
                         if (meta.summaryObj && meta.summaryObj.subsets) {
                             meta.summaryObj.subsets.forEach(s => allSubsets.add(s));
@@ -2261,6 +2280,13 @@ window.updateGeometryPitListUI = async function() {
                 window.pitColorModes[pit] = currentMode;
                 localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
             }
+            
+            // Fallback: Jika mode tersimpan adalah 'Res. Zone' tapi karena setting dihapus/none maka pit hilang akses
+            if (currentMode === 'Res. Zone' && !pitObj.hasResZone) {
+                currentMode = pitObj.hasSubset ? 'Subset' : 'Burden';
+                window.pitColorModes[pit] = currentMode;
+                localStorage.setItem('rizpec_pit_color_modes', JSON.stringify(window.pitColorModes));
+            }
 
             let optionsHtml = `<option value="Burden" ${currentMode === 'Burden' ? 'selected' : ''}>Burden</option>`;
             if (pitObj.hasSubset) {
@@ -2269,7 +2295,11 @@ window.updateGeometryPitListUI = async function() {
             // Tambahan 3 Mode Pro
             optionsHtml += `<option value="Res. Incremental" ${currentMode === 'Res. Incremental' ? 'selected' : ''}>Res. Incremental</option>`;
             optionsHtml += `<option value="Res. Cumulative" ${currentMode === 'Res. Cumulative' ? 'selected' : ''}>Res. Cumulative</option>`;
-            optionsHtml += `<option value="Res. Zone" ${currentMode === 'Res. Zone' ? 'selected' : ''}>Res. Zone</option>`;
+            
+            // Hanya tambahkan Res. Zone jika memenuhi syarat minimum pemetaan di setting CSV
+            if (pitObj.hasResZone) {
+                optionsHtml += `<option value="Res. Zone" ${currentMode === 'Res. Zone' ? 'selected' : ''}>Res. Zone</option>`;
+            }
 
             const div = document.createElement('div');
             
@@ -2536,7 +2566,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==============================================================
 // PROCESSING MODAL UI TRIGGER 
 // ==============================================================
-window.showProcessingModal = function(pitId, mode, selectElement) {
+window.showProcessingModal = async function(pitId, mode, selectElement) {
     // 1. Injeksi Modal ke DOM jika belum ada
     if (!document.getElementById('processing-modal')) {
         const modalHtml = `
@@ -2569,59 +2599,153 @@ window.showProcessingModal = function(pitId, mode, selectElement) {
     title.innerHTML = `<i class="fa-solid fa-gear mr-2 text-blue-400"></i> ${mode} - ${pitId}`;
     content.innerHTML = '';
 
-    // Ambil daftar Header jika mode "Res. Zone"
-    let headers = [];
-    if (window.pitStates && window.pitStates[pitId] && window.pitStates[pitId].mrHeaders) {
-        headers = window.pitStates[pitId].mrHeaders;
+    // Ambil daftar Kategori secara pintar jika mode "Res. Zone"
+    let availableCategories = [];
+    if (mode === 'Res. Zone') {
+        try {
+            let pitCols = {};
+            let pitQualities = {};
+
+            // Ambil referensi columns dan qualities (Dari RAM jika ada, fallback ke DB)
+            if (window.pitStates && window.pitStates[pitId]) {
+                pitCols = window.pitStates[pitId].cols || {};
+                if (window.pitStates[pitId].summaryObj) {
+                    pitQualities = window.pitStates[pitId].summaryObj.qualities || {};
+                }
+            }
+
+            if (typeof RizpecDB !== 'undefined') {
+                const safeId = pitId.replace(/\s+/g, '_');
+                const meta = await RizpecDB.get(`rizpec_pit_entity_${safeId}_meta`);
+                if (meta) {
+                    if (Object.keys(pitCols).length === 0) pitCols = meta.cols || {};
+                    if (Object.keys(pitQualities).length === 0 && meta.summaryObj) {
+                        pitQualities = meta.summaryObj.qualities || {};
+                    }
+                }
+            }
+
+            // Pintar mengecek: Apakah user mapping Waste Thick?
+            if (pitCols['pit-col-waste-thickness'] && pitCols['pit-col-waste-thickness'].trim() !== '') {
+                availableCategories.push('Waste Thick');
+            }
+
+            // Pintar mengecek: Apakah user mapping Resource Thick?
+            if (pitCols['pit-col-resource-thickness'] && pitCols['pit-col-resource-thickness'].trim() !== '') {
+                availableCategories.push('Resource Thick');
+            }
+
+            // Pintar mengecek: Apakah user mapping Quality From dan To?
+            if (pitCols['pit-col-quality-from'] && pitCols['pit-col-quality-from'].trim() !== '' && 
+                pitCols['pit-col-quality-to'] && pitCols['pit-col-quality-to'].trim() !== '') {
+                availableCategories.push(...Object.keys(pitQualities));
+            }
+
+        } catch(e) {
+            console.error("Gagal meload metadata dari DB:", e);
+        }
     }
-    const headerOptions = '<option value="">None</option>' + headers.map(h => `<option value="${h}">${h}</option>`).join('');
+
+    // Load prev config if available untuk UX yang lebih baik
+    const savedConfig = window.pitProConfigs && window.pitProConfigs[pitId] && window.pitProConfigs[pitId][mode] 
+                        ? window.pitProConfigs[pitId][mode] : {};
 
     // 2. Render Form Berdasarkan Mode
     if (mode === 'Res. Incremental') {
+        const defSr = savedConfig.srLimit !== undefined ? savedConfig.srLimit : '';
         content.innerHTML = `
             <div class="flex flex-col gap-1.5">
                 <label class="text-slate-300 font-semibold">SR Limit</label>
-                <input type="number" id="pro-sr-limit" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 transition-colors" placeholder="Contoh: 5.0" step="0.01">
+                <input type="number" id="pro-sr-limit" value="${defSr}" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 transition-colors" placeholder="Contoh: 5.0" step="0.01">
             </div>
         `;
     } else if (mode === 'Res. Cumulative') {
+        const defSr = savedConfig.srLimit !== undefined ? savedConfig.srLimit : '';
+        
         content.innerHTML = `
             <div class="flex flex-col gap-1.5">
-                <label class="text-slate-300 font-semibold">Direction</label>
-                <select id="pro-direction" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">
-                    <option value="Top-Down">Top-Down</option>
-                    <option value="Bottom-Up">Bottom-Up</option>
+                <label class="text-slate-300 font-semibold">Transition</label>
+                <select id="pro-sequence" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">
+                    <option value="Block Ascending">Block Ascending</option>
+                    <option value="Block Descending">Block Descending</option>
+                    <option value="Strip Ascending">Strip Ascending</option>
+                    <option value="Strip Descending">Strip Descending</option>
                 </select>
             </div>
             <div class="flex flex-col gap-1.5">
                 <label class="text-slate-300 font-semibold">Sequence</label>
-                <select id="pro-sequence" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">
-                    <option value="By Bench">By Bench</option>
-                    <option value="By Block">By Block</option>
+                <select id="pro-transition" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">
+                    <!-- Dinamis via JS -->
                 </select>
             </div>
             <div class="flex flex-col gap-1.5">
                 <label class="text-slate-300 font-semibold">SR Limit</label>
-                <input type="number" id="pro-sr-limit" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 transition-colors" placeholder="Contoh: 5.0" step="0.01">
+                <input type="number" id="pro-sr-limit" value="${defSr}" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 transition-colors" placeholder="Contoh: 5.0" step="0.01">
             </div>
         `;
+
+        // Logic Dinamis untuk Dropdown Transition
+        const seqSelect = document.getElementById('pro-sequence');
+        const transSelect = document.getElementById('pro-transition');
+
+        // Set sequence dari config lama jika ada
+        if (savedConfig.sequence) {
+            seqSelect.value = savedConfig.sequence;
+        }
+
+        const updateTransitionOptions = () => {
+            const isBlock = seqSelect.value.startsWith('Block');
+            transSelect.innerHTML = isBlock ? `
+                <option value="Strip Ascending">Strip Ascending</option>
+                <option value="Strip Descending">Strip Descending</option>
+            ` : `
+                <option value="Block Ascending">Block Ascending</option>
+                <option value="Block Descending">Block Descending</option>
+            `;
+
+            // Coba pulihkan nilai Transition lama jika opsi masih valid
+            if (savedConfig.transition) {
+                const validOptions = Array.from(transSelect.options).map(o => o.value);
+                if (validOptions.includes(savedConfig.transition)) {
+                    transSelect.value = savedConfig.transition;
+                }
+            }
+        };
+
+        // Eksekusi inisialisasi awal dan tempel listener perubahan
+        updateTransitionOptions();
+        seqSelect.addEventListener('change', updateTransitionOptions);
+
     } else if (mode === 'Res. Zone') {
+        const defCategory = savedConfig.category || (availableCategories.length > 0 ? availableCategories[0] : '');
+        const defAggregation = savedConfig.aggregation || 'W. Avg';
+        const defInterpretation = savedConfig.interpretation || 'Higher is Better';
+
+        const generateCategoryOptions = (selectedValue) => {
+            // Hapus opsi <option value="">None</option>
+            return availableCategories.map(c => `<option value="${c}" ${c === selectedValue ? 'selected' : ''}>${c}</option>`).join('');
+        };
+
         content.innerHTML = `
             <div class="flex flex-col gap-1.5">
-                <label class="text-slate-300 font-semibold">Waste Thick</label>
-                <select id="pro-waste-thick" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${headerOptions}</select>
+                <label class="text-slate-300 font-semibold">Category</label>
+                <select id="pro-category" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${generateCategoryOptions(defCategory)}</select>
             </div>
             <div class="flex flex-col gap-1.5">
-                <label class="text-slate-300 font-semibold">Resource Thick</label>
-                <select id="pro-resource-thick" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${headerOptions}</select>
+                <label class="text-slate-300 font-semibold">Aggregation</label>
+                <select id="pro-aggregation" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">
+                    <option value="Sum" ${defAggregation === 'Sum' ? 'selected' : ''}>Sum</option>
+                    <option value="Min" ${defAggregation === 'Min' ? 'selected' : ''}>Min</option>
+                    <option value="Max" ${defAggregation === 'Max' ? 'selected' : ''}>Max</option>
+                    <option value="W. Avg" ${defAggregation === 'W. Avg' ? 'selected' : ''}>W. Avg</option>
+                </select>
             </div>
             <div class="flex flex-col gap-1.5">
-                <label class="text-slate-300 font-semibold">Quality From</label>
-                <select id="pro-quality-from" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${headerOptions}</select>
-            </div>
-            <div class="flex flex-col gap-1.5">
-                <label class="text-slate-300 font-semibold">Quality To</label>
-                <select id="pro-quality-to" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">${headerOptions}</select>
+                <label class="text-slate-300 font-semibold">Interpretation</label>
+                <select id="pro-interpretation" class="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-white outline-none focus:border-blue-500 cursor-pointer">
+                    <option value="Higher is Better" ${defInterpretation === 'Higher is Better' ? 'selected' : ''}>Higher is Better</option>
+                    <option value="Lower is Better" ${defInterpretation === 'Lower is Better' ? 'selected' : ''}>Lower is Better</option>
+                </select>
             </div>
         `;
     }

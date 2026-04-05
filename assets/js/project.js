@@ -557,6 +557,13 @@ async function executeProgressiveStreamSave(fileHandle, fileName) {
         if (projNameEl) projNameEl.textContent = window.currentProjectName;
         if (sep) sep.classList.remove('hidden');
 
+        // === FIX: UPDATE RECENT CARDS SETELAH SAVE ===
+        // Menyimpan file handle ke IndexedDB agar masuk ke "Recent Cards"
+        if (fileHandle && typeof RizpecRecentDB !== 'undefined') {
+            await RizpecRecentDB.saveHandle(fileHandle, fileHandle.name);
+        }
+        // =============================================
+
         if (typeof updateFileMenuState === 'function') updateFileMenuState();
         if (typeof window.updateTabLockState === 'function') window.updateTabLockState();
 

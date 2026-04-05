@@ -2,6 +2,7 @@
 // GEOMETRY BUILDER & MANAGER (ULTIMATE EDITION)
 // UI/UX DARI NEW_3 + MEMORY MANAGEMENT DARI NEW_1
 // OPTIMIZED FOR MOBILE/TABLET (ULTRA OOM PREVENTION & DOM CULLING)
+// + LABEL SYNC FIX FOR ARM TABLETS
 // ==========================================
 
 // Track state Pit & Disposal mana saja yang saat ini sedang diload dan dirender
@@ -23,6 +24,7 @@ window.isRenderingPits = window.isRenderingPits || false;
 // =========================================================================
 window.activeLabels = window.activeLabels || [];
 window.isLabelHooked = window.isLabelHooked || false;
+window.isUpdatingLabels = window.isUpdatingLabels || false; // Lock sinkronisasi frame
 
 // Konfigurasi jarak (Distance) untuk Fade dan Hide Label
 const LABEL_CONFIG = {
@@ -45,75 +47,93 @@ window.clearLabels = function(entityId) {
 };
 
 window.updateLabels = function() {
-    const labelsContainer = document.getElementById('labels-container');
-    if (!labelsContainer) return;
+    // [FIX DESYNC]: Jangan proses jika frame ini sedang merender label
+    if (window.isUpdatingLabels) return;
+    window.isUpdatingLabels = true;
 
-    // [FIX STACKING CONTEXT]: Cegah z-index bocor menimpa Compass (z-10)
-    labelsContainer.style.zIndex = '1';
-
-    if (!window.isLabelLayerVisible) {
-        labelsContainer.style.display = 'none';
-        return;
-    } else {
-        labelsContainer.style.display = 'block';
-    }
-
-    if (typeof camera === 'undefined' || typeof renderer === 'undefined') return;
-
-    const widthHalf = renderer.domElement.clientWidth / 2;
-    const heightHalf = renderer.domElement.clientHeight / 2;
-    const camPos = camera.position;
-    
-    let visibleCount = 0;
-
-    window.activeLabels.forEach(lbl => {
-        lbl.vec.copy(lbl.position);
-        const distance = camPos.distanceTo(lbl.position);
-
-        // [OPTIMASI DOM CULLING]: Hilangkan dari kalkulasi UI jika melebihi batas render / jumlah maks
-        if (distance > LABEL_CONFIG.FADE_END || visibleCount > LABEL_CONFIG.MAX_VISIBLE) {
-            if (lbl.element.style.display !== 'none') lbl.element.style.display = 'none';
+    // [FIX DESYNC]: Paksa jalan bersamaan dengan GPU Render Pipeline (requestAnimationFrame)
+    requestAnimationFrame(() => {
+        const labelsContainer = document.getElementById('labels-container');
+        
+        if (!labelsContainer) {
+            window.isUpdatingLabels = false;
             return;
         }
 
-        lbl.vec.project(camera);
+        // [FIX STACKING CONTEXT]: Cegah z-index bocor menimpa Compass (z-10)
+        labelsContainer.style.zIndex = '1';
 
-        // Cek apakah koordinat berada di belakang kamera
-        if (lbl.vec.z > 1) {
-            if (lbl.element.style.display !== 'none') lbl.element.style.display = 'none';
+        if (!window.isLabelLayerVisible) {
+            labelsContainer.style.display = 'none';
+            window.isUpdatingLabels = false;
+            return;
         } else {
-            lbl.element.style.display = 'flex';
-            visibleCount++;
-            
-            // [BEST PRACTICE UI/UX]: Dynamic Z-Index (Yang dekat menimpa yang jauh)
-            lbl.element.style.zIndex = Math.round(10000 - distance);
+            labelsContainer.style.display = 'block';
+        }
 
-            // Kalkulasi Opacity (Fading)
-            let currentOpacity = window.labelOpacity !== undefined ? window.labelOpacity : 1;
-            if (distance > LABEL_CONFIG.FADE_START) {
-                const fadeRange = LABEL_CONFIG.FADE_END - LABEL_CONFIG.FADE_START;
-                const fadeProgress = (distance - LABEL_CONFIG.FADE_START) / fadeRange;
-                currentOpacity = currentOpacity * Math.max(0, (1 - fadeProgress));
-            }
-            
-            if (currentOpacity < 0.05) {
-                lbl.element.style.display = 'none';
+        if (typeof camera === 'undefined' || typeof renderer === 'undefined') {
+            window.isUpdatingLabels = false;
+            return;
+        }
+
+        const widthHalf = renderer.domElement.clientWidth / 2;
+        const heightHalf = renderer.domElement.clientHeight / 2;
+        const camPos = camera.position;
+        
+        let visibleCount = 0;
+
+        window.activeLabels.forEach(lbl => {
+            lbl.vec.copy(lbl.position);
+            const distance = camPos.distanceTo(lbl.position);
+
+            // [OPTIMASI DOM CULLING]: Hilangkan dari kalkulasi UI jika melebihi batas render / jumlah maks
+            if (distance > LABEL_CONFIG.FADE_END || visibleCount > LABEL_CONFIG.MAX_VISIBLE) {
+                if (lbl.element.style.display !== 'none') lbl.element.style.display = 'none';
                 return;
             }
 
-            lbl.element.style.opacity = currentOpacity;
-            
-            // Posisi Layar + Hardware Acceleration (translate3d)
-            const x = (lbl.vec.x * widthHalf) + widthHalf;
-            const y = -(lbl.vec.y * heightHalf) + heightHalf;
-            
-            let scale = 0.75; 
-            if (distance < LABEL_CONFIG.FADE_START / 2) {
-                scale = 0.75 + (0.15 * (1 - (distance / (LABEL_CONFIG.FADE_START / 2))));
+            lbl.vec.project(camera);
+
+            // Cek apakah koordinat berada di belakang kamera
+            if (lbl.vec.z > 1) {
+                if (lbl.element.style.display !== 'none') lbl.element.style.display = 'none';
+            } else {
+                lbl.element.style.display = 'flex';
+                visibleCount++;
+                
+                // [BEST PRACTICE UI/UX]: Dynamic Z-Index (Yang dekat menimpa yang jauh)
+                lbl.element.style.zIndex = Math.round(10000 - distance);
+
+                // Kalkulasi Opacity (Fading)
+                let currentOpacity = window.labelOpacity !== undefined ? window.labelOpacity : 1;
+                if (distance > LABEL_CONFIG.FADE_START) {
+                    const fadeRange = LABEL_CONFIG.FADE_END - LABEL_CONFIG.FADE_START;
+                    const fadeProgress = (distance - LABEL_CONFIG.FADE_START) / fadeRange;
+                    currentOpacity = currentOpacity * Math.max(0, (1 - fadeProgress));
+                }
+                
+                if (currentOpacity < 0.05) {
+                    lbl.element.style.display = 'none';
+                    return;
+                }
+
+                lbl.element.style.opacity = currentOpacity;
+                
+                // Posisi Layar + Hardware Acceleration (translate3d)
+                const x = (lbl.vec.x * widthHalf) + widthHalf;
+                const y = -(lbl.vec.y * heightHalf) + heightHalf;
+                
+                let scale = 0.75; 
+                if (distance < LABEL_CONFIG.FADE_START / 2) {
+                    scale = 0.75 + (0.15 * (1 - (distance / (LABEL_CONFIG.FADE_START / 2))));
+                }
+                
+                lbl.element.style.transform = `translate3d(calc(${x}px - 50%), calc(${y}px - 50%), 0) scale(${scale})`;
             }
-            
-            lbl.element.style.transform = `translate3d(calc(${x}px - 50%), calc(${y}px - 50%), 0) scale(${scale})`;
-        }
+        });
+
+        // Bebaskan lock setelah selesai diproses di frame ini
+        window.isUpdatingLabels = false;
     });
 };
 
@@ -396,6 +416,15 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             if (idxWaste === -1) idxWaste = headers.lastIndexOf('BANK_VOLUME');
                         }
 
+                        const idxWThick = headers.lastIndexOf('WASTE THICKNESS');
+                        const idxRThick = headers.lastIndexOf('RESOURCE THICKNESS');
+                        const qualityIndices = [];
+                        if (type === 'pit' && idxRThick !== -1 && idxWaste !== -1) {
+                            for (let i = idxRThick + 1; i < idxWaste; i++) {
+                                qualityIndices.push(i);
+                            }
+                        }
+
                         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
                         let blocks = {}; let groupStats = {};
 
@@ -434,7 +463,24 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             const stripVal = idxStrip !== -1 && row[idxStrip] ? row[idxStrip].replace(/['"]/g, '').trim() : '';
                             const groupKey = nameVal + '_' + blockVal + '_' + stripVal;
 
-                            if (!groupStats[groupKey]) groupStats[groupKey] = { waste: 0, res: 0 };
+                            // [FIX BUG A]: Jangan simpan menggunakan string gabungan untuk di-split nanti. 
+                            // Simpan langsung nilai asli name, block, dan strip ke dalam object groupStats.
+                            if (!groupStats[groupKey]) {
+                                groupStats[groupKey] = { waste: 0, res: 0, name: nameVal, block: blockVal, strip: stripVal, metrics: {} };
+                            }
+
+                            const addMetric = (colName, val, weight) => {
+                                if (!groupStats[groupKey].metrics[colName]) {
+                                    groupStats[groupKey].metrics[colName] = { sum: 0, min: Infinity, max: -Infinity, wtSum: 0, weightTotal: 0, count: 0 };
+                                }
+                                const m = groupStats[groupKey].metrics[colName];
+                                m.sum += val;
+                                if (val < m.min) m.min = val;
+                                if (val > m.max) m.max = val;
+                                m.wtSum += val * weight;
+                                m.weightTotal += weight;
+                                m.count += 1;
+                            };
 
                             [   [row[idxE1], row[idxT1], row[idxN1]], [row[idxE2], row[idxT2], row[idxN2]],
                                 [row[idxE3], row[idxT3], row[idxN3]], [row[idxE1], row[idxB1], row[idxN1]]
@@ -458,6 +504,17 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                                 else burden = resVal > 0 ? 'RESOURCE' : 'WASTE';
                                 groupStats[groupKey].waste += wasteVal;
                                 groupStats[groupKey].res += resVal;
+
+                                const wThickVal = idxWThick !== -1 ? (parseFloat(row[idxWThick]) || 0) : 0;
+                                const rThickVal = idxRThick !== -1 ? (parseFloat(row[idxRThick]) || 0) : 0;
+                                
+                                addMetric('WASTE THICKNESS', wThickVal, wasteVal > 0 ? wasteVal : 1);
+                                addMetric('RESOURCE THICKNESS', rThickVal, resVal > 0 ? resVal : 1);
+                                
+                                qualityIndices.forEach(qIdx => {
+                                    const qVal = parseFloat(row[qIdx]) || 0;
+                                    addMetric(headers[qIdx], qVal, resVal > 0 ? resVal : 1);
+                                });
                             } else {
                                 burden = 'WASTE';
                             }
@@ -633,12 +690,111 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                     }
                 }
 
-                // --- 2. RENDER 3D MESH ---
+                // --- 2. PREPARE PRO CONFIG & STATS ---
+                const proConfigs = JSON.parse(localStorage.getItem('rizpec_pit_pro_configs')) || {};
+                const pitColorModes = JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {};
+                const colorMode = pitColorModes[entityId] || 'Burden';
+
+                // Logika Kalkulasi Res. Cumulative
+                if (groupStats && type === 'pit') {
+                    if (colorMode === 'Res. Cumulative' && proConfigs[entityId] && proConfigs[entityId]['Res. Cumulative']) {
+                        const cumConfig = proConfigs[entityId]['Res. Cumulative'];
+                        
+                        const uiTransition = cumConfig.sequence || 'Block Ascending';
+                        const uiSequence = cumConfig.transition || 'Strip Ascending';
+                        
+                        const isTransitionBlock = uiTransition.startsWith('Block');
+                        const transitionAsc = uiTransition.endsWith('Ascending');
+                        
+                        const isSequenceBlock = uiSequence.startsWith('Block');
+                        const sequenceAsc = uiSequence.endsWith('Ascending');
+
+                        let sortedKeys = Object.keys(groupStats);
+                        sortedKeys.sort((a, b) => {
+                            const gA = groupStats[a];
+                            const gB = groupStats[b];
+                            
+                            let valOuterA = isTransitionBlock ? gA.block : gA.strip;
+                            let valOuterB = isTransitionBlock ? gB.block : gB.strip;
+                            
+                            let valInnerA = isSequenceBlock ? gA.block : gA.strip;
+                            let valInnerB = isSequenceBlock ? gB.block : gB.strip;
+
+                            if (valOuterA !== valOuterB) {
+                                const cmp = String(valOuterA).localeCompare(String(valOuterB), undefined, { numeric: true, sensitivity: 'base' });
+                                return transitionAsc ? cmp : -cmp;
+                            }
+
+                            if (valInnerA !== valInnerB) {
+                                const cmp = String(valInnerA).localeCompare(String(valInnerB), undefined, { numeric: true, sensitivity: 'base' });
+                                return sequenceAsc ? cmp : -cmp;
+                            }
+
+                            return 0;
+                        });
+
+                        let cumWaste = 0;
+                        let cumRes = 0;
+                        let order = 1;
+                        let minCumSR = Infinity;
+
+                        sortedKeys.forEach(k => {
+                            const g = groupStats[k];
+                            cumWaste += g.waste;
+                            cumRes += g.res;
+                            g.cumWaste = cumWaste;
+                            g.cumRes = cumRes;
+                            g.cumSR = cumRes > 0 ? cumWaste / cumRes : Infinity;
+                            g.order = order++;
+                            if (g.cumRes > 0 && g.cumSR < minCumSR) minCumSR = g.cumSR;
+                        });
+                        
+                        groupStats.minCumSR = minCumSR === Infinity ? 0 : minCumSR;
+                    }
+                }
+
+                let zoneGlobalMin = Infinity;
+                let zoneGlobalMax = -Infinity;
+                let zoneCategoryKey = '';
+                let zoneAggregation = '';
+                let zoneInterpretation = '';
+                let zConfig = null;
+
+                if (groupStats && type === 'pit' && colorMode === 'Res. Zone' && proConfigs[entityId] && proConfigs[entityId]['Res. Zone']) {
+                    zConfig = proConfigs[entityId]['Res. Zone'];
+                    zoneAggregation = zConfig.aggregation || 'W. Avg';
+                    zoneInterpretation = zConfig.interpretation || 'Higher is Better';
+                    
+                    if (zConfig.category === 'Waste Thick') zoneCategoryKey = 'WASTE THICKNESS';
+                    else if (zConfig.category === 'Resource Thick') zoneCategoryKey = 'RESOURCE THICKNESS';
+                    else zoneCategoryKey = (zConfig.category || '').toUpperCase();
+
+                    Object.values(groupStats).forEach(g => {
+                        let val = 0;
+                        const m = g.metrics ? g.metrics[zoneCategoryKey] : null;
+                        if (m) {
+                            if (zoneAggregation === 'Sum') val = m.sum;
+                            else if (zoneAggregation === 'Min') val = m.min !== Infinity ? m.min : 0;
+                            else if (zoneAggregation === 'Max') val = m.max !== -Infinity ? m.max : 0;
+                            else if (zoneAggregation === 'W. Avg') val = m.weightTotal > 0 ? m.wtSum / m.weightTotal : (m.count > 0 ? m.sum/m.count : 0);
+                        }
+                        g.zoneValue = val;
+                        
+                        if (val !== 0) {
+                            if (val < zoneGlobalMin) zoneGlobalMin = val;
+                            if (val > zoneGlobalMax) zoneGlobalMax = val;
+                        }
+                    });
+                    
+                    if (zoneGlobalMin === Infinity) zoneGlobalMin = 0;
+                    if (zoneGlobalMax === -Infinity) zoneGlobalMax = 0;
+                }
+
+                // --- 3. RENDER 3D MESH ---
                 const opacResource = typeof resourceOpacity !== 'undefined' ? resourceOpacity : 1;
                 const opacWaste = typeof wasteOpacity !== 'undefined' ? wasteOpacity : 1;
                 const burdenPalette = JSON.parse(localStorage.getItem(type === 'pit' ? 'rizpec_burden_palette' : 'rizpec_disp_burden_palette')) || [];
                 const subsetPalette = JSON.parse(localStorage.getItem(type === 'pit' ? 'rizpec_subset_palette' : 'rizpec_disp_subset_palette')) || [];
-                const proConfigs = JSON.parse(localStorage.getItem('rizpec_pit_pro_configs')) || {};
                 
                 let sharedMaterials = {}; 
                 let sharedLineMaterials = {};
@@ -647,7 +803,8 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                 const statEl = document.getElementById('stat-new-entity');
                 const originalStatText = statEl ? statEl.textContent : '';
 
-                const discretePalette = ['#000080', '#0000FF', '#0080FF', '#00FFFF', '#00FF80', '#00FF00', '#80FF00', '#FFFF00', '#FF8000', '#FF0000'];
+                const discretePalette = ['#000080', '#0000FF', '#0080FF', '#00FFFF', '#00FF80', '#00FF00', '#80FF00', '#FFFF00', '#FF8000', '#8B0000'];
+                const zonePalette = ['#8B0000', '#E53935', '#FFC107', '#43A047', '#00C853'];
 
                 const processChunk = () => {
                     const isStillValidChunk = localStorage.getItem(`${lsPrefix}${safeIdCheck}`) !== null;
@@ -674,7 +831,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                                 geometry = mergedGeom;
                             } catch (mergeErr) { }
                         } else if (vertexCount > SAFE_VERTEX_LIMIT) {
-                            // [OPTIMASI RAM GPU]: Bypass merge jika blok terlalu kompleks agar tidak crash di Tablet
                             console.warn(`Bypass Merge Blok ${b.info.blockKey}: Terlalu berat (${vertexCount} vertex)`);
                         }
                         
@@ -682,7 +838,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
 
                         const blockEntityId = b.info.entityId; const burden = (b.info.burden || '').toUpperCase();
                         const subset = b.info.subset || ''; const isResource = burden === 'RESOURCE';
-                        const pitColorModes = JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {};
                         const mode = pitColorModes[blockEntityId] || (subset ? 'Subset' : 'Burden'); 
                         const proConfig = (proConfigs[blockEntityId] && proConfigs[blockEntityId][mode]) ? proConfigs[blockEntityId][mode] : null;
 
@@ -692,13 +847,47 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             const gStats = groupStats ? groupStats[b.info.groupKey] : null;
                             const sr = gStats ? gStats.sr : Infinity;
                             if (!gStats || gStats.res === 0) { hexColor = '#ffffff'; } 
-                            else if (sr > srLimit) { hexColor = '#8b0000'; } 
+                            else if (sr > srLimit) { hexColor = '#8B0000'; } 
                             else {
                                 const range = srLimit - minSR; let t = range > 0 ? (sr - minSR) / range : 0;
                                 t = Math.max(0, Math.min(1, t)); 
                                 let classIndex = Math.floor(t * discretePalette.length);
                                 if (classIndex >= discretePalette.length) classIndex = discretePalette.length - 1; 
                                 hexColor = discretePalette[classIndex];
+                            }
+                        } else if (mode === 'Res. Cumulative' && proConfig) {
+                            const srLimit = parseFloat(proConfig.srLimit) || 0;
+                            const gStats = groupStats ? groupStats[b.info.groupKey] : null;
+                            const sr = gStats ? gStats.cumSR : Infinity;
+                            const baseMinSR = groupStats ? (groupStats.minCumSR || 0) : 0;
+                            
+                            if (!gStats || gStats.cumRes === 0) { hexColor = '#ffffff'; } 
+                            else if (sr > srLimit) { hexColor = '#8B0000'; } 
+                            else {
+                                const range = srLimit - baseMinSR; let t = range > 0 ? (sr - baseMinSR) / range : 0;
+                                t = Math.max(0, Math.min(1, t)); 
+                                let classIndex = Math.floor(t * discretePalette.length);
+                                if (classIndex >= discretePalette.length) classIndex = discretePalette.length - 1; 
+                                hexColor = discretePalette[classIndex];
+                            }
+                        } else if (mode === 'Res. Zone' && proConfig) {
+                            const gStats = groupStats ? groupStats[b.info.groupKey] : null;
+                            
+                            if (!gStats || gStats.zoneValue === undefined || gStats.zoneValue === 0) {
+                                hexColor = '#ffffff';
+                            } else {
+                                const val = gStats.zoneValue;
+                                const range = zoneGlobalMax - zoneGlobalMin;
+                                let t = range > 0 ? (val - zoneGlobalMin) / range : 0;
+                                t = Math.max(0, Math.min(1, t)); 
+                                
+                                if (zoneInterpretation === 'Lower is Better') {
+                                    t = 1 - t; 
+                                }
+                                
+                                let classIndex = Math.floor(t * zonePalette.length);
+                                if (classIndex >= zonePalette.length) classIndex = zonePalette.length - 1; 
+                                hexColor = zonePalette[classIndex];
                             }
                         } else if (mode === 'Subset' && subset) {
                             const subsetItem = subsetPalette.find(p => p.name === subset);
@@ -747,7 +936,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             pitReserveGroup.add(mesh); meshes[b.blockKey] = mesh;
                         }
                         
-                        // [OPTIMASI RAM CHUNK]: Langsung hancurkan referensi buffer titik per blok
                         b.positions = null; 
                         blocks[currentIndex] = null; 
                         currentIndex++;
@@ -760,17 +948,13 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                     if (currentIndex < blocks.length) {
                         requestAnimationFrame(processChunk);
                     } else {
-                        // Bersihkan total array blocks & pooling references
                         blocks = null;
                         sharedMaterials = null; 
                         sharedLineMaterials = null;
                         
                         if (statEl && statEl.textContent.includes('Merender 3D')) statEl.textContent = originalStatText; 
 
-                        // --- 3. GENERATE SCREEN-SPACE LABELS ---
-                        const pitColorModes = JSON.parse(localStorage.getItem('rizpec_pit_color_modes')) || {};
-                        const colorMode = pitColorModes[entityId] || 'Burden';
-                        
+                        // --- 4. GENERATE SCREEN-SPACE LABELS ---
                         if (type === 'pit' && ['Res. Incremental', 'Res. Cumulative', 'Res. Zone'].includes(colorMode)) {
                             const labelsContainer = document.getElementById('labels-container');
                             
@@ -805,11 +989,27 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                                     if (!g) return;
 
                                     const div = document.createElement('div');
-                                    div.className = 'absolute top-0 left-0 text-[10px] sm:text-[11px] font-bold px-2 py-1 rounded-md shadow-lg border border-slate-500/80 pointer-events-none select-none flex items-center justify-center text-center transition-opacity duration-75 z-10 backdrop-blur-sm';
+                                    // [FIX UI ARM TABLET]: Dihapus `transition-opacity duration-75` agar pergerakan murni dikontrol rAF tiap frame
+                                    div.className = 'absolute top-0 left-0 text-[10px] sm:text-[11px] font-bold px-2 py-1 rounded-md shadow-lg border border-slate-500/80 pointer-events-none select-none flex items-center justify-center text-center z-10 backdrop-blur-sm';
                                     
-                                    let srText = g.res > 0 ? (g.waste / g.res).toFixed(2) : '-';
+                                    let htmlContent = '';
+                                    if (colorMode === 'Res. Cumulative') {
+                                        const srText = g.cumRes > 0 ? g.cumSR.toFixed(2) : '-';
+                                        const orderText = g.order || '-';
+                                        htmlContent = `<span class="${srText !== '-' ? 'text-amber-400' : 'text-slate-200'} drop-shadow-md tracking-widest">${orderText} | SR: ${srText}</span>`;
+                                    } else if (colorMode === 'Res. Zone') {
+                                        let alias = zConfig ? zConfig.category : 'Zone';
+                                        if (alias === 'Waste Thick') alias = 'W.Thk';
+                                        else if (alias === 'Resource Thick') alias = 'R.Thk';
+                                        
+                                        const valText = g.zoneValue !== undefined ? g.zoneValue.toFixed(2) : '-';
+                                        htmlContent = `<span class="text-amber-400 drop-shadow-md tracking-widest">${alias}: ${valText}</span>`;
+                                    } else {
+                                        const srText = g.res > 0 ? (g.waste / g.res).toFixed(2) : '-';
+                                        htmlContent = `<span class="${srText !== '-' ? 'text-amber-400' : 'text-slate-200'} drop-shadow-md tracking-widest">SR: ${srText}</span>`;
+                                    }
                                     
-                                    div.innerHTML = `<span class="${srText !== '-' ? 'text-amber-400' : 'text-slate-200'} drop-shadow-md tracking-widest">SR: ${srText}</span>`;
+                                    div.innerHTML = htmlContent;
                                     div.style.backgroundColor = 'rgba(15, 23, 42, 0.75)'; 
                                     div.style.willChange = 'transform, opacity'; 
                                     
@@ -829,6 +1029,8 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         }
 
                         if (typeof controls !== 'undefined' && !window.isLabelHooked) {
+                            // [FIX DESYNC]: Kita biarkan di-hook di sini karena sudah disematkan rAF throttling di window.updateLabels.
+                            // Catatan: Jika ada masalah lain, event ini bisa dicabut dan letakkan window.updateLabels() di dalam gameLoop()/animate().
                             controls.addEventListener('change', window.updateLabels);
                             window.addEventListener('resize', window.updateLabels);
                             window.isLabelHooked = true;

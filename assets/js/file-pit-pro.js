@@ -30,17 +30,16 @@ document.addEventListener('click', (e) => {
             config = { srLimit };
             
         } else if (mode === 'Res. Cumulative') {
-            const direction = document.getElementById('pro-direction')?.value || 'Top-Down';
-            const sequence = document.getElementById('pro-sequence')?.value || 'By Bench';
+            const sequence = document.getElementById('pro-sequence')?.value || 'Block Ascending';
+            const transition = document.getElementById('pro-transition')?.value || 'Strip Ascending';
             const srLimit = document.getElementById('pro-sr-limit')?.value || '';
-            config = { direction, sequence, srLimit };
+            config = { sequence, transition, srLimit };
             
         } else if (mode === 'Res. Zone') {
-            const wasteThick = document.getElementById('pro-waste-thick')?.value || '';
-            const resourceThick = document.getElementById('pro-resource-thick')?.value || '';
-            const qualityFrom = document.getElementById('pro-quality-from')?.value || '';
-            const qualityTo = document.getElementById('pro-quality-to')?.value || '';
-            config = { wasteThick, resourceThick, qualityFrom, qualityTo };
+            const category = document.getElementById('pro-category')?.value || '';
+            const aggregation = document.getElementById('pro-aggregation')?.value || 'W. Avg';
+            const interpretation = document.getElementById('pro-interpretation')?.value || 'Higher is Better';
+            config = { category, aggregation, interpretation };
         }
 
         // 2. Simpan Konfigurasi Parameter ke State & LocalStorage

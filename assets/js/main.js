@@ -84,6 +84,14 @@ window.resume3D = function() {
     animate();
 };
 
+// [FIX GPU OOM]: Panggil fungsi ini jika ingin memunculkan UI sangat berat (Tabel/Loading Modal besar)
+window.suspendForHeavyUI = function() {
+    window.pause3D();
+    // Mengosongkan buffer target sementara membantu melepas sedikit ikatan memori GPU 
+    // jika OS tiba-tiba membutuhkan RAM lebih banyak untuk merender DOM Tabel
+    if (renderer) renderer.clear();
+};
+
 // Fungsi ini memaksa rendering 1 frame (berguna saat 3D sedang pause tapi ada action Real-time)
 window.forceSingleRender = function() {
     if (window.is3DRenderingActive) return; // Abaikan jika loop sudah berjalan normal
@@ -151,18 +159,22 @@ function init3D() {
     
     // --- EVENT LISTENER CONTEXT LOST ---
     renderer.domElement.addEventListener('webglcontextlost', function(e) {
-        e.preventDefault();
+        e.preventDefault(); // Mencegah browser menghapus state Three.js secara total
         console.error("WEBGL CONTEXT LOST DETECTED");
-        alert("Peringatan: Memori Grafis (GPU) Anda Penuh!\n\nHal ini disebabkan karena terlalu banyak data DXF/Texture yang diload. Tampilan 3D akan berhenti.\n\nHarap Refresh halaman (F5) untuk melanjutkan.");
+        alert("Peringatan: Memori Grafis (GPU) Anda Penuh!\n\nHal ini disebabkan karena RAM tablet disedot habis untuk memuat antarmuka (DOM Tabel).\n\nHarap Refresh halaman (F5) atau tutup beberapa panel untuk melanjutkan.");
         window.pause3D();
     }, false);
 
     renderer.domElement.addEventListener('webglcontextrestored', function(e) {
         console.log("WEBGL CONTEXT RESTORED");
+        // Jika beruntung OS mengembalikan konteks, coba gambar 1 frame darurat
+        if(typeof forceSingleRender === 'function') window.forceSingleRender(); 
     }, false);
     
     renderer.setSize(cachedContainerW, cachedContainerH);
-    const maxPixelRatio = isMobileOrTablet ? 1.25 : 2;
+    
+    // [FIX GPU OOM]: Menurunkan pixel ratio untuk Mobile/Tablet dari 1.25 menjadi 1.0 (Menghemat ~36% VRAM)
+    const maxPixelRatio = isMobileOrTablet ? 1.0 : 2;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
     renderer.autoClear = false; 
     
@@ -622,14 +634,23 @@ function init3D() {
         'container-geometry',     // Panel floating Geometry di kanan
         'container-layerlist',    // Panel floating Drawings/Layerlist di kanan
         'container-control',      // Panel floating Control (Tools) di kanan
-        'panel-geometry'          // Fallback sidebar Geometry
+        'panel-geometry',         // Fallback sidebar Geometry
+        
+        // [FIX GPU OOM]: Tambahkan ID/Class Container Tabel Anda di bawah ini!
+        // Misalnya jika HTML tabel ada di dalam <div id="data-table-modal">...
+        'data-table-modal',
+        'table-container'
     ];
 
     panelsToPause.forEach(id => {
         const panel = document.getElementById(id);
         if (panel) {
+            // [FIX GPU OOM]: Saat mouse/jari masuk ke tabel, GPU berhenti total
             panel.addEventListener('mouseenter', window.pause3D);
             panel.addEventListener('mouseleave', window.resume3D);
+            // Tambahan deteksi sentuhan (touch) di Mobile/Tablet
+            panel.addEventListener('touchstart', window.pause3D, {passive: true});
+            panel.addEventListener('touchend', window.resume3D, {passive: true});
         }
     });
 
