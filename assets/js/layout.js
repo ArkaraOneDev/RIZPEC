@@ -289,8 +289,11 @@ window.updateLayerUI = function() {
     const gl = document.getElementById('geometry-list');
     if (!gl) return;
     
-    gl.style.maxHeight = 'none';
-    gl.style.overflow = 'visible';
+    // Membatasi tinggi panel geometry sekitar 120px (seukuran dari Pit Data s/d Label)
+    // dan mengaktifkan scrollbar vertikal apabila Disposal Data masuk
+    gl.style.maxHeight = '120px';
+    gl.style.overflowY = 'auto';
+    gl.style.overflowX = 'hidden';
     gl.style.height = 'auto';
     
     gl.innerHTML = '';

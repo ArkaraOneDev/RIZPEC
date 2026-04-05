@@ -525,7 +525,9 @@ window.render2DDxfPreview = function(layers) {
     if (width === 0 || height === 0) return;
 
     if (!window._dxfPreviewSystem) {
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        // [FIX GPU OOM]: Matikan antialias, set low-power, & paksa PixelRatio = 1 untuk renderer kedua
+        const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: "low-power" });
+        renderer.setPixelRatio(1);
         renderer.setClearColor(0x0f172a, 1);
         renderer.domElement.style.position = 'absolute';
         renderer.domElement.style.top = '0';
@@ -770,6 +772,7 @@ window.onDxfFolderRenamed = async function(oldName, newName, rootName) {
     }
 };
 
+// [FIX GPU OOM]: Perbaikan Tersangka #3 (Pembersihan Agresif Memori GPU)
 window.onDxfFolderDeleted = async function(name, rootName) {
     if (rootName === 'DXF Data') {
         if (window._lastSelectedDxfFolderName === name) window._lastSelectedDxfFolderName = null;
@@ -779,38 +782,56 @@ window.onDxfFolderDeleted = async function(name, rootName) {
             if (index !== -1) {
                 const layer = appLayers[index];
                 
-                if (layer.maskRenderTarget) layer.maskRenderTarget.dispose();
+                // Pembersihan RenderTexture Masking
+                if (layer.maskRenderTarget) {
+                    layer.maskRenderTarget.texture.dispose();
+                    layer.maskRenderTarget.dispose();
+                }
                 if (layer.maskMat) layer.maskMat.dispose(); 
                 if (layer.clipInterval) clearInterval(layer.clipInterval);
                 
+                // Pembersihan Mesh Agresif
                 if (layer.threeObject) {
                     layer.threeObject.traverse((child) => {
                         if (child.isMesh || child.isLineSegments) {
-                            if (child.geometry) child.geometry.dispose();
+                            if (child.geometry) {
+                                child.geometry.dispose();
+                                child.geometry = null; // Putus referensi
+                            }
                             
                             if (child.material) {
-                                if (Array.isArray(child.material)) {
-                                    child.material.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
-                                } else {
-                                    if (child.material.map) child.material.map.dispose();
-                                    child.material.dispose();
-                                }
+                                const mats = Array.isArray(child.material) ? child.material : [child.material];
+                                mats.forEach(m => { 
+                                    if (m.map) m.map.dispose(); 
+                                    m.dispose(); 
+                                });
+                                child.material = null; // Putus referensi
                             }
                             
                             if (child.userData.originalMaterial) {
                                 if (child.userData.originalMaterial.map) child.userData.originalMaterial.map.dispose();
                                 child.userData.originalMaterial.dispose();
+                                child.userData.originalMaterial = null;
                             }
                             if (child.userData.originalMaterialTex) {
                                 if (child.userData.originalMaterialTex.map) child.userData.originalMaterialTex.map.dispose();
                                 child.userData.originalMaterialTex.dispose();
+                                child.userData.originalMaterialTex = null;
                             }
+                            child.userData = {}; // Kosongkan userData agar V8 bebas GC
                         }
                     });
                     if (typeof scene !== 'undefined') scene.remove(layer.threeObject);
+                    layer.threeObject = null;
                 }
                 
                 appLayers.splice(index, 1);
+                
+                // Paksa renderer membuang list objek yang tidak terpakai
+                if (typeof renderer !== 'undefined' && renderer.renderLists) {
+                    renderer.renderLists.dispose();
+                }
+                
                 if (typeof updateLayerUI === 'function') updateLayerUI();
 
                 if (typeof renderer !== 'undefined' && typeof scene !== 'undefined' && typeof camera !== 'undefined') {
@@ -1182,11 +1203,14 @@ window.executeDxfFootprintClipping = function(layer) {
         layer.maskRenderTarget.dispose(); 
     }
 
-    const rtRes = 1024;
+    // [FIX GPU OOM]: Perbaikan Tersangka #2
+    // Menurunkan resolusi RT dari 1024 ke 512, menghemat VRAM 75% setiap ada layer footprint yang aktif.
+    // NearestFilter digunakan karena lebih ringan di mobile GPU daripada LinearFilter.
+    const rtRes = 512;
     const rt = new THREE.WebGLRenderTarget(rtRes, rtRes, {
         format: THREE.RedFormat,
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
         generateMipmaps: false
     });
     layer.maskRenderTarget = rt;
@@ -1912,7 +1936,10 @@ window.initGcpModal = function(img, file, layerTarget) {
     
     const rightContainer = document.getElementById('gcp-right-3d');
     rightContainer.innerHTML = '';
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); 
+
+    // [FIX GPU OOM]: Matikan antialias, set low-power, & paksa PixelRatio = 1 untuk renderer GCP 3D
+    const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: "low-power" }); 
+    renderer.setPixelRatio(1);
     renderer.setSize(rightContainer.clientWidth, rightContainer.clientHeight);
     renderer.setClearColor(0x0f172a, 1); 
     rightContainer.appendChild(renderer.domElement);

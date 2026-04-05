@@ -130,6 +130,22 @@
             background: rgba(96, 165, 250, 0.8);
         }
 
+        /* Custom Scrollbar for Vertical Panels (Geometry & Layer) */
+        .layer-scroll::-webkit-scrollbar {
+            width: 4px;
+        }
+        .layer-scroll::-webkit-scrollbar-track {
+            background: rgba(30, 41, 59, 0.3);
+            border-radius: 4px;
+        }
+        .layer-scroll::-webkit-scrollbar-thumb {
+            background: rgba(71, 85, 105, 0.8);
+            border-radius: 4px;
+        }
+        .layer-scroll::-webkit-scrollbar-thumb:hover {
+            background: rgba(96, 165, 250, 0.8);
+        }
+
         /* =========================================
            DIAGONAL SLIDESHOW BACKGROUND STYLES
            ========================================= */
@@ -205,7 +221,7 @@
                         <input type="checkbox" id="cb-layout-geo" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Geometry
                     </label>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
-                        <input type="checkbox" id="cb-layout-layer" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Drawings
+                        <input type="checkbox" id="cb-layout-layer" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Layers
                     </label>
                     <label class="flex items-center px-4 lg:px-3 py-2 lg:py-1.5 hover:bg-slate-700 cursor-pointer text-slate-300 gap-3 lg:gap-2">
                         <input type="checkbox" id="cb-layout-helper" class="rounded bg-slate-900 border-slate-600 w-4 h-4 lg:w-3 lg:h-3" checked> Control
@@ -1087,22 +1103,36 @@
                                     </h3>
                                 </div>
                                 <div class="p-2.5 lg:p-2 flex flex-col gap-2 lg:gap-1.5">
-                                    <div id="geometry-list" class="flex flex-col gap-1.5 lg:gap-1 pr-1 h-auto">
+                                    <!-- Menambahkan class layer-scroll -->
+                                    <div id="geometry-list" class="flex flex-col gap-1.5 lg:gap-1 pr-1 h-auto layer-scroll">
                                         <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada Geometri</div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- Panel Drawings (Menjadi flex-1 agar merenggang sampai container control) -->
+                            <!-- Panel Layers (Menjadi flex-1 agar merenggang sampai container control) -->
+                            <!-- Menambahkan class layer-scroll pada layer kontainer jika ingin diatur seragam -->
                             <div id="container-layerlist" class="pointer-events-auto bg-slate-800/95 border border-slate-600 rounded shadow-xl backdrop-blur-sm flex flex-col hidden flex-1 min-h-0 overflow-hidden">
                                 <div class="p-2.5 lg:p-2 border-b border-slate-700 flex items-center justify-between rounded-t bg-slate-800/30 shrink-0">
                                     <h3 class="text-[11px] lg:text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                                        <i class="fa-solid fa-pen-ruler text-amber-400"></i> Drawings
+                                        <i class="fa-solid fa-pen-ruler text-amber-400"></i> Layers
                                     </h3>
+                                    <button class="text-slate-400 hover:text-blue-400 transition-colors" title="Add Layer"><i class="fa-solid fa-plus"></i></button>
                                 </div>
-                                <div class="p-2.5 lg:p-2 flex flex-col gap-2 lg:gap-1.5 flex-1 overflow-y-auto">
+                                <div class="p-2.5 lg:p-2 flex flex-col gap-2 lg:gap-1.5 flex-1 overflow-y-auto layer-scroll">
                                     <div id="drawing-list" class="flex flex-col gap-1.5 lg:gap-1 pr-1 h-auto">
-                                        <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada Drawing</div>
+                                        <div class="text-[10px] lg:text-[9px] text-slate-500 italic text-center py-2 lg:py-1">Belum ada Layer</div>
+                                    </div>
+                                </div>
+                                <!-- Footer Tools -->
+                                <div class="py-2 lg:py-1.5 px-3 lg:px-2 border-t border-slate-700 flex items-center bg-slate-800/50 shrink-0">
+                                    <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0 ml-1">Tools</span>
+                                    <div class="flex gap-1.5 lg:gap-1 flex-wrap">
+                                        <button class="tool-btn" data-mode="draw_marker" title="Draw Marker"><i class="fa-solid fa-location-dot"></i></button>
+                                        <button class="tool-btn" data-mode="draw_line" title="Draw Line (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-pen"></i></button>
+                                        <button class="tool-btn" data-mode="draw_area" title="Draw Area (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-draw-polygon"></i></button>
+                                        <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.undoLastRecord()" title="Undo (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
+                                        <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.resetCurrentDrawing()" title="Reset (X / Esc)"><i class="fa-solid fa-xmark"></i></button>
                                     </div>
                                 </div>
                             </div>
@@ -1134,8 +1164,8 @@
                                     <div class="flex items-center px-1">
                                         <span class="text-[10px] lg:text-[9px] text-slate-400 font-medium w-16 shrink-0">Action</span>
                                         <div class="flex gap-1.5 lg:gap-1 flex-wrap">
-                                            <button class="tool-btn" data-mode="draw_line" title="Draw Line (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-pen"></i></button>
-                                            <button class="tool-btn" data-mode="draw_area" title="Draw Area (Kiri: Gambar, Kanan/Enter: Selesai)"><i class="fa-solid fa-draw-polygon"></i></button>
+                                            <button class="tool-btn" data-mode="pan_view" title="Pan View (Klik Tengah/Kanan)"><i class="fa-solid fa-hand"></i></button>
+                                            <button class="tool-btn" data-mode="center_pivot" title="Set Center Pivot (C)"><i class="fa-solid fa-crosshairs"></i></button>
                                             <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.undoLastRecord()" title="Undo Record (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
                                             <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.redoLastUndo()" title="Redo Record (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
                                             <button class="tool-btn text-orange-400 hover:text-orange-300" onclick="window.resetSequenceAndView()" title="Reset & Unhide (X / Esc)"><i class="fa-solid fa-xmark"></i></button>
@@ -1156,11 +1186,6 @@
                                     
                                     <!-- Orbit Tools (Vertical) - Dibuat sejajar tingginya dengan trackpad -->
                                     <div class="flex flex-col gap-1.5 lg:gap-1 shrink-0 h-44 lg:h-40 w-[34px] lg:w-[28px]">
-                                        <!-- Tombol Center Pivot -->
-                                        <button class="tool-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 shadow backdrop-blur-sm text-blue-400 hover:text-blue-300 transition-colors shrink-0" data-mode="center_pivot" title="Set Center Pivot (C)">
-                                            <i class="fa-solid fa-crosshairs"></i>
-                                        </button>
-                                        
                                         <!-- Vertical Smooth Zoom Slider - Lebih rapi dan pas ukurannya -->
                                         <div class="flex-1 bg-slate-900/80 border border-slate-700 rounded flex flex-col items-center justify-center py-1.5 shadow-inner w-full min-h-0">
                                             <i class="fa-solid fa-plus text-[9px] text-slate-500 shrink-0 mb-0.5"></i>

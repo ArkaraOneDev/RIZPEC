@@ -40,6 +40,7 @@ window.lastRaycastTime = 0;
 window.isCameraMoving = false; 
 window.isPointerDown = false; 
 window.rawPointerDownPos = { x: 0, y: 0 }; 
+window._ignoreNextClick = false; 
 
 // STATE VIRTUAL SCROLL
 window.ROW_HEIGHT = 30; // Tinggi tetap setiap baris tabel (px)
@@ -286,7 +287,7 @@ if (container) {
         const mode = window.activeInteractionMode;
         const isBox = mode === 'box_select';
         const isPoly = mode === 'poly_select';
-        if ((isBox || isPoly || mode === 'draw_line' || mode === 'draw_area') && typeof controls !== 'undefined') {
+        if ((isBox || isPoly || mode === 'draw_line' || mode === 'draw_area' || mode === 'draw_marker') && typeof controls !== 'undefined') {
             controls.enabled = false;
         }
     }, true); 
@@ -528,7 +529,7 @@ window.handleHover = function(intersects, param2 = null) {
     const mode = window.activeInteractionMode;
     const isBlockMode = mode === 'select_block' || mode === 'record_block';
     
-    const isToolMode = ['box_select', 'poly_select', 'center_pivot', 'draw_line', 'draw_area'].includes(mode);
+    const isToolMode = ['box_select', 'poly_select', 'center_pivot', 'draw_line', 'draw_area', 'draw_marker'].includes(mode);
 
     const updateCursor = (isHovering) => {
         if (!container) return;
@@ -664,6 +665,22 @@ window.onPointerDown = function(event) {
     const pos = window.getMousePos(event);
     const mode = window.activeInteractionMode;
     
+    if (mode === 'draw_marker') {
+        if (event.button !== 0) return;
+        if(typeof window.getRaycastPoint === 'function') {
+            const pt = window.getRaycastPoint(pos);
+            if (pt) { 
+                if (typeof window.addDrawMarker === 'function') window.addDrawMarker(pt);
+                // Langsung kembalikan ke mode seleksi agar interaksi blok tidak tumpang tindih
+                const defaultBtn = document.querySelector('.tool-btn[data-mode="select_bench"]');
+                if (defaultBtn) defaultBtn.click();
+            }
+        }
+        window.dragStartPos = { x: pos.x, y: pos.y }; 
+        window._ignoreNextClick = true; // Jangan jalankan executeClickAction saat pointerUp
+        return;
+    }
+
     if (mode === 'draw_line' || mode === 'draw_area') {
         if (event.button === 2) { if(window.finishDrawing) window.finishDrawing(); return; } 
         if (event.button !== 0) return; 
@@ -759,20 +776,20 @@ window.onPointerMove = function(event) {
     if (!window.is3DRenderingActive || (typeof isProcessing !== 'undefined' && isProcessing)) return; 
     const mode = window.activeInteractionMode;
     
-    const isToolMode = ['box_select', 'poly_select', 'center_pivot', 'draw_line', 'draw_area'].includes(mode);
+    const isToolMode = ['box_select', 'poly_select', 'center_pivot', 'draw_line', 'draw_area', 'draw_marker'].includes(mode);
 
     if (isToolMode && container) {
         container.style.cursor = 'crosshair';
     }
 
-    if (window.isPointerDown && !window.isDraggingRect && !window.isDrawingPolygon && mode !== 'draw_line' && mode !== 'draw_area') {
+    if (window.isPointerDown && !window.isDraggingRect && !window.isDrawingPolygon && mode !== 'draw_line' && mode !== 'draw_area' && mode !== 'draw_marker') {
         const dx = Math.abs(event.clientX - window.rawPointerDownPos.x); const dy = Math.abs(event.clientY - window.rawPointerDownPos.y);
         if ((dx > 3 || dy > 3) && !window.isCameraMoving) { window.isCameraMoving = true; window.toggleEdgesLOD(false); }
     }
 
     const pos = window.getMousePos(event); window.currentMousePos = pos;
     
-    if (mode === 'draw_line' || mode === 'draw_area') {
+    if (mode === 'draw_line' || mode === 'draw_area' || mode === 'draw_marker') {
         lastDrawPos = pos;
         if (!isDrawVisualUpdatePending) {
             isDrawVisualUpdatePending = true;
@@ -783,7 +800,9 @@ window.onPointerMove = function(event) {
                         const pt = window.getRaycastPoint(lastDrawPos);
                         if (pt && typeof drawHotspot !== 'undefined') {
                             drawHotspot.position.copy(pt); drawHotspot.visible = true;
-                            if (typeof drawPoints3D !== 'undefined' && drawPoints3D.length > 0 && window.updateDrawVisuals) window.updateDrawVisuals(pt);
+                            if (mode !== 'draw_marker' && typeof drawPoints3D !== 'undefined' && drawPoints3D.length > 0 && window.updateDrawVisuals) {
+                                window.updateDrawVisuals(pt);
+                            }
                         } else { if (typeof drawHotspot !== 'undefined' && drawHotspot) drawHotspot.visible = false; }
                     }
                 }
@@ -867,6 +886,7 @@ window.onPointerUp = function(event) {
     if (event.target && event.target.tagName !== 'CANVAS' && !window.isDraggingRect && !window.isDrawingPolygon) return;
 
     if (window._justCentered) { window._justCentered = false; return; }
+    if (window._ignoreNextClick) { window._ignoreNextClick = false; return; }
     
     if (typeof controls !== 'undefined' && !controls.enabled) {
         // PERBAIKAN: Melepaskan kendali bahkan saat 'isDrawingPolygon' bernilai true.
@@ -898,7 +918,7 @@ window.onPointerUp = function(event) {
     }
     
     if (window.isDrawingPolygon) return;
-    if (mode === 'draw_line' || mode === 'draw_area') return; 
+    if (mode === 'draw_line' || mode === 'draw_area' || mode === 'draw_marker') return; 
 
     if (Math.hypot(pos.x - window.dragStartPos.x, pos.y - window.dragStartPos.y) < 5) window.executeClickAction(event, pos);
 }
@@ -1569,13 +1589,6 @@ window.resetSequenceAndView = function() {
     window.hoveredGroupKey = null; window.hoveredMeshes.length = 0; window.currentHoveredName = null; window.currentHoveredData = null;
 
     window.displaySelectionInfo(); window.updateSequenceUI();
-    
-    if (typeof drawGroup !== 'undefined' && drawGroup) {
-        drawGroup.children.forEach(c => window.cleanseZombieMesh(c)); 
-        drawGroup.clear();
-    }
-    if (typeof finishedDrawings !== 'undefined') finishedDrawings = [];
-    if (typeof selectedDrawing !== 'undefined') selectedDrawing = null;
 
     const defaultBtn = document.querySelector('.tool-btn[data-mode="select_bench"]');
     if (defaultBtn) {
