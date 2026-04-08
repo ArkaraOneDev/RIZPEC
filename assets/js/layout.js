@@ -225,6 +225,7 @@ window.toggleSublayer = function(type) {
     if (type === 'DispWaste') window.isDispWasteVisible = !window.isDispWasteVisible;
     if (type === 'Label') window.isLabelLayerVisible = !window.isLabelLayerVisible;
     
+    // 1. Mengatur Visibilitas 3D Mesh (Block / Batubara)
     if (typeof meshes !== 'undefined') {
         Object.values(meshes).forEach(mesh => {
             if (mesh.userData.isRecorded) return; 
@@ -239,8 +240,21 @@ window.toggleSublayer = function(type) {
         });
     }
 
+    // 2. [UPDATE] Mengatur Visibilitas WebGL Sprite Labels
+    if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup !== null) {
+        pitReserveGroup.children.forEach(child => {
+            if (child.isSprite && child.userData && child.userData.isLabel) {
+                child.visible = window.isLabelLayerVisible;
+            }
+        });
+    }
+
     window.updateLayerUI();
-    if(typeof updateLabels === 'function') updateLabels(); 
+    
+    // [PERBAIKAN BUG]: Gunakan forceSingleRender agar Scene, Compass, dan Trackpad dirender dengan benar
+    if (typeof window.forceSingleRender === 'function') {
+        window.forceSingleRender();
+    }
 };
 
 window.changeSublayerOpacity = function(type, value) {
@@ -275,13 +289,22 @@ window.changeSublayerOpacity = function(type, value) {
             }
         });
     } else {
-        if (typeof activeLabels !== 'undefined') {
-            activeLabels.forEach(lbl => { lbl.element.style.opacity = window.labelOpacity; });
+        // [UPDATE] Mengatur Opacity WebGL Sprite Labels
+        if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup !== null) {
+            pitReserveGroup.children.forEach(child => {
+                if (child.isSprite && child.userData && child.userData.isLabel) {
+                    if (child.material) {
+                        child.material.opacity = window.labelOpacity;
+                        child.material.needsUpdate = true;
+                    }
+                }
+            });
         }
     }
     
-    if (window.is3DRenderingActive && typeof renderer !== 'undefined') {
-        renderer.render(scene, camera);
+    // [PERBAIKAN BUG]: Gunakan forceSingleRender agar Scene, Compass, dan Trackpad dirender dengan benar
+    if (typeof window.forceSingleRender === 'function') {
+        window.forceSingleRender();
     }
 };
 

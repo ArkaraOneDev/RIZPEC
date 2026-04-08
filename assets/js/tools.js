@@ -5,7 +5,7 @@ window.drawPoints3D = window.drawPoints3D || []; // Dibuat eksplisit global agar
 var activeDrawMesh = null;
 var activeDrawLine = null;
 var drawGroup = null;
-var cachedDrawIntersectables = []; // Ditinggalkan untuk backward compatibility saja
+var cachedDrawIntersectables = []; 
 var isDrawCachingValid = false;
 var drawHotspot = null; // Sphere penunjuk kursor raycast
 var finishedDrawings = []; // Menyimpan semua gambar yang sudah selesai
@@ -39,6 +39,7 @@ const canvasContainer = document.getElementById('canvas-container');
 window.restoreNormalNavigation = function() {
     if(typeof controls !== 'undefined' && controls) {
         controls.mouseButtons.LEFT = THREE.MOUSE.PAN; 
+        controls.enableDamping = true; // [PERBAIKAN] Aktifkan kembali damping (smooth pan) saat keluar dari mode draw
     }
 };
 
@@ -70,12 +71,20 @@ document.querySelectorAll('.tool-btn').forEach(btn => {
         if (mode !== 'draw_line' && mode !== 'draw_area' && mode !== 'draw_marker') {
             window.cancelActiveDrawing();
             window.restoreNormalNavigation();
+            isDrawCachingValid = false; // [OPTIMASI RAM] Kosongkan cache memori setelah selesai menggambar
         } else {
             // Kosongkan pilihan biasa apabila memasuki mod lukisan
             if(typeof window.clearSelection === 'function') window.clearSelection();
             window.clearDrawingSelection();
+            
             // Lumpuhkan orbit/pan pada klik kiri semasa melukis
-            if(typeof controls !== 'undefined' && controls) controls.mouseButtons.LEFT = null;
+            if(typeof controls !== 'undefined' && controls) {
+                controls.mouseButtons.LEFT = null;
+                controls.enableDamping = false; // [PERBAIKAN] Matikan damping agar kamera stop instan & raycast tidak ngelag
+            }
+            
+            // [OPTIMASI RAM] Bangun array Raycast SATU KALI saja sebelum mulai menggambar
+            if(typeof window.updateDrawCache === 'function') window.updateDrawCache(); 
         }
     });
 });
@@ -94,6 +103,12 @@ window.updateLayersUI = function() {
 
     listEl.innerHTML = '';
     finishedDrawings.forEach(drawing => {
+        // Fallback backward compatibility untuk variable visible
+        if (drawing.visible === undefined) drawing.visible = true;
+
+        const eyeIconClass = drawing.visible ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+        const eyeColorClass = drawing.visible ? 'text-slate-400 hover:text-blue-400' : 'text-slate-600 hover:text-slate-400';
+
         const itemDiv = document.createElement('div');
         itemDiv.className = 'flex items-center justify-between pl-6 pr-2 py-1 bg-slate-800/30 border-l-2 border-slate-600 transition-colors hover:bg-slate-700/40';
         
@@ -103,15 +118,34 @@ window.updateLayersUI = function() {
                 ${drawing.name}
             </span>
             <div class="flex items-center shrink-0">
-                <div class="flex items-center justify-start gap-2.5 border-l border-slate-600 pl-2.5 h-4 w-6">
-                    <button onclick="window.deleteLayer('${drawing.id}')" class="text-slate-500 hover:text-rose-400 flex items-center justify-center w-4 h-4 shrink-0 outline-none" title="Hapus Layer">
-                        <i class="fa-solid fa-trash-can text-[10px]"></i>
+                <button onclick="window.deleteLayer('${drawing.id}')" class="text-slate-500 hover:text-rose-400 flex items-center justify-center w-4 h-4 shrink-0 outline-none mr-2.5" title="Hapus Layer">
+                    <i class="fa-solid fa-trash-can text-[10px]"></i>
+                </button>
+                <div class="flex items-center justify-center border-l border-slate-600 pl-2.5 h-4 w-6">
+                    <button onclick="window.toggleLayerVisibility('${drawing.id}')" class="${eyeColorClass} flex items-center justify-center w-4 h-4 shrink-0 outline-none" title="Sembunyikan/Tampilkan Layer">
+                        <i class="${eyeIconClass} text-[10px]" id="eye-icon-${drawing.id}"></i>
                     </button>
                 </div>
             </div>
         `;
         listEl.appendChild(itemDiv);
     });
+};
+
+window.toggleLayerVisibility = function(id) {
+    const drawing = finishedDrawings.find(d => d.id === id);
+    if (!drawing) return;
+    
+    drawing.visible = !drawing.visible;
+    
+    // Terapkan visibility ke semua mesh milik gambar
+    if (drawing.lineMesh) drawing.lineMesh.visible = drawing.visible;
+    if (drawing.areaMesh) drawing.areaMesh.visible = drawing.visible;
+    if (drawing.markerMesh) drawing.markerMesh.visible = drawing.visible;
+    
+    window.updateLayersUI(); // Perbarui UI layer untuk mengubah ikon mata
+    
+    if (typeof window.forceSingleRender === 'function') window.forceSingleRender();
 };
 
 window.deleteLayer = function(id) {
@@ -156,10 +190,12 @@ window.zoomToLayer = function(id) {
 
     const box = new THREE.Box3();
 
-    if (drawing.type === 'draw_marker') {
+    if (drawing.type === 'draw_marker' && drawing.point) {
+        // Marker tunggal dari Tool biasa
         box.expandByPoint(drawing.point);
         box.expandByScalar(30); 
     } else if (drawing.points && drawing.points.length > 0) {
+        // Line, Area, ATAU Marker Pro (Fleet/Drill Hole) yang memiliki banyak titik
         drawing.points.forEach(p => box.expandByPoint(p));
         const size = new THREE.Vector3();
         box.getSize(size);
@@ -237,7 +273,8 @@ window.finishDrawing = function() {
         colorClass: colorClass,
         lineMesh: activeDrawLine,
         areaMesh: activeDrawMesh,
-        points: [...window.drawPoints3D]
+        points: [...window.drawPoints3D],
+        visible: true // Tambahkan ini agar memiliki state default yang benar
     };
 
     if (activeDrawLine) activeDrawLine.userData.drawRef = finishedData;
@@ -270,26 +307,14 @@ window.clearDrawingSelection = function() {
     }
 }
 
+// [OPTIMASI RAM] CACHING ARRAY RAYCAST SAAT MENGGAMBAR
 window.updateDrawCache = function() {
-    // Deprecated: Fungsi ini dikosongkan karena getRaycastPoint kini mengecek .visible pada object 
-    // secara real-time seperti halnya operasi hover normal.
-    isDrawCachingValid = true;
-}
-
-window.getRaycastPoint = function(pos) {
-    if (typeof mouse === 'undefined' || typeof raycaster === 'undefined' || typeof camera === 'undefined') return null;
+    cachedDrawIntersectables = [];
     
-    mouse.x = pos.nx; mouse.y = pos.ny; 
-    raycaster.setFromCamera(mouse, camera);
-    
-    let intersectableObjects = [];
-
     // Kumpulkan objek pit block yang TERLIHAT (visible)
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
         pitReserveGroup.children.forEach(c => {
-            if (c.isMesh && c.visible) {
-                intersectableObjects.push(c);
-            }
+            if (c.isMesh && c.visible) cachedDrawIntersectables.push(c);
         });
     }
 
@@ -299,17 +324,30 @@ window.getRaycastPoint = function(pos) {
             if (l.type === 'dxf' && l.visible && l.threeObject) {
                 l.threeObject.traverse(c => {
                     if ((c.isMesh || c.isLineSegments) && c.visible) {
-                        // Tambahkan metadata sementara untuk mendukung kalkulasi masking (clipping)
                         c.userData.dxfLayerName = l.name;
                         c.userData.dxfType = l.hasFaces ? 'Polymesh' : 'Polyline';
-                        intersectableObjects.push(c);
+                        cachedDrawIntersectables.push(c);
                     }
                 });
             }
         });
     }
+    
+    isDrawCachingValid = true;
+};
 
-    const intersects = raycaster.intersectObjects(intersectableObjects, false);
+window.getRaycastPoint = function(pos) {
+    if (typeof mouse === 'undefined' || typeof raycaster === 'undefined' || typeof camera === 'undefined') return null;
+    
+    mouse.x = pos.nx; mouse.y = pos.ny; 
+    raycaster.setFromCamera(mouse, camera);
+    
+    // [OPTIMASI BARU]: Gunakan cache agar memori tablet tidak dipaksa membuat Array 5000+ item 60x per detik!
+    if (!isDrawCachingValid) {
+        window.updateDrawCache();
+    }
+
+    const intersects = raycaster.intersectObjects(cachedDrawIntersectables, false);
     
     // Gunakan filter bawaan dari interaction.js yang memperhitungkan masking/clipping
     if (typeof window.getFirstValidIntersection === 'function') {
@@ -472,7 +510,8 @@ window.addDrawMarker = function(pt) {
         name: 'Marker ' + window.markerCount,
         colorClass: 'bg-red-400/20 border-red-400',
         point: pt.clone(),
-        markerMesh: markerMesh 
+        markerMesh: markerMesh,
+        visible: true // Tambahkan ini agar memiliki state default yang benar
     };
     
     window.drawMarkers.push(markerData);

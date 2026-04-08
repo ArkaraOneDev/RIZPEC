@@ -126,6 +126,15 @@ window.renderVirtualList = function(containerId, tbodyId, data, renderRowFn) {
     const tbody = document.getElementById(tbodyId);
     if (!container || !tbody) return;
 
+    // FIX BUG 1: Bersihkan listener dan frame animasi lama agar data "hantu" tidak tereksekusi kembali
+    if (container._vsHandler) {
+        container.removeEventListener('scroll', container._vsHandler);
+    }
+    if (container._rAF) {
+        cancelAnimationFrame(container._rAF);
+        container._rAF = null;
+    }
+
     if (data.length === 0) {
         tbody.style.paddingTop = '0px';
         tbody.style.paddingBottom = '0px';
@@ -139,7 +148,8 @@ window.renderVirtualList = function(containerId, tbodyId, data, renderRowFn) {
     const update = () => {
         const scrollTop = container.scrollTop;
         let startIndex = Math.floor(scrollTop / window.ROW_HEIGHT);
-        startIndex = Math.max(0, Math.min(startIndex, data.length - visibleCount));
+        // Pastikan tidak out-of-bounds saat ukuran data mengecil
+        startIndex = Math.max(0, Math.min(startIndex, Math.max(0, data.length - visibleCount)));
         let endIndex = Math.min(startIndex + visibleCount, data.length);
 
         const paddingTop = startIndex * window.ROW_HEIGHT;
@@ -150,14 +160,17 @@ window.renderVirtualList = function(containerId, tbodyId, data, renderRowFn) {
 
         tbody.innerHTML = '';
         for (let i = startIndex; i < endIndex; i++) {
-            tbody.appendChild(renderRowFn(data[i], i));
+            if (data[i]) {
+                tbody.appendChild(renderRowFn(data[i], i));
+            }
         }
     };
 
-    if (!container._vsHandler) {
-        container._vsHandler = () => requestAnimationFrame(update);
-        container.addEventListener('scroll', container._vsHandler, { passive: true });
-    }
+    container._vsHandler = () => {
+        if (container._rAF) cancelAnimationFrame(container._rAF);
+        container._rAF = requestAnimationFrame(update);
+    };
+    container.addEventListener('scroll', container._vsHandler, { passive: true });
 
     update(); 
 };
@@ -281,7 +294,6 @@ if (container) {
         if (e.target && e.target.tagName !== 'CANVAS') return;
         
         // HANYA MATIKAN KONTROL PADA KLIK KIRI SAJA
-        // Ini memungkinkan Pengguna menggunakan klik tengah / kanan untuk pan dan rotasi kamera
         if (e.button !== 0) return; 
 
         const mode = window.activeInteractionMode;
@@ -521,14 +533,27 @@ window.getFirstValidIntersection = function(intersects) {
 window.handleHover = function(intersects, param2 = null) {
     if (window.isDraggingRect || window.isDrawingPolygon || (typeof isProcessing !== 'undefined' && isProcessing)) return;
     
+    // --- PENANGANAN KHUSUS UNTUK PAN_VIEW ---
+    const mode = window.activeInteractionMode;
+    if (mode === 'pan_view') {
+        if (container) {
+            container.style.cursor = window.isPointerDown ? 'grabbing' : 'grab';
+        }
+        if (window.hoveredGroupKey) {
+            window.hoveredMeshes.forEach(m => window.highlightMesh(m, false)); 
+            window.hoveredMeshes.length = 0; window.hoveredGroupKey = null; window.currentHoveredData = null;
+            window.renderInfoPanel();
+        }
+        return; 
+    }
+    // -----------------------------------------
+
     let dxfIntersect = null;
     if (param2 !== null && typeof param2 === 'object') {
         dxfIntersect = param2;
     }
 
-    const mode = window.activeInteractionMode;
     const isBlockMode = mode === 'select_block' || mode === 'record_block';
-    
     const isToolMode = ['box_select', 'poly_select', 'center_pivot', 'draw_line', 'draw_area', 'draw_marker'].includes(mode);
 
     const updateCursor = (isHovering) => {
@@ -665,19 +690,27 @@ window.onPointerDown = function(event) {
     const pos = window.getMousePos(event);
     const mode = window.activeInteractionMode;
     
+    // --- PENANGANAN KHUSUS UNTUK PAN_VIEW ---
+    if (mode === 'pan_view') {
+        if (event.button === 0 && container) {
+            container.style.cursor = 'grabbing';
+        }
+        return; 
+    }
+    // -----------------------------------------
+
     if (mode === 'draw_marker') {
         if (event.button !== 0) return;
         if(typeof window.getRaycastPoint === 'function') {
             const pt = window.getRaycastPoint(pos);
             if (pt) { 
                 if (typeof window.addDrawMarker === 'function') window.addDrawMarker(pt);
-                // Langsung kembalikan ke mode seleksi agar interaksi blok tidak tumpang tindih
                 const defaultBtn = document.querySelector('.tool-btn[data-mode="select_bench"]');
                 if (defaultBtn) defaultBtn.click();
             }
         }
         window.dragStartPos = { x: pos.x, y: pos.y }; 
-        window._ignoreNextClick = true; // Jangan jalankan executeClickAction saat pointerUp
+        window._ignoreNextClick = true; 
         return;
     }
 
@@ -732,11 +765,9 @@ window.onPointerDown = function(event) {
         window.isDrawingPolygon = true; 
         if(typeof controls !== 'undefined') controls.enabled = false; 
         
-        // Panggil hook sinkronisasi kamera & temukan poin 3D
         if (typeof window.bindCameraChange === 'function') window.bindCameraChange();
         
         const pt3d = window._get3DPointFromMouse(pos);
-        // Simpan titik 3D agar update Polygon SVG bisa re-project titik tersebut
         window.polygonPoints.push({ x: pos.x, y: pos.y, vec3: pt3d }); 
         window.updatePolygonSVG();
         
@@ -889,8 +920,6 @@ window.onPointerUp = function(event) {
     if (window._ignoreNextClick) { window._ignoreNextClick = false; return; }
     
     if (typeof controls !== 'undefined' && !controls.enabled) {
-        // PERBAIKAN: Melepaskan kendali bahkan saat 'isDrawingPolygon' bernilai true.
-        // Dengan ini, user bisa pan / zoom di sela-sela klik pembuatan polygon.
         if (!window.isDraggingRect && (typeof isCustomOrbiting === 'undefined' || !isCustomOrbiting)) {
             controls.enabled = true;
         }
@@ -899,6 +928,11 @@ window.onPointerUp = function(event) {
     if (!window.is3DRenderingActive || (typeof isProcessing !== 'undefined' && isProcessing) || event.button !== 0) return; 
     const pos = window.getMousePos(event);
     const mode = window.activeInteractionMode;
+
+    if (mode === 'pan_view') {
+        if (container) container.style.cursor = 'grab';
+        return; 
+    }
 
     if (window.isDraggingRect) {
         window.isDraggingRect = false; 
@@ -937,7 +971,6 @@ window.executeCenterPivot = function(pos) {
     
     if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup && pitReserveGroup.visible) {
         pitReserveGroup.traverse(c => { 
-            // Izinkan center pivot pada objek terekam asalkan terlihat
             if (c.isMesh && c.visible) intersectable.push(c); 
         });
     }
@@ -1039,7 +1072,6 @@ window.executeClickAction = function(event, pos) {
 window.updatePolygonSVG = function(currentPos = null) {
     if (window.polygonPoints.length === 0 || !polygonShape || !polygonLine) return;
     
-    // PEMBARUAN: Kalkulasi ulang posisi 2D SVG berbasis koordinat 3D mengikuti posisi kamera terbaru
     if (typeof camera !== 'undefined' && container) {
         window.polygonPoints.forEach(p => {
             if (p.vec3 && _tempScreenPos) {
@@ -1068,7 +1100,7 @@ window.updatePolygonSVG = function(currentPos = null) {
 window.finishPolygonSelection = function() {
     window.isDrawingPolygon = false; 
     if(typeof controls !== 'undefined') controls.enabled = true; 
-    window.updatePolygonSVG(); // Sinkronisasi titik terakhir
+    window.updatePolygonSVG(); 
     if(polygonLine) polygonLine.setAttribute('points', '');
     if (window.polygonPoints.length > 2) window.processAreaSelection(null, window.polygonPoints, window.isShiftDown);
     setTimeout(() => { if(polygonShape) polygonShape.setAttribute('points', ''); window.polygonPoints = []; }, 300);
@@ -1353,7 +1385,7 @@ window.toggleAutoRecord = function() {
 }
 
 // ==========================================
-// URUTAN & RAKAMAN REKOD (LOGIK BARU TERPISAH PIT/DISP & NAMING BARU)
+// URUTAN & RAKAMAN REKOD
 // ==========================================
 window.recordSelectedMeshes = function() {
     if (window.selectedMeshes.size === 0) return;
@@ -1626,9 +1658,16 @@ window.updateSequenceUI = function() {
         return row;
     };
 
+    // FIX BUG 2: Pengaturan Placeholder Pit yang lebih aman dengan classList dan display
     const pitPlaceholder = document.getElementById('sequence-placeholder');
     if (pitPlaceholder) {
-        pitPlaceholder.style.display = window.pitSequenceRecords.length === 0 ? 'flex' : 'none';
+        if (window.pitSequenceRecords.length === 0) {
+            pitPlaceholder.classList.remove('hidden');
+            pitPlaceholder.style.display = 'flex';
+        } else {
+            pitPlaceholder.classList.add('hidden');
+            pitPlaceholder.style.display = 'none';
+        }
     }
     window.renderVirtualList('sequence-scroll-container', 'sequence-tbody', window.pitSequenceRecords, renderPitRow);
     
@@ -1644,9 +1683,16 @@ window.updateSequenceUI = function() {
         setTimeout(() => { pitScrollContainer.scrollTop = pitScrollContainer.scrollHeight; }, 10); 
     }
 
+    // FIX BUG 2: Pengaturan Placeholder Disp yang lebih aman
     const dispPlaceholder = document.getElementById('disp-sequence-placeholder');
     if (dispPlaceholder) {
-        dispPlaceholder.style.display = window.dispSequenceRecords.length === 0 ? 'flex' : 'none';
+        if (window.dispSequenceRecords.length === 0) {
+            dispPlaceholder.classList.remove('hidden');
+            dispPlaceholder.style.display = 'flex';
+        } else {
+            dispPlaceholder.classList.add('hidden');
+            dispPlaceholder.style.display = 'none';
+        }
     }
     window.renderVirtualList('disp-sequence-scroll-container', 'disp-sequence-tbody', window.dispSequenceRecords, renderDispRow);
     

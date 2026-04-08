@@ -249,16 +249,28 @@ function processDXF(dxfText, fileName) {
                 firstColorCaptured = true;
             }
 
-            const geo = new THREE.BufferGeometry();
+            let geo = new THREE.BufferGeometry();
             // Langsung pakai buffer untuk menghemat RAM
             geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(item.buffer), 3));
+            
+            // [OPTIMASI RAM & PERFORMA 1]: Gabungkan (Weld) Titik-Titik DXF yang Terpisah
+            if (THREE.BufferGeometryUtils) {
+                try {
+                    const mergedGeo = THREE.BufferGeometryUtils.mergeVertices(geo, 0.01);
+                    geo.dispose(); 
+                    geo = mergedGeo;
+                } catch(err) { console.warn("Bypass DXF Merge: Mesh terlalu besar/kompleks"); }
+            }
+
             geo.computeVertexNormals(); 
 
-            const mat = new THREE.MeshStandardMaterial({
+            // [PERBAIKAN VISUAL]: Menggunakan MeshPhongMaterial (Bukan Lambert)
+            // Agar desain Pit/Lubang tambang terlihat tajam dan solid dengan shading per-pixel.
+            const mat = new THREE.MeshPhongMaterial({
                 color: finalColor,
                 side: THREE.DoubleSide,
-                roughness: 0.6,
-                metalness: 0.1,
+                shininess: 30, // Memberikan definisi pada sudut-sudut lubang pit
+                flatShading: true, // Smooth shading untuk topografi yang mulus
                 polygonOffset: true, 
                 polygonOffsetFactor: 1, 
                 polygonOffsetUnits: 1
@@ -306,8 +318,8 @@ function processDXF(dxfText, fileName) {
                 clipFootprints: 'Pit Data',
                 colorMode: 'Default',
                 visualColor: uiColorHex,
-                fileSize: capturedFileMeta.size,             // Menggunakan metadata yang sudah ditangkap
-                lastModified: capturedFileMeta.lastModified, // Menggunakan metadata yang sudah ditangkap
+                fileSize: capturedFileMeta.size,             
+                lastModified: capturedFileMeta.lastModified, 
                 textureMeta: null
             });
         }
@@ -361,7 +373,7 @@ function processDXF(dxfText, fileName) {
     // Eksekusi Worker
     worker.postMessage({
         dxfText: dxfText,
-        parserUrl: getDxfParserScriptUrl(), // Cari url library dinamis
+        parserUrl: getDxfParserScriptUrl(), 
         worldOriginSet: worldOrigin.isSet,
         existingOrigin: worldOrigin
     });
@@ -558,7 +570,7 @@ window.render2DDxfPreview = function(layers) {
     while(previewGroup.children.length > 0) {
         const child = previewGroup.children[0];
         previewGroup.remove(child);
-        child.userData = {}; // Netralkan referensi user data agar V8 gampang menyapu memori
+        child.userData = {}; 
     }
 
     layers.forEach(l => {
@@ -772,7 +784,7 @@ window.onDxfFolderRenamed = async function(oldName, newName, rootName) {
     }
 };
 
-// [FIX GPU OOM]: Perbaikan Tersangka #3 (Pembersihan Agresif Memori GPU)
+// [FIX GPU OOM]: Pembersihan Agresif Memori GPU
 window.onDxfFolderDeleted = async function(name, rootName) {
     if (rootName === 'DXF Data') {
         if (window._lastSelectedDxfFolderName === name) window._lastSelectedDxfFolderName = null;
@@ -796,7 +808,7 @@ window.onDxfFolderDeleted = async function(name, rootName) {
                         if (child.isMesh || child.isLineSegments) {
                             if (child.geometry) {
                                 child.geometry.dispose();
-                                child.geometry = null; // Putus referensi
+                                child.geometry = null; 
                             }
                             
                             if (child.material) {
@@ -805,7 +817,7 @@ window.onDxfFolderDeleted = async function(name, rootName) {
                                     if (m.map) m.map.dispose(); 
                                     m.dispose(); 
                                 });
-                                child.material = null; // Putus referensi
+                                child.material = null; 
                             }
                             
                             if (child.userData.originalMaterial) {
@@ -818,7 +830,7 @@ window.onDxfFolderDeleted = async function(name, rootName) {
                                 child.userData.originalMaterialTex.dispose();
                                 child.userData.originalMaterialTex = null;
                             }
-                            child.userData = {}; // Kosongkan userData agar V8 bebas GC
+                            child.userData = {}; 
                         }
                     });
                     if (typeof scene !== 'undefined') scene.remove(layer.threeObject);
@@ -1203,9 +1215,6 @@ window.executeDxfFootprintClipping = function(layer) {
         layer.maskRenderTarget.dispose(); 
     }
 
-    // [FIX GPU OOM]: Perbaikan Tersangka #2
-    // Menurunkan resolusi RT dari 1024 ke 512, menghemat VRAM 75% setiap ada layer footprint yang aktif.
-    // NearestFilter digunakan karena lebih ringan di mobile GPU daripada LinearFilter.
     const rtRes = 512;
     const rt = new THREE.WebGLRenderTarget(rtRes, rtRes, {
         format: THREE.RedFormat,
@@ -1781,7 +1790,6 @@ window.invert3x3 = function(m) {
     ];
 };
 
-// [PERBAIKAN KE-3]: Cross Hair panel kanan ditipiskan
 window.renderRightCanvasMarkers = function() {
     if(!window.gcpState || !window.gcpState.markersGroup) return;
     
@@ -1937,7 +1945,6 @@ window.initGcpModal = function(img, file, layerTarget) {
     const rightContainer = document.getElementById('gcp-right-3d');
     rightContainer.innerHTML = '';
 
-    // [FIX GPU OOM]: Matikan antialias, set low-power, & paksa PixelRatio = 1 untuk renderer GCP 3D
     const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: "low-power" }); 
     renderer.setPixelRatio(1);
     renderer.setSize(rightContainer.clientWidth, rightContainer.clientHeight);
@@ -1982,7 +1989,6 @@ window.initGcpModal = function(img, file, layerTarget) {
     const size = new THREE.Vector3(); box.getSize(size);
     const center = new THREE.Vector3(); box.getCenter(center);
     
-    // [UPDATE]: Menyimpan elevasi dasar (Y) untuk keperluan fallback klik di luar bounding box
     window.gcpState.centerY = center.y;
     
     const aspect = rightContainer.clientWidth / rightContainer.clientHeight;
@@ -2033,22 +2039,14 @@ window.initGcpModal = function(img, file, layerTarget) {
         
         window.gcpState.raycaster.setFromCamera(window.gcpState.mouse, window.gcpState.camera);
         
-        // ========================================================
-        // [PERBAIKAN MAGNETIC SNAPPING]: "Distance to Ray" Method
-        // ========================================================
         let nearestDistSq = Infinity;
         let bestVertex = new THREE.Vector3();
         let foundVertex = false;
 
-        // Radius snap dibuat responsif: 5% dari viewport yang terlihat
-        // Jadi kalau user zoom-in, magnetic-nya makin sempit (presisi). 
-        // Kalau zoom-out, magnetic-nya makin lebar (mudah menangkap sudut).
         const effectiveFrustumWidth = (window.gcpState.camera.right - window.gcpState.camera.left) / window.gcpState.camera.zoom;
         const magneticRadius = effectiveFrustumWidth * 0.05; 
-        const magneticRadiusSq = magneticRadius * magneticRadius; // Hitung kuadrat untuk optimasi performa
+        const magneticRadiusSq = magneticRadius * magneticRadius; 
 
-        // 1. Traverse seluruh point, cari yang terdekat dengan "Sinar/Ray" secara 2D.
-        // Hal ini memungkinkan snapping sudut PALING LUAR meskipun user mengklik di ruang kosong di luar Polymesh.
         previewGroup.traverse((child) => {
             if ((child.isMesh || child.isLineSegments) && child.geometry && child.geometry.attributes.position) {
                 const pos = child.geometry.attributes.position;
@@ -2057,7 +2055,6 @@ window.initGcpModal = function(img, file, layerTarget) {
                     tempV.fromBufferAttribute(pos, i);
                     tempV.applyMatrix4(child.matrixWorld);
                     
-                    // distanceSqToPoint ini akan mengukur jarak 2D pada Orthographic Top-Down
                     const distSq = window.gcpState.raycaster.ray.distanceSqToPoint(tempV);
                     
                     if (distSq < nearestDistSq && distSq < magneticRadiusSq) {
@@ -2072,17 +2069,14 @@ window.initGcpModal = function(img, file, layerTarget) {
         let targetX, targetZ;
 
         if (foundVertex) {
-            // Berhasil Snap ke titik terdekat (sudut menempel sempurna)
             targetX = bestVertex.x;
             targetZ = bestVertex.z;
         } else {
-            // 2. Fallback: Kalau tidak ada vertex terdekat, tapi raycaster tembus badan Mesh
             const intersects = window.gcpState.raycaster.intersectObject(previewGroup, true);
             if (intersects.length > 0) {
                 targetX = intersects[0].point.x;
                 targetZ = intersects[0].point.z;
             } else {
-                // 3. Fallback Ekstrim: User klik murni di luar segalanya dan jauh dari titik apapun
                 const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -window.gcpState.centerY); 
                 const targetPoint = new THREE.Vector3();
                 window.gcpState.raycaster.ray.intersectPlane(plane, targetPoint);
@@ -2090,7 +2084,7 @@ window.initGcpModal = function(img, file, layerTarget) {
                     targetX = targetPoint.x;
                     targetZ = targetPoint.z;
                 } else {
-                    return; // Gagal
+                    return; 
                 }
             }
         }

@@ -183,7 +183,11 @@ function init3D() {
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.zoomSpeed = 3.5; 
     controls.panSpeed = 1.5;
-    controls.enableDamping = false; 
+    
+    // [PERBAIKAN]: Kita aktifkan kembali agar pergerakan kamera sehari-hari terasa nyaman.
+    // Mematikan damping saat menggambar sudah dihandle mandiri oleh `tools.js`
+    controls.enableDamping = true; 
+    controls.dampingFactor = 0.5;
 
     controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: null, RIGHT: null };
 
@@ -202,17 +206,20 @@ function init3D() {
 
         if (!window.is3DRenderingActive) return;
 
-        let dist = camera.position.distanceTo(controls.target);
-        let step = dist * 0.08;
-        if (step < 10) step = 10; 
+        // [PERBAIKAN ZOOM CAD-STYLE]: 
+        // Menggunakan langkah kecepatan konstan (linear), tidak logaritmik.
+        // Berapapun jaraknya ke target, zoom tidak akan melambat.
+        let step = 80; // Ubah angka ini jika dirasa terlalu cepat/lambat
 
         const isZoomingIn = e.deltaY < 0;
         const moveAmount = isZoomingIn ? step : -step;
 
         camera.getWorldDirection(_v1);
+        let dist = camera.position.distanceTo(controls.target);
 
         if (isZoomingIn) {
             if (dist - moveAmount <= 1.0) {
+                // Dorong target ke depan agar kamera bisa terus menembus (fly-through)
                 _v1.multiplyScalar(moveAmount);
                 camera.position.add(_v1);
                 controls.target.add(_v1);
@@ -226,6 +233,7 @@ function init3D() {
         }
 
         controls.update();
+        if (typeof window.forceSingleRender === 'function') window.forceSingleRender();
     }, { passive: false, capture: true });
 
     // ==========================================

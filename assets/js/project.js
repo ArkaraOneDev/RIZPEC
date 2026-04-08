@@ -510,6 +510,45 @@ async function executeProgressiveStreamSave(fileHandle, fileName) {
                         }
                     }
 
+                    // 2.5 Ekstrak dan Tulis WebGL Sprite Labels ke dalam file .riz
+                    controller.enqueue(new TextEncoder().encode('],"spriteLabels":['));
+                    let firstLabel = true;
+                    if (typeof pitReserveGroup !== 'undefined' && pitReserveGroup) {
+                        pitReserveGroup.children.forEach(child => {
+                            if (child.isSprite && child.userData && child.userData.isLabel) {
+                                let base64 = null;
+                                try {
+                                    if (child.material && child.material.map && child.material.map.image) {
+                                        const imgSource = child.material.map.image;
+                                        // [FIX]: Menghindari kegagalan .toDataURL() jika sumbernya adalah HTMLImageElement dari hasil Load sebelumnya
+                                        if (typeof imgSource.toDataURL === 'function') {
+                                            base64 = imgSource.toDataURL('image/png');
+                                        } else {
+                                            const canvas = document.createElement('canvas');
+                                            canvas.width = imgSource.width || imgSource.naturalWidth;
+                                            canvas.height = imgSource.height || imgSource.naturalHeight;
+                                            const ctx = canvas.getContext('2d');
+                                            ctx.drawImage(imgSource, 0, 0);
+                                            base64 = canvas.toDataURL('image/png');
+                                        }
+                                    }
+                                } catch(e) { console.warn("Failed to extract sprite texture", e); }
+                                
+                                if (base64) {
+                                    const labelData = {
+                                        position: { x: child.position.x, y: child.position.y, z: child.position.z },
+                                        scale: { x: child.scale.x, y: child.scale.y, z: child.scale.z },
+                                        userData: child.userData,
+                                        textureBase64: base64
+                                    };
+                                    const separator = firstLabel ? '' : ',';
+                                    controller.enqueue(new TextEncoder().encode(separator + JSON.stringify(labelData)));
+                                    firstLabel = false;
+                                }
+                            }
+                        });
+                    }
+
                     // 3. Pindah array ke DXF Layers
                     controller.enqueue(new TextEncoder().encode('],"dxfLayers":['));
 
@@ -619,7 +658,7 @@ function resetFullProject() {
     }
     if (typeof meshes !== 'undefined') meshes = {};
     
-    // [FIX LABEL LEAK]: Hapus DOM element label secara menyeluruh
+    // [FIX LABEL LEAK]: Hapus DOM element label (sebagai pengaman legacy cache)
     if (window.activeLabels) {
         window.activeLabels.forEach(lbl => {
             if (lbl.element && lbl.element.parentNode) {
@@ -1091,7 +1130,6 @@ async function processLoadedData(data, fileName) {
                 const safeId = pId.replace(/\s+/g, '_');
                 try {
                     await RizpecDB.set(`rizpec_pit_entity_${safeId}`, csvStr);
-                    // Dihapus: if (window.pitStates[pId]) { window.pitStates[pId].generatedCsv = csvStr; }
                 } catch(e) {
                     console.warn("Gagal memulihkan CSV untuk Pit: " + pId);
                 }
@@ -1171,7 +1209,6 @@ async function processLoadedData(data, fileName) {
                 const safeId = dId.replace(/\s+/g, '_');
                 try {
                     await RizpecDB.set(`rizpec_disp_entity_${safeId}`, csvStr);
-                    // Dihapus: if (window.disposalStates[dId]) { window.disposalStates[dId].generatedCsv = csvStr; }
                 } catch(e) {
                     console.warn("Gagal memulihkan CSV untuk Disposal: " + dId);
                 }
@@ -1417,89 +1454,54 @@ async function processLoadedData(data, fileName) {
             }
         }
 
-        // --- [FIX] REBUILD LABELS UNTUK PRO MODES ---
-        const proModes = ['Res. Incremental', 'Res. Cumulative', 'Res. Zone'];
-        const labelsContainer = document.getElementById('labels-container');
-        
-        if (labelsContainer) {
-            if(getComputedStyle(labelsContainer).position === 'static') {
-                labelsContainer.style.position = 'absolute';
-                labelsContainer.style.top = '0';
-                labelsContainer.style.left = '0';
-                labelsContainer.style.width = '100%';
-                labelsContainer.style.height = '100%';
-                labelsContainer.style.pointerEvents = 'none'; 
-                labelsContainer.style.overflow = 'hidden';
-            }
-            labelsContainer.style.zIndex = '1';
-
-            window.activeLabels = window.activeLabels || [];
-
-            window.loadedPits.forEach(pitId => {
-                const mode = window.pitColorModes[pitId];
-                if (proModes.includes(mode)) {
-                    const blockBoxes = {};
-                    const groupStats = {};
-
-                    // 1. Hitung ulang Bounding Box dan Total Volume per GroupKey dari mesh yang di-load
-                    Object.values(meshes).forEach(mesh => {
-                        if (mesh.userData.entityId === pitId && mesh.userData.groupKey) {
-                            const gKey = mesh.userData.groupKey;
-                            
-                            if (!blockBoxes[gKey]) blockBoxes[gKey] = new THREE.Box3();
-                            blockBoxes[gKey].expandByObject(mesh);
-
-                            if (!groupStats[gKey]) groupStats[gKey] = { waste: 0, res: 0 };
-                            
-                            // Ambil data wasteVol dan resVol yang melekat pada mesh
-                            groupStats[gKey].waste += (mesh.userData.wasteVol || 0);
-                            groupStats[gKey].res += (mesh.userData.resVol || 0);
-                        }
-                    });
-
-                    // 2. Buat kembali elemen HTML Labelnya
-                    Object.keys(blockBoxes).forEach(gKey => {
-                        const box = blockBoxes[gKey];
-                        const center = box.getCenter(new THREE.Vector3());
-                        center.y = box.max.y + 5; 
+        // --- [UPDATE] REBUILD WEBGL SPRITE LABELS DARI SAVE DATA ---
+        const spritePromises = [];
+        if (data.spriteLabels && data.spriteLabels.length > 0 && typeof pitReserveGroup !== 'undefined') {
+            data.spriteLabels.forEach(lbl => {
+                if (!lbl.textureBase64) return;
+                
+                const img = new Image();
+                const p = new Promise((resolve) => {
+                    img.onload = () => {
+                        const texture = new THREE.Texture(img);
+                        texture.minFilter = THREE.LinearFilter;
+                        texture.magFilter = THREE.LinearFilter;
+                        texture.needsUpdate = true;
                         
-                        const g = groupStats[gKey];
-                        if (!g) return;
-
-                        const div = document.createElement('div');
-                        div.className = 'absolute top-0 left-0 text-[10px] sm:text-[11px] font-bold px-2 py-1 rounded-md shadow-lg border border-slate-500/80 pointer-events-none select-none flex items-center justify-center text-center transition-opacity duration-75 z-10 backdrop-blur-sm';
-                        
-                        let srText = g.res > 0 ? (g.waste / g.res).toFixed(2) : '-';
-                        
-                        div.innerHTML = `<span class="${srText !== '-' ? 'text-amber-400' : 'text-slate-200'} drop-shadow-md tracking-widest">SR: ${srText}</span>`;
-                        div.style.backgroundColor = 'rgba(15, 23, 42, 0.75)'; 
-                        div.style.willChange = 'transform, opacity'; 
-                        
-                        // Set visibilitas dan opacity sesuai state yang tersimpan
-                        div.style.display = window.isLabelLayerVisible ? 'flex' : 'none';
-                        div.style.opacity = window.labelOpacity !== undefined ? window.labelOpacity : 1;
-                        
-                        labelsContainer.appendChild(div);
-
-                        window.activeLabels.push({
-                            entityId: pitId,
-                            element: div,
-                            position: center,
-                            vec: new THREE.Vector3()
+                        const spriteMat = new THREE.SpriteMaterial({
+                            map: texture,
+                            transparent: true,
+                            depthTest: false,
+                            depthWrite: false,
+                            opacity: window.labelOpacity !== undefined ? window.labelOpacity : 1.0
                         });
-                    });
-                }
+                        
+                        const sprite = new THREE.Sprite(spriteMat);
+                        sprite.position.set(lbl.position.x, lbl.position.y, lbl.position.z);
+                        sprite.scale.set(lbl.scale.x, lbl.scale.y, lbl.scale.z);
+                        sprite.userData = lbl.userData;
+                        
+                        // [FIX PENTING]: Paksa Sprite selalu dirender setelah Mesh Block
+                        sprite.renderOrder = 999;
+                        
+                        // Validasi state layer pit agar label tidak muncul jika layer-nya di-hide saat disave
+                        const pitId = lbl.userData.entityId;
+                        const isPitLoaded = window.loadedPits && window.loadedPits.has(pitId);
+                        sprite.visible = isPitLoaded && (window.isLabelLayerVisible !== undefined ? window.isLabelLayerVisible : true);
+                        
+                        pitReserveGroup.add(sprite);
+                        resolve();
+                    };
+                    img.onerror = resolve;
+                    img.src = lbl.textureBase64;
+                });
+                spritePromises.push(p);
             });
-            
-            // Re-hook label events jika belum
-            if (typeof controls !== 'undefined' && !window.isLabelHooked) {
-                controls.addEventListener('change', window.updateLabels);
-                window.addEventListener('resize', window.updateLabels);
-                window.isLabelHooked = true;
-            }
-            if (typeof window.updateLabels === 'function') window.updateLabels();
         }
-        // --------------------------------------------
+        if (spritePromises.length > 0) {
+            await Promise.all(spritePromises);
+        }
+        // ------------------------------------------------------------
     }
 
     // [FIX 3] Restorasi Sequence secara Spesifik
@@ -1570,6 +1572,7 @@ async function processLoadedData(data, fileName) {
         delete data.pitDataCSVs;
         delete data.dispDataCSVs;
         delete data.pitReserve;
+        delete data.spriteLabels;
         delete data.dxfLayers;
         data = null; 
     }

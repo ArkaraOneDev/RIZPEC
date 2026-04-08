@@ -1,8 +1,8 @@
 // ==========================================
 // GEOMETRY BUILDER & MANAGER (ULTIMATE EDITION)
 // UI/UX DARI NEW_3 + MEMORY MANAGEMENT DARI NEW_1
-// OPTIMIZED FOR MOBILE/TABLET (ULTRA OOM PREVENTION & DOM CULLING)
-// + LABEL SYNC FIX FOR ARM TABLETS
+// OPTIMIZED FOR MOBILE/TABLET (ULTRA OOM PREVENTION)
+// + [NEW] HIGH-PERFORMANCE WEBGL SPRITE LABELS
 // ==========================================
 
 // Track state Pit & Disposal mana saja yang saat ini sedang diload dan dirender
@@ -20,120 +20,84 @@ window.worldOrigin = savedOrigin ? JSON.parse(savedOrigin) : { x: 0, y: 0, z: 0,
 window.isRenderingPits = window.isRenderingPits || false; 
 
 // =========================================================================
-// FITUR: 3D TO 2D SCREEN-SPACE LABELING MANAGER (OPTIMIZED + DOM CULLING)
+// FITUR: WEBGL 3D SPRITE LABELING MANAGER (100% GPU ACCELERATED)
 // =========================================================================
-window.activeLabels = window.activeLabels || [];
-window.isLabelHooked = window.isLabelHooked || false;
-window.isUpdatingLabels = window.isUpdatingLabels || false; // Lock sinkronisasi frame
 
-// Konfigurasi jarak (Distance) untuk Fade dan Hide Label
-const LABEL_CONFIG = {
-    FADE_START: 1500,  // Jarak kamera dimana label mulai memudar
-    FADE_END: 3000,    // Jarak kamera dimana label hilang 100%
-    MAX_VISIBLE: 200   // [OPTIMASI DOM]: Batas maksimal DOM label yg dirender per frame agar tidak lag
-};
+// Utility untuk membuat Teks menjadi Sprite di WebGL
+function createLabelSprite(text, colorHex, bgColorRgba) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    
+    // Resolusi font ditinggikan agar tekstur tidak pecah
+    const font = "bold 36px 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"; 
+    context.font = font;
+
+    const metrics = context.measureText(text);
+    const textWidth = metrics.width;
+    const textHeight = 36;
+
+    // Padding Canvas
+    canvas.width = textWidth + 30; 
+    canvas.height = textHeight + 20; 
+
+    // Reset font setelah resize canvas (Wajib)
+    context.font = font;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+
+    // Gambar Background (Rounded Box)
+    context.fillStyle = bgColorRgba;
+    context.beginPath();
+    context.roundRect(0, 0, canvas.width, canvas.height, 8);
+    context.fill();
+    
+    // Gambar Border (Opsional agar terlihat seperti UI)
+    context.strokeStyle = "rgba(100, 116, 139, 0.8)";
+    context.lineWidth = 2;
+    context.stroke();
+
+    // Gambar Text
+    context.fillStyle = colorHex;
+    // Penyesuaian optikal y sedikit ke bawah karena textBaseline middle
+    context.fillText(text, canvas.width / 2, canvas.height / 2 + 2); 
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+
+    const spriteMaterial = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthTest: false, // [PENTING] Memastikan label selalu dirender di ATAS mesh block (tidak tembus)
+        depthWrite: false
+    });
+
+    const sprite = new THREE.Sprite(spriteMaterial);
+    
+    // Skala Sprite (Sesuaikan rasio dari canvas ke world space)
+    const scaleFactor = 0.35; // Sesuaikan jika label terasa kekecilan/kebesaran
+    sprite.scale.set(canvas.width * scaleFactor, canvas.height * scaleFactor, 1);
+
+    return sprite;
+}
 
 window.clearLabels = function(entityId) {
-    window.activeLabels = window.activeLabels.filter(lbl => {
-        // [FIX LEAK]: Pastikan hanya menghapus label milik entity yang diminta dari DOM & Array
-        if (lbl.entityId === entityId) { 
-            if (lbl.element && lbl.element.parentNode) {
-                lbl.element.parentNode.removeChild(lbl.element);
-            }
-            return false; 
+    if (typeof pitReserveGroup === 'undefined') return;
+    
+    // Cari dan hapus semua sprite label milik entity ini
+    const labelsToRemove = [];
+    pitReserveGroup.children.forEach(child => {
+        if (child.isSprite && child.userData && child.userData.isLabel && child.userData.entityId === entityId) {
+            labelsToRemove.push(child);
         }
-        return true; 
     });
-};
 
-window.updateLabels = function() {
-    // [FIX DESYNC]: Jangan proses jika frame ini sedang merender label
-    if (window.isUpdatingLabels) return;
-    window.isUpdatingLabels = true;
-
-    // [FIX DESYNC]: Paksa jalan bersamaan dengan GPU Render Pipeline (requestAnimationFrame)
-    requestAnimationFrame(() => {
-        const labelsContainer = document.getElementById('labels-container');
-        
-        if (!labelsContainer) {
-            window.isUpdatingLabels = false;
-            return;
+    labelsToRemove.forEach(sprite => {
+        pitReserveGroup.remove(sprite);
+        if (sprite.material) {
+            if (sprite.material.map) sprite.material.map.dispose(); // Bebaskan Memory Texture
+            sprite.material.dispose(); // Bebaskan Material
         }
-
-        // [FIX STACKING CONTEXT]: Cegah z-index bocor menimpa Compass (z-10)
-        labelsContainer.style.zIndex = '1';
-
-        if (!window.isLabelLayerVisible) {
-            labelsContainer.style.display = 'none';
-            window.isUpdatingLabels = false;
-            return;
-        } else {
-            labelsContainer.style.display = 'block';
-        }
-
-        if (typeof camera === 'undefined' || typeof renderer === 'undefined') {
-            window.isUpdatingLabels = false;
-            return;
-        }
-
-        const widthHalf = renderer.domElement.clientWidth / 2;
-        const heightHalf = renderer.domElement.clientHeight / 2;
-        const camPos = camera.position;
-        
-        let visibleCount = 0;
-
-        window.activeLabels.forEach(lbl => {
-            lbl.vec.copy(lbl.position);
-            const distance = camPos.distanceTo(lbl.position);
-
-            // [OPTIMASI DOM CULLING]: Hilangkan dari kalkulasi UI jika melebihi batas render / jumlah maks
-            if (distance > LABEL_CONFIG.FADE_END || visibleCount > LABEL_CONFIG.MAX_VISIBLE) {
-                if (lbl.element.style.display !== 'none') lbl.element.style.display = 'none';
-                return;
-            }
-
-            lbl.vec.project(camera);
-
-            // Cek apakah koordinat berada di belakang kamera
-            if (lbl.vec.z > 1) {
-                if (lbl.element.style.display !== 'none') lbl.element.style.display = 'none';
-            } else {
-                lbl.element.style.display = 'flex';
-                visibleCount++;
-                
-                // [BEST PRACTICE UI/UX]: Dynamic Z-Index (Yang dekat menimpa yang jauh)
-                lbl.element.style.zIndex = Math.round(10000 - distance);
-
-                // Kalkulasi Opacity (Fading)
-                let currentOpacity = window.labelOpacity !== undefined ? window.labelOpacity : 1;
-                if (distance > LABEL_CONFIG.FADE_START) {
-                    const fadeRange = LABEL_CONFIG.FADE_END - LABEL_CONFIG.FADE_START;
-                    const fadeProgress = (distance - LABEL_CONFIG.FADE_START) / fadeRange;
-                    currentOpacity = currentOpacity * Math.max(0, (1 - fadeProgress));
-                }
-                
-                if (currentOpacity < 0.05) {
-                    lbl.element.style.display = 'none';
-                    return;
-                }
-
-                lbl.element.style.opacity = currentOpacity;
-                
-                // Posisi Layar + Hardware Acceleration (translate3d)
-                const x = (lbl.vec.x * widthHalf) + widthHalf;
-                const y = -(lbl.vec.y * heightHalf) + heightHalf;
-                
-                let scale = 0.75; 
-                if (distance < LABEL_CONFIG.FADE_START / 2) {
-                    scale = 0.75 + (0.15 * (1 - (distance / (LABEL_CONFIG.FADE_START / 2))));
-                }
-                
-                lbl.element.style.transform = `translate3d(calc(${x}px - 50%), calc(${y}px - 50%), 0) scale(${scale})`;
-            }
-        });
-
-        // Bebaskan lock setelah selesai diproses di frame ini
-        window.isUpdatingLabels = false;
     });
 };
 
@@ -223,7 +187,7 @@ window.unloadGeometry = function(entityId, type) {
         
         keysToDelete.forEach(k => delete meshes[k]);
 
-        window.clearLabels(entityId);
+        window.clearLabels(entityId); // Panggil unloader label baru
 
         // Hapus dari state jika di-unload murni (Bukan Re-build)
         if (type === 'pit' && !window.loadedPits.has(entityId)) {
@@ -463,8 +427,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                             const stripVal = idxStrip !== -1 && row[idxStrip] ? row[idxStrip].replace(/['"]/g, '').trim() : '';
                             const groupKey = nameVal + '_' + blockVal + '_' + stripVal;
 
-                            // [FIX BUG A]: Jangan simpan menggunakan string gabungan untuk di-split nanti. 
-                            // Simpan langsung nilai asli name, block, dan strip ke dalam object groupStats.
                             if (!groupStats[groupKey]) {
                                 groupStats[groupKey] = { waste: 0, res: 0, name: nameVal, block: blockVal, strip: stripVal, metrics: {} };
                             }
@@ -626,7 +588,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
 
             worker.onmessage = (e) => {
                 URL.revokeObjectURL(workerUrl); 
-                // [OPTIMASI ZOMBIE WORKER]: Langsung matikan worker untuk bebaskan RAM background
                 worker.terminate();
                 
                 if (e.data.error) {
@@ -649,8 +610,6 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                 if (!window.worldOrigin.isSet && centerUsed) { window.worldOrigin = { x: centerUsed.x, y: centerUsed.y, z: centerUsed.z, isSet: true }; }
 
                 window.unloadGeometry(entityId, type);
-                
-                if (typeof window.clearLabels === 'function') window.clearLabels(entityId);
 
                 // --- 1. SETUP KAMERA ---
                 if (bounds && typeof camera !== 'undefined' && typeof controls !== 'undefined') {
@@ -835,6 +794,9 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         }
                         
                         geometry.computeBoundingBox();
+                        
+                        // [PERBAIKAN WARNA LAMBERT MATERIAL]: Menghitung arah pantulan cahaya
+                        geometry.computeVertexNormals();
 
                         const blockEntityId = b.info.entityId; const burden = (b.info.burden || '').toUpperCase();
                         const subset = b.info.subset || ''; const isResource = burden === 'RESOURCE';
@@ -904,10 +866,15 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         let material = sharedMaterials[matKey];
                         
                         if (!material) {
-                            material = new THREE.MeshStandardMaterial({ 
-                                color: hexColor, side: THREE.DoubleSide, flatShading: true,
-                                roughness: isResource ? 0.4 : 0.8, metalness: 0.1, polygonOffset: true, 
-                                polygonOffsetFactor: isResource ? -2 : 1, polygonOffsetUnits: isResource ? -2 : 1,
+                            // [PERBAIKAN PERFORMA & VISUAL]: Menggunakan MeshPhongMaterial
+                            // Jalan tengah terbaik: Visualnya tajam dan ada pantulan (specular) seperti Standard,
+                            // tapi beban GPU-nya jauh lebih ringan (hampir setara Lambert).
+                            material = new THREE.MeshPhongMaterial({ 
+                                color: hexColor, 
+                                side: THREE.DoubleSide, 
+                                flatShading: true,
+                                shininess: 30, // Memberikan efek pantulan cahaya ringan di sudut blok
+                                polygonOffset: true, polygonOffsetFactor: isResource ? -2 : 1, polygonOffsetUnits: isResource ? -2 : 1,
                                 transparent: isTransparent, opacity: currentOpacity 
                             });
                             sharedMaterials[matKey] = material;
@@ -917,17 +884,19 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         mesh.userData = { ...b.info, isRecorded: false, centerOffset: centerUsed };
                         mesh.matrixAutoUpdate = false; mesh.updateMatrix();
 
+                        // [AKTIF KEMBALI DENGAN OPTIMASI SUDUT]: Menggambar garis HANYA di batas luar (sudut tajam)
                         if (vertexCount <= SAFE_VERTEX_LIMIT * 1.5) {
                             const lineMatKey = isResource ? 'resource' : 'waste';
                             let lineMaterial = sharedLineMaterials[lineMatKey];
                             if (!lineMaterial) {
                                 lineMaterial = new THREE.LineBasicMaterial({ 
-                                    color: 0x111111, opacity: 0.9, transparent: true, linewidth: 1,
+                                    color: 0x000000, opacity: 0.35, transparent: true, linewidth: 1,
                                     polygonOffset: true, polygonOffsetFactor: isResource ? -3 : 0, polygonOffsetUnits: isResource ? -3 : 0
                                 });
                                 sharedLineMaterials[lineMatKey] = lineMaterial;
                             }
-                            const edges = new THREE.EdgesGeometry(geometry, stupaMode ? 10 : 60); 
+                            // Threshold 45 derajat: Mengabaikan segitiga internal yang rata, hanya gambar siku tebing
+                            const edges = new THREE.EdgesGeometry(geometry, stupaMode ? 15 : 45); 
                             const line = new THREE.LineSegments(edges, lineMaterial);
                             line.matrixAutoUpdate = false; line.updateMatrix(); mesh.add(line);
                         }
@@ -954,23 +923,9 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                         
                         if (statEl && statEl.textContent.includes('Merender 3D')) statEl.textContent = originalStatText; 
 
-                        // --- 4. GENERATE SCREEN-SPACE LABELS ---
+                        // --- 4. GENERATE WEBGL SPRITE LABELS ---
                         if (type === 'pit' && ['Res. Incremental', 'Res. Cumulative', 'Res. Zone'].includes(colorMode)) {
-                            const labelsContainer = document.getElementById('labels-container');
-                            
-                            if(labelsContainer && getComputedStyle(labelsContainer).position === 'static') {
-                                labelsContainer.style.position = 'absolute';
-                                labelsContainer.style.top = '0';
-                                labelsContainer.style.left = '0';
-                                labelsContainer.style.width = '100%';
-                                labelsContainer.style.height = '100%';
-                                labelsContainer.style.pointerEvents = 'none'; 
-                                labelsContainer.style.overflow = 'hidden';
-                            }
-
-                            if (labelsContainer) labelsContainer.style.zIndex = '1';
-
-                            if (labelsContainer && groupStats) {
+                            if (groupStats && typeof pitReserveGroup !== 'undefined') {
                                 const blockBoxes = {};
                                 Object.values(meshes).forEach(mesh => {
                                     if (mesh.userData.entityId === entityId && mesh.userData.groupKey) {
@@ -983,58 +938,53 @@ window.buildGeometryMesh = function(entityId, type = 'pit') {
                                 Object.keys(blockBoxes).forEach(gKey => {
                                     const box = blockBoxes[gKey];
                                     const center = box.getCenter(new THREE.Vector3());
-                                    center.y = box.max.y + 5; 
+                                    // Posisikan sedikit di atas block
+                                    center.y = box.max.y + 10; 
                                     
                                     const g = groupStats[gKey];
                                     if (!g) return;
 
-                                    const div = document.createElement('div');
-                                    // [FIX UI ARM TABLET]: Dihapus `transition-opacity duration-75` agar pergerakan murni dikontrol rAF tiap frame
-                                    div.className = 'absolute top-0 left-0 text-[10px] sm:text-[11px] font-bold px-2 py-1 rounded-md shadow-lg border border-slate-500/80 pointer-events-none select-none flex items-center justify-center text-center z-10 backdrop-blur-sm';
-                                    
-                                    let htmlContent = '';
+                                    let labelText = '';
+                                    let textColor = "#e2e8f0"; // slate-200
+                                    let bgColor = "rgba(15, 23, 42, 0.75)"; // slate-900 transparent
+
                                     if (colorMode === 'Res. Cumulative') {
                                         const srText = g.cumRes > 0 ? g.cumSR.toFixed(2) : '-';
                                         const orderText = g.order || '-';
-                                        htmlContent = `<span class="${srText !== '-' ? 'text-amber-400' : 'text-slate-200'} drop-shadow-md tracking-widest">${orderText} | SR: ${srText}</span>`;
+                                        labelText = `${orderText} | SR: ${srText}`;
+                                        if (srText !== '-') textColor = "#fbbf24"; // amber-400
                                     } else if (colorMode === 'Res. Zone') {
                                         let alias = zConfig ? zConfig.category : 'Zone';
                                         if (alias === 'Waste Thick') alias = 'W.Thk';
                                         else if (alias === 'Resource Thick') alias = 'R.Thk';
                                         
                                         const valText = g.zoneValue !== undefined ? g.zoneValue.toFixed(2) : '-';
-                                        htmlContent = `<span class="text-amber-400 drop-shadow-md tracking-widest">${alias}: ${valText}</span>`;
+                                        labelText = `${alias}: ${valText}`;
+                                        textColor = "#fbbf24"; 
                                     } else {
                                         const srText = g.res > 0 ? (g.waste / g.res).toFixed(2) : '-';
-                                        htmlContent = `<span class="${srText !== '-' ? 'text-amber-400' : 'text-slate-200'} drop-shadow-md tracking-widest">SR: ${srText}</span>`;
+                                        labelText = `SR: ${srText}`;
+                                        if (srText !== '-') textColor = "#fbbf24";
                                     }
                                     
-                                    div.innerHTML = htmlContent;
-                                    div.style.backgroundColor = 'rgba(15, 23, 42, 0.75)'; 
-                                    div.style.willChange = 'transform, opacity'; 
+                                    // Buat Sprite Murni dari GPU Canvas Texture
+                                    const sprite = createLabelSprite(labelText, textColor, bgColor);
+                                    sprite.position.copy(center);
                                     
-                                    div.style.display = window.isLabelLayerVisible ? 'flex' : 'none';
-                                    labelsContainer.appendChild(div);
-
-                                    window.activeLabels.push({
-                                        entityId: entityId,
-                                        element: div,
-                                        position: center,
-                                        vec: new THREE.Vector3()
-                                    });
+                                    // Metadata untuk identifikasi saat penghapusan (Garbage Collection)
+                                    sprite.userData = { entityId: entityId, isLabel: true };
+                                    
+                                    // Gunakan visibilitas dari state global
+                                    sprite.visible = window.isLabelLayerVisible !== undefined ? window.isLabelLayerVisible : true;
+                                    
+                                    pitReserveGroup.add(sprite);
                                 });
-                                
-                                window.updateLabels();
                             }
                         }
 
-                        if (typeof controls !== 'undefined' && !window.isLabelHooked) {
-                            // [FIX DESYNC]: Kita biarkan di-hook di sini karena sudah disematkan rAF throttling di window.updateLabels.
-                            // Catatan: Jika ada masalah lain, event ini bisa dicabut dan letakkan window.updateLabels() di dalam gameLoop()/animate().
-                            controls.addEventListener('change', window.updateLabels);
-                            window.addEventListener('resize', window.updateLabels);
-                            window.isLabelHooked = true;
-                        }
+                        // NOTE: Kita tidak perlu lagi pasang event listener 'controls change' 
+                        // untuk update label karena Sprite sudah di-*handle* otomatis oleh WebGL Engine 
+                        // di setiap putaran renderer.render(scene, camera)
 
                         window.recalculateGlobalSums();
                         if (typeof window.refreshAllDxfClipping === 'function') window.refreshAllDxfClipping();
